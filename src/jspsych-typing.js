@@ -5,7 +5,6 @@ import SurveyMultiSelectPlugin from "@jspsych/plugin-survey-multi-select";
 import FullscreenPlugin from "@jspsych/plugin-fullscreen";
 import InstructionsPlugin from "@jspsych/plugin-instructions";
 import jspsychKeyboardDisplay from "./jspsych-keyboard-display";
-import jspsychSurvey from "./jspsych-demographics";
 import SurveyMultiChoicePlugin from "@jspsych/plugin-survey-multi-choice";
 import HtmlButtonResponsePlugin from "@jspsych/plugin-html-button-response";
 import SurveyTextPlugin from "@jspsych/plugin-survey-text";
@@ -20,7 +19,6 @@ export const DICT = {
     'display': jspsychKeyboardDisplay,
     'button': HtmlButtonResponsePlugin,
     'text': SurveyTextPlugin,
-    'survey': jspsychSurvey
 }
 /** 
 * @summary The function does the following:
@@ -95,7 +93,7 @@ function keypressCallback(info, response, trial, response_history, counter, disp
 };
 
 /**
- * This function helps to render jspsych compatiple plugins from yaml configurations
+ * This function helps to render jspsych compatible plugins from yaml configurations
  * 
  * @param
  */

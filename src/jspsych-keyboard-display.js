@@ -106,7 +106,7 @@ const info = {
 /**
  * **An extension of keyboard response plugin**
  *
- * the purposes of this plugin are two folds:
+ * The purpose of this plugin is two-fold:
  * 1) allow to collect multiple responses during one trial
  * 2) allow to display the last n keyboard presses
  * 
