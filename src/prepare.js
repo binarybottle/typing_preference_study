@@ -24,9 +24,4 @@ export const text = {
     wasWere: settings.val == 1 ? 'was' : 'were'
 };
 
-
-export default jsPsych = initJsPsych({
-  on_finish: () => {
-    // jsPsych.data.displayData();
-  }
-})
+export default initJsPsych(); 

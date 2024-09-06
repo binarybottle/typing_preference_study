@@ -1,14 +1,8 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from 'vite';
 
 export default defineConfig({
-    base: "/jspsych-typing/",
-    build: {
-      target: "esnext",
-      sourcemap: true
-    },
-    test: {
-      environment: 'jsdom',
-      include: ['tests/*.{test,spec}.{js,ts}']
-    }
-  });
-  
+  base: './',
+  build: {
+    outDir: 'dist',
+  },
+});
