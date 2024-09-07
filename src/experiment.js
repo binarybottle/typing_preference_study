@@ -26,7 +26,11 @@ async function runExperiment() {
       const response = await fetch('./bigram_pairs.csv');
       const csvText = await response.text();
       const rows = csvText.split('\n').map(row => row.trim()).filter(row => row);
-      return rows.map(row => row.split(',').map(bigram => bigram.trim()));
+      return rows.map(row => {
+        const bigrams = row.split(',').map(bigram => bigram.trim());
+        // Randomly shuffle the order of bigrams in each pair
+        return jsPsych.randomization.shuffle(bigrams);
+      });
     } catch (error) {
       console.error('Error loading bigram pairs:', error);
       return [];
@@ -128,7 +132,7 @@ async function runExperiment() {
 
   timeline.push(startExperiment);
 
-  // Function to create a typing trial for each pair
+  // Function to create a typing trial for each bigram
   function createTypingTrial(bigram, trialId) {
     return {
       type: jsPsychHtmlKeyboardResponse,
@@ -252,8 +256,8 @@ async function runExperiment() {
   
   // Create trials for each pair of bigrams
   randomizedBigramPairs.forEach(([bigram1, bigram2], index) => {
-    timeline.push(createTypingTrial(bigram1.toLowerCase(), `trial-${index+1}-1`));
-    timeline.push(createTypingTrial(bigram2.toLowerCase(), `trial-${index+1}-2`));
+    timeline.push(createTypingTrial(bigram1, `trial-${index+1}-1`));
+    timeline.push(createTypingTrial(bigram2, `trial-${index+1}-2`));
   
     timeline.push({
       type: jsPsychHtmlButtonResponse,
