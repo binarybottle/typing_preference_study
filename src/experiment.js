@@ -155,36 +155,40 @@ async function runExperiment() {
   
         const keyData = [];
         let lastKeyDown = null;
-  
+
         const handleKeydown = (event) => {
           if (trialEnded) return;
+        
           const typedKey = event.key.toLowerCase();
           const currentPosition = typedSequence.length % bigram.length;
           const correctKey = bigram[currentPosition];
-  
-          // If there's a previous keydown without a corresponding keyup, log it now
-          if (lastKeyDown && lastKeyDown !== typedKey) {
+        
+          // Log the keydown event only if it's not already tracked
+          if (lastKeyDown !== typedKey) {
+            if (lastKeyDown) {
+              keyData.push({
+                type: 'keyup',
+                key: lastKeyDown,
+                time: performance.now() - 1 // Log the previous keyup before the new keydown
+              });
+            }
+            
             keyData.push({
-              type: 'keyup',
-              key: lastKeyDown,
-              time: performance.now() - 1 // 1ms before current keydown
+              type: 'keydown',
+              key: typedKey,
+              time: performance.now(),
+              correct: typedKey === correctKey
             });
+            
+            lastKeyDown = typedKey;
           }
-  
-          keyData.push({
-            type: 'keydown',
-            key: typedKey,
-            time: performance.now(),
-            correct: typedKey === correctKey
-          });
-  
-          lastKeyDown = typedKey;
-  
+        
+          // Existing logic for correct key tracking
           if (typedKey === correctKey) {
             typedSequence += typedKey;
             feedbackElement.innerHTML += `<span style="color: green;">${typedKey}</span>`;
             errorMessageElement.innerHTML = "";
-  
+        
             if (typedSequence.length === bigram.length) {
               correctCount++;
               typedSequence = "";
@@ -198,26 +202,29 @@ async function runExperiment() {
             feedbackElement.innerHTML = "";
             errorMessageElement.innerHTML = `Try again:`;
           }
-  
+        
           if (correctCount === 3) {
             keyData.push({ type: 'success', time: performance.now() });
             endTrial();
           }
         };
-  
+        
         const handleKeyup = (event) => {
           if (trialEnded) return;
+        
           const typedKey = event.key.toLowerCase();
-          keyData.push({
-            type: 'keyup',
-            key: typedKey,
-            time: performance.now()
-          });
+        
+          // Only log keyup if it matches the last keydown
           if (typedKey === lastKeyDown) {
-            lastKeyDown = null;
+            keyData.push({
+              type: 'keyup',
+              key: typedKey,
+              time: performance.now()
+            });
+            lastKeyDown = null;  // Reset last keydown
           }
         };
-  
+          
         const endTrial = () => {
           if (trialEnded) return;
           trialEnded = true;
