@@ -48,6 +48,35 @@ async function runExperiment() {
   // Randomize the order of bigram pairs
   const randomizedBigramPairs = jsPsych.randomization.shuffle(bigramPairs);
 
+  // Add this function to set global styles
+  function setGlobalStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+      .jspsych-content {
+        max-width: 90% !important;
+        font-size: 24px !important;
+      }
+      .jspsych-btn {
+        font-size: 20px !important;
+        padding: 15px 25px !important;
+        margin: 10px !important;
+      }
+      #experiment-timer {
+        font-size: 24px !important;
+      }
+      .comfort-choice-button {
+        font-size: 24px !important;
+        padding: 20px 30px !important;
+        margin: 15px !important;
+        min-width: 200px !important;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Call this function at the start of the experiment
+  setGlobalStyles();
+
   // Set up the timeline
   const timeline = [];
 
@@ -110,8 +139,9 @@ async function runExperiment() {
   // Start experiment screen
   const startExperiment = {
     type: jsPsychHtmlButtonResponse,
-    stimulus: `<p>Press the button below to begin the experiment.</p>`,
+    stimulus: `<p style="font-size: 28px;">Press the button below to begin the experiment.</p>`,
     choices: ["Start"],
+    button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
     on_finish: () => {
       experimentStartTime = performance.now();
 
@@ -139,8 +169,9 @@ async function runExperiment() {
       stimulus: `<div class="jspsych-content-wrapper">
                    <div class="jspsych-content">
                      <p>Type <b>${bigram}</b> three times.</p>
-                     <p id="feedback" style="text-align: center;"></p>
-                     <p id="error-message" style="color: red; text-align: center;"></p>
+                     <p id="user-input" style="font-size: 24px; min-height: 30px; letter-spacing: 2px;"></p>
+                     <p id="feedback" style="text-align: center; min-height: 24px;"></p>
+                     <p id="error-message" style="color: red; text-align: center; min-height: 24px;"></p>
                    </div>
                  </div>`,
       choices: "ALL_KEYS",
@@ -154,62 +185,60 @@ async function runExperiment() {
         let typedSequence = "";
         let correctCount = 0;
         let trialEnded = false;
+        const userInputElement = document.querySelector('#user-input');
         const feedbackElement = document.querySelector('#feedback');
         const errorMessageElement = document.querySelector('#error-message');
   
         const keyData = [];
         let lastKeyDown = null;
-
+  
         const handleKeydown = (event) => {
           if (trialEnded) return;
         
           const typedKey = event.key.toLowerCase();
+          
+          // Prevent default behavior for all keys except 'Backspace'
+          if (typedKey !== 'backspace') {
+            event.preventDefault();
+          }
+          
           const currentPosition = typedSequence.length % bigram.length;
           const correctKey = bigram[currentPosition];
         
-          // Log the keydown event only if it's not already tracked
-          if (lastKeyDown !== typedKey) {
-            if (lastKeyDown) {
-              keyData.push({
-                type: 'keyup',
-                key: lastKeyDown,
-                time: performance.now() - 1 // Log the previous keyup before the new keydown
-              });
+          // Log the keydown event
+          keyData.push({
+            type: 'keydown',
+            key: typedKey,
+            time: performance.now(),
+            correct: typedKey === correctKey
+          });
+          
+          lastKeyDown = typedKey;
+        
+          // Handle backspace
+          if (typedKey === 'backspace') {
+            if (typedSequence.length > 0) {
+              typedSequence = typedSequence.slice(0, -1);
+              updateUserInputDisplay();
             }
-            
-            keyData.push({
-              type: 'keydown',
-              key: typedKey,
-              time: performance.now(),
-              correct: typedKey === correctKey
-            });
-            
-            lastKeyDown = typedKey;
+            return;
           }
         
-          // Existing logic for correct key tracking
+          // Handle typed key
           if (typedKey === correctKey) {
             typedSequence += typedKey;
-            feedbackElement.innerHTML += `<span style="color: green;">${typedKey}</span>`;
+            updateUserInputDisplay();
             errorMessageElement.innerHTML = "";
         
-            if (typedSequence.length === bigram.length) {
+            if (typedSequence.length === bigram.length * 3) {
               correctCount++;
-              typedSequence = "";
-              if (correctCount < 3) {
-                feedbackElement.innerHTML += `<br />`;
+              feedbackElement.innerHTML = "Correct! Press any key to continue.";
+              if (correctCount === 1) {
+                endTrial();
               }
             }
           } else {
-            typedSequence = "";
-            correctCount = 0;
-            feedbackElement.innerHTML = "";
-            errorMessageElement.innerHTML = `Try again:`;
-          }
-        
-          if (correctCount === 3) {
-            keyData.push({ type: 'success', time: performance.now() });
-            endTrial();
+            errorMessageElement.innerHTML = `Incorrect. Try again.`;
           }
         };
         
@@ -218,28 +247,26 @@ async function runExperiment() {
         
           const typedKey = event.key.toLowerCase();
         
-          // Only log keyup if it matches the last keydown
-          if (typedKey === lastKeyDown) {
-            keyData.push({
-              type: 'keyup',
-              key: typedKey,
-              time: performance.now()
-            });
-            lastKeyDown = null;  // Reset last keydown
-          }
+          // Log keyup
+          keyData.push({
+            type: 'keyup',
+            key: typedKey,
+            time: performance.now()
+          });
         };
           
+        const updateUserInputDisplay = () => {
+          let displayHTML = '';
+          for (let i = 0; i < typedSequence.length; i++) {
+            const charClass = typedSequence[i] === bigram[i % bigram.length] ? 'correct' : 'incorrect';
+            displayHTML += `<span class="${charClass}">${typedSequence[i]}</span>`;
+          }
+          userInputElement.innerHTML = displayHTML;
+        };
+  
         const endTrial = () => {
           if (trialEnded) return;
           trialEnded = true;
-          // If there's a final keydown without a keyup, log it now
-          if (lastKeyDown) {
-            keyData.push({
-              type: 'keyup',
-              key: lastKeyDown,
-              time: performance.now()
-            });
-          }
           document.removeEventListener('keydown', handleKeydown);
           document.removeEventListener('keyup', handleKeyup);
           jsPsych.finishTrial({
@@ -250,6 +277,14 @@ async function runExperiment() {
   
         document.addEventListener('keydown', handleKeydown);
         document.addEventListener('keyup', handleKeyup);
+  
+        // Add styles for correct and incorrect characters
+        const style = document.createElement('style');
+        style.textContent = `
+          #user-input .correct { color: green; }
+          #user-input .incorrect { color: red; }
+        `;
+        document.head.appendChild(style);
       }
     };
   }
@@ -263,10 +298,11 @@ async function runExperiment() {
       type: jsPsychHtmlButtonResponse,
       stimulus: `<div class="jspsych-content-wrapper">
                    <div class="jspsych-content">
-                     <p>Which pair was more comfortable to type?</p>
+                     <p style="font-size: 28px;">Which pair was easier (more comfortable) to type?</p>
                    </div>
                  </div>`,
-      choices: [bigram1, bigram2],
+      choices: [bigram1, bigram2, "No difference"],
+      button_html: '<button class="jspsych-btn comfort-choice-button">%choice%</button>',
       data: {
         task: 'comfort_choice',
         bigram1: bigram1,
@@ -275,7 +311,13 @@ async function runExperiment() {
       on_finish: function(data) {
         console.log('Comfort choice data:', data);  // For debugging
         if (data.response !== null && data.response !== undefined) {
-          data.comfortable_pair = data.response === 0 ? bigram1 : bigram2;
+          if (data.response === 0) {
+            data.comfortable_pair = bigram1;
+          } else if (data.response === 1) {
+            data.comfortable_pair = bigram2;
+          } else {
+            data.comfortable_pair = "no difference";
+          }
         } else {
           console.log('No response recorded for comfort choice.');
           data.comfortable_pair = null;
@@ -289,10 +331,11 @@ async function runExperiment() {
     type: jsPsychHtmlButtonResponse,
     stimulus: `<div class="jspsych-content-wrapper">
                  <div class="jspsych-content">
-                   <p>Thank you for participating! Press any button to finish.</p>
+                   <p style="font-size: 28px;">Thank you for participating! Press the button to finish.</p>
                  </div>
                </div>`,
     choices: ["Finish"],
+    button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
     on_finish: function() {
       endExperiment("Experiment completed. Thank you for your participation!");
     }
