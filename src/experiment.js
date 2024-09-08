@@ -71,10 +71,61 @@ function setGlobalStyles() {
 }
 
 // Typing trial function
+// Typing trial function
 function createTypingTrial(bigram, bigramPair, trialId) {
-  let keyData = [];  // Move keyData here so it is accessible across the entire trial lifecycle
+  let keyData = [];
+  let correctSequenceCount = 0;
+  let typedSequence = "";
+  const trialStartTime = performance.now();  // Start time of the trial
 
-  let handleKeyPress, handleKeyUp;  // Declare variables for event handlers
+  function handleKeyPress(event) {
+    const typedKey = event.key.toLowerCase();
+    const expectedKey = bigram[typedSequence.length % bigram.length];
+
+    const keydownTime = performance.now() - trialStartTime;  // Track keydown time
+
+    // Log only the necessary fields: expectedKey, typedKey, and chosenBigram
+    const keyLog = {
+      trialId: trialId,
+      bigramPair: bigramPair.join(", "),
+      bigram: bigram,
+      expectedKey: expectedKey,  // Save the expected key
+      typedKey: typedKey,  // Save the typed key
+      keydownTime: keydownTime.toFixed(2),  // Log the time of the key press
+      chosenBigram: ""  // To be updated after the comfort choice trial
+    };
+
+    if (typedKey === expectedKey) {
+      typedSequence += typedKey;
+      document.querySelector('#user-input').textContent = typedSequence;  // Show typed sequence
+
+      // Increase correct sequence count when a full bigram is typed
+      if (typedSequence.length % bigram.length === 0) {
+        correctSequenceCount++;
+      }
+
+      // If the required correct repetitions are reached, save the streak
+      if (correctSequenceCount === requiredCorrectRepetitions) {
+        keyData.push(keyLog);  // Log the final key event
+        document.querySelector('#feedback').textContent = "Correct!";
+
+        // End the trial after a short delay to give feedback
+        setTimeout(() => {
+          jsPsych.finishTrial({ keyData: keyData });  // Finish the trial and save key data
+        }, 500);
+      } else {
+        // Log intermediate correct keys contributing to the streak
+        keyData.push(keyLog);
+      }
+    } else {
+      // If there's a mistake, reset everything and don't save any data
+      typedSequence = "";
+      correctSequenceCount = 0;
+      document.querySelector('#user-input').textContent = "";  // Clear input
+      document.querySelector('#error-message').textContent = "Mistake detected. Start over.";
+      keyData = [];  // Clear key data since the sequence was broken
+    }
+  }
 
   return {
     type: jsPsychHtmlKeyboardResponse,
@@ -82,8 +133,8 @@ function createTypingTrial(bigram, bigramPair, trialId) {
                  <div class="jspsych-content">
                    <p>Type <b>${bigram}</b> ${requiredCorrectRepetitions} times in a row without mistakes.</p>
                    <p id="user-input" style="font-size: 24px; letter-spacing: 2px;"></p>
-                   <p id="feedback" style="text-align: center;"></p>
-                   <p id="error-message" style="color: red; text-align: center;"></p>
+                   <p id="feedback" style="color: green;"></p>
+                   <p id="error-message" style="color: red;"></p>
                  </div>
                </div>`,
     choices: "ALL_KEYS",
@@ -95,83 +146,11 @@ function createTypingTrial(bigram, bigramPair, trialId) {
       keyData: []  // To store key events
     },
     on_load: function () {
-      let typedSequence = "";
-      let correctSequenceCount = 0;  // Track the correct repetitions
-      let streakStarted = false;  // Track whether we are in a streak
-      const trialStartTime = performance.now();
-
-      const userInputElement = document.querySelector('#user-input');
-      const feedbackElement = document.querySelector('#feedback');
-      const errorMessageElement = document.querySelector('#error-message');
-
-      handleKeyPress = (event) => {
-        const typedKey = event.key.toLowerCase();
-        const keydownTime = performance.now() - trialStartTime;
-        const expectedKey = bigram[typedSequence.length % bigram.length];
-        const isCorrectKey = typedKey === expectedKey;
-
-        // Log keydown event with keyup event to be added later
-        const keyLog = {
-          trialId: trialId,
-          bigramPair: bigramPair.join(", "),
-          bigram: bigram,
-          expectedKey: expectedKey,
-          typedKey: typedKey,
-          isCorrectKey: isCorrectKey,
-          keydownTime: keydownTime.toFixed(2),
-          keyupTime: "",
-          inStreak: false  // Will be updated when streak is complete
-        };
-
-        keyData.push(keyLog);
-
-        if (isCorrectKey) {
-          typedSequence += typedKey;
-          userInputElement.textContent = typedSequence;
-
-          // If bigram has been typed correctly, increment the correct count
-          if (typedSequence.length % bigram.length === 0) {
-            correctSequenceCount++;
-          }
-
-          // Check if the correct sequence count reached the required streak count
-          if (correctSequenceCount === requiredCorrectRepetitions) {
-            streakStarted = true;
-            keyData.forEach(key => key.inStreak = true);  // Mark all the keys in the streak
-            feedbackElement.textContent = "Correct!";
-            console.log("Correct sequence typed 3 times, ending trial...");
-            jsPsych.finishTrial({ keyData: keyData });
-          }
-
-        } else {
-          // If mistake, reset the sequence and streak
-          errorMessageElement.textContent = "Mistake detected. Start over.";
-          typedSequence = "";
-          correctSequenceCount = 0;
-          userInputElement.textContent = "";  // Reset typed sequence
-        }
-      };
-
-      handleKeyUp = (event) => {
-        const keyupTime = performance.now() - trialStartTime;
-        const lastKey = keyData[keyData.length - 1];  // Update last key's keyupTime
-        if (lastKey) {
-          lastKey.keyupTime = keyupTime.toFixed(2);
-        }
-      };
-
-      document.addEventListener('keydown', handleKeyPress);
-      document.addEventListener('keyup', handleKeyUp);
+      document.addEventListener('keydown', handleKeyPress);  // Attach keydown event
     },
     on_finish: function (data) {
-      // Remove event listeners when the trial ends
-      document.removeEventListener('keydown', handleKeyPress);
-      document.removeEventListener('keyup', handleKeyUp);
-
-      // Store key data for the trial
-      data.keyData = keyData;  // Now keyData is available here
-
-      console.log(`Typing trial for ${bigram} finished...`);  // Add a log when the trial finishes
+      document.removeEventListener('keydown', handleKeyPress);  // Remove keydown event
+      data.keyData = keyData;  // Attach key data to trial data
     }
   };
 }
@@ -180,7 +159,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
 function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
   return {
     type: jsPsychHtmlButtonResponse,
-    stimulus: `<p style="font-size: 28px;">Which pair was easier (more comfortable) to type?</p>`,
+    stimulus: `<p style="font-size: 28px;">Which pair was easier to type?</p>`,
     choices: [bigram1, bigram2, "No difference"],
     button_html: '<button class="jspsych-btn comfort-choice-button">%choice%</button>',
     data: {
@@ -190,11 +169,29 @@ function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
       trialId: `trial-${trialIndex}-choice`
     },
     on_finish: function (data) {
-      data.comfortable_pair = data.response !== null ? [bigram1, bigram2, "No difference"][data.response] : null;
+      let chosenBigram = "";
+
+      if (data.response === 0) {
+        chosenBigram = bigram1;
+      } else if (data.response === 1) {
+        chosenBigram = bigram2;
+      } else {
+        chosenBigram = "No difference";
+      }
+
+      // Update chosenBigram for all key logs in the successful streak
+      jsPsych.data.get().filterCustom(trial => {
+        return trial.trialId === `trial-${trialIndex}-1` || trial.trialId === `trial-${trialIndex}-2`;
+      }).values().forEach(trial => {
+        trial.keyData.forEach(key => {
+          key.chosenBigram = chosenBigram;  // Set chosenBigram for keys in the streak
+        });
+      });
     }
   };
 }
 
+// Function to escape commas and wrap fields in quotes if necessary
 // Function to escape commas and wrap fields in quotes if necessary
 function escapeCSVField(field) {
   if (typeof field === 'string' && field.includes(',')) {
@@ -205,7 +202,7 @@ function escapeCSVField(field) {
 
 // Function to convert data to CSV format
 function convertToCSV(data) {
-  const csvHeaders = ['trialId', 'bigramPair', 'bigram', 'expectedKey', 'typedKey', 'isCorrectKey', 'keydownTime', 'keyupTime', 'inStreak', 'chosenBigram'];
+  const csvHeaders = ['trialId', 'bigramPair', 'bigram', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram'];
   let csvContent = csvHeaders.join(',') + '\n';
 
   data.forEach(trial => {
@@ -217,11 +214,8 @@ function convertToCSV(data) {
           escapeCSVField(keyEvent.bigram || ''),
           escapeCSVField(keyEvent.expectedKey || ''),
           escapeCSVField(keyEvent.typedKey || ''),
-          keyEvent.isCorrectKey !== undefined ? keyEvent.isCorrectKey : '',
           keyEvent.keydownTime !== undefined ? keyEvent.keydownTime : '',
-          keyEvent.keyupTime !== undefined ? keyEvent.keyupTime : '',
-          keyEvent.inStreak !== undefined ? keyEvent.inStreak : '',
-          escapeCSVField(trial.chosenBigram || '')
+          escapeCSVField(keyEvent.chosenBigram || '')
         ];
         csvContent += row.join(',') + '\n';
       });
@@ -358,13 +352,14 @@ const startExperiment = {
 };
 
 // Run the experiment
+// Run the experiment
 async function runExperiment() {
   setGlobalStyles();
 
   const osfToken = await loadOSFToken();
   const bigramPairs = await loadBigramPairs();
   if (bigramPairs.length === 0) {
-    jsPsych.end();  // End experiment if no bigram pairs available
+    jsPsych.endExperiment('No bigram pairs available');
     return;
   }
 
@@ -375,18 +370,17 @@ async function runExperiment() {
   timeline.push(startExperiment);
 
   // Create trials for each pair of bigrams
-    // Create trials for each pair of bigrams
-    randomizedBigramPairs.forEach(([bigram1, bigram2], index) => {
-      timeline.push(createTypingTrial(bigram1, [bigram1, bigram2], `trial-${index + 1}-1`));
-      timeline.push(createTypingTrial(bigram2, [bigram1, bigram2], `trial-${index + 1}-2`));
-      timeline.push(createComfortChoiceTrial(bigram1, bigram2, index + 1));  // Add the comfort choice trial
-    });
-  
-    timeline.push(thankYouTrial);  // Add the thank-you screen to the end of the timeline
-  
-    // Run the timeline
-    console.log("Running experiment timeline...");
-    jsPsych.run(timeline);
+  randomizedBigramPairs.forEach(([bigram1, bigram2], index) => {
+    timeline.push(createTypingTrial(bigram1, [bigram1, bigram2], `trial-${index + 1}-1`));
+    timeline.push(createTypingTrial(bigram2, [bigram1, bigram2], `trial-${index + 1}-2`));
+    timeline.push(createComfortChoiceTrial(bigram1, bigram2, index + 1));
+  });
+
+  timeline.push(thankYouTrial);
+
+  // Run the timeline
+  console.log("Running experiment timeline...");
+  jsPsych.run(timeline);
 }
 
 // Start the experiment
