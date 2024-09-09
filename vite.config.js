@@ -5,6 +5,7 @@ export default defineConfig({
   resolve: {
     alias: {
       'jspsych': path.resolve(__dirname, 'node_modules/jspsych'),
+      '@jspsych': path.resolve(__dirname, 'node_modules/@jspsych'),
     },
   },
   build: {

@@ -234,7 +234,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
   }
 
   return {
-    type: htmlButtonResponse,
+    type: htmlKeyboardResponse,
     stimulus: `<div class="jspsych-content-wrapper">
                  <div class="jspsych-content">
                    <p style="white-space: nowrap;">Type ${experimentConfig.requiredCorrectRepetitions} times:</p>
