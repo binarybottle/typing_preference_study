@@ -12,7 +12,7 @@ let experimentConfig = {
   timeLimit: 10,  // Default time limit of 10 seconds for the entire experiment
   requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
   useTimer: false,  // Default to not using the timer
-  practiceOnly: false  // If true, only run the practice set
+  practiceOnly: true  // If true, only run the practice set
 };
 
 let experimentStartTime;
@@ -260,17 +260,18 @@ function createTypingTrial(bigram, bigramPair, trialId) {
     choices: "ALL_KEYS",
     response_ends_trial: false,
     data: {
+      task: 'typing',
       trialId: trialId,
       correctSequence: bigram,
       bigramPair: bigramPair.join(", "),
-      keyData: []  // To store key events
+      keyData: []
     },
     on_load: function () {
-      document.addEventListener('keydown', handleKeyPress);  // Attach keydown event
+      document.addEventListener('keydown', handleKeyPress);
     },
     on_finish: function (data) {
-      document.removeEventListener('keydown', handleKeyPress);  // Remove keydown event
-      data.keyData = keyData;  // Attach key data to trial data
+      document.removeEventListener('keydown', handleKeyPress);
+      data.keyData = keyData;
     }
   };
 }
@@ -290,7 +291,6 @@ function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
     },
     on_finish: function (data) {
       let chosenBigram = "";
-
       if (data.response === 0) {
         chosenBigram = bigram1;
       } else if (data.response === 1) {
@@ -299,19 +299,21 @@ function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
         chosenBigram = "No difference";
       }
 
-      // Update chosenBigram for all key logs in the successful streak
-      jsPsych.data.get().filterCustom(trial => {
-        return trial.trialId === `trial-${trialIndex}-1` || trial.trialId === `trial-${trialIndex}-2`;
-      }).values().forEach(trial => {
-        trial.keyData.forEach(key => {
-          key.chosenBigram = chosenBigram;  // Set chosenBigram for keys in the streak
-        });
-      });
+      // Update the previous two typing trials with the chosen bigram
+      const allData = jsPsych.data.get().values();
+      const currentTrialIndex = allData.length - 1;
+      
+      for (let i = currentTrialIndex - 1; i >= currentTrialIndex - 2; i--) {
+        if (allData[i].task === 'typing' && allData[i].keyData) {
+          allData[i].keyData.forEach(keyEvent => {
+            keyEvent.chosenBigram = chosenBigram;
+          });
+        }
+      }
     }
   };
 }
 
-// Function to escape commas and wrap fields in quotes if necessary
 // Function to escape commas and wrap fields in quotes if necessary
 function escapeCSVField(field) {
   if (typeof field === 'string' && field.includes(',')) {
@@ -326,12 +328,12 @@ function convertToCSV(data) {
   let csvContent = csvHeaders.join(',') + '\n';
 
   data.forEach(trial => {
-    if (trial.keyData) {
+    if (trial.task === 'typing' && trial.keyData) {
       trial.keyData.forEach(keyEvent => {
         const row = [
-          escapeCSVField(keyEvent.trialId || ''),
-          escapeCSVField(keyEvent.bigramPair || ''),
-          escapeCSVField(keyEvent.bigram || ''),
+          escapeCSVField(trial.trialId || ''),
+          escapeCSVField(trial.bigramPair || ''),
+          escapeCSVField(trial.correctSequence || ''),
           escapeCSVField(keyEvent.expectedKey || ''),
           escapeCSVField(keyEvent.typedKey || ''),
           keyEvent.keydownTime !== undefined ? keyEvent.keydownTime : '',
@@ -402,7 +404,7 @@ async function storeDataOnOSF(data, format = 'csv') {
 function endExperiment() {
   console.log("endExperiment function is called...");
   const experimentData = jsPsych.data.get().values();
-  console.log("Collected experiment data:", experimentData);
+  console.log("All experiment data:", experimentData);
 
   // Log each trial's data for further confirmation
   experimentData.forEach((trial, index) => {
