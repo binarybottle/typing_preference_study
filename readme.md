@@ -15,8 +15,8 @@ If you'd like to run the experiment locally (or remotely with vite):
 8. Visit `localhost:8080` in your browser to preview the project.
 
 Remote production:
-7. Add ``base: 'typing/bigram-comfort-study/',`` to vite.config.js
+7. Add ``base: 'typing/bigram-prolific-study/',`` to vite.config.js
 8. Run `npm run build` to generate static files for use in deployment on platforms such as GITHUB.
-9. mkdir /home/binarybottle/binarybottle.com/bigram-comfort-study
-10. cp -R dist/* /home/binarybottle/binarybottle.com/bigram-comfort-study/
-
+9. mkdir /home/binarybottle/binarybottle.com/bigram-prolific-study
+10. cp -R dist/* /home/binarybottle/binarybottle.com/bigram-prolific-study/
+11. Copy bigrams.csv and public/configs/token.json OSF token to bigram-prolific-study/configs/
