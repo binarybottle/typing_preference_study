@@ -525,7 +525,7 @@ async function runExperiment(options = {}) {
     experimentTimeline.timeline.push(
       {
         type: htmlButtonResponse,
-        stimulus: `<p>Great job! You've completed the introductory pairs. 
+        stimulus: `<p>Great job! You've completed the introductory pairs.<br>
                    Now we'll move on to the main part of the experiment.</p>`,
         choices: ['Continue'],
       },
