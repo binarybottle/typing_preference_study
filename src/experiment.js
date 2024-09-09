@@ -66,58 +66,91 @@ function setGlobalStyles() {
   document.head.appendChild(style);
 }
 
+
+// First informational page
+const keyboardLayoutInfo = {
+  type: HtmlButtonResponse,
+  stimulus: `
+    <div class='instruction'> 
+      <p>It is expected that your keyboard has the following character layout:</p>
+      <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/qwerty-layout.jpg" width="500">
+    </div>
+  `,
+  choices: ["Next >"],
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
+};
+
+// Second informational page
+const typingInstructionsInfo = {
+  type: HtmlButtonResponse,
+  stimulus: `
+    <div class='instruction'> 
+      <p>You will be asked to <strong>touch type</strong> a pair of letters three times with your left hand.</p>
+      <p>Touch type as you normally would, with left fingers above the home row characters
+        <span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span>:</p>
+      <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500">
+      <p>For instance, you will be asked to type 
+        <span id=keystroke>a</span><span id=keystroke>b</span> three times.
+        If you type this correctly three times in a row,</p>
+      <p>then you will be asked to type another pair, say
+        <span id=keystroke>c</span><span id=keystroke>d</span> three times.
+        If you type this correctly as well,</p>
+      <p>then you will be asked which letter pair &mdash; 
+        <span id=keystroke>a</span><span id=keystroke>b</span> or 
+        <span id=keystroke>c</span><span id=keystroke>d</span> 
+        &mdash; is easier (more comfortable) for you to type.</p> 
+    </div>
+  `,
+  choices: ["Next >"],
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
+};
+
 // Consent trial
 const consentTrial = {
-  type: SurveyMultiChoice,
-  questions: [
-    {
-      prompt: `
-        <div class='instruction'> 
-        <h2 class='jspsych-content'>Welcome</h2>
-        <dl>
-            <dt>Purpose</dt>
-            <dd>The purpose of this study is to determine how comfortable different pairs of keys 
-            are to type on computer keyboards to inform the design of future keyboard layouts.</dd>
+  type: HtmlButtonResponse,
+  stimulus: `
+    <div class='instruction' style='text-align: left; max-width: 800px; margin: 0 auto;'> 
+      <h2 style='text-align: center;'>Welcome</h2>
+      <dl>
+          <dt>Purpose</dt>
+          <dd>The purpose of this study is to determine how comfortable different pairs of keys 
+          are to type on computer keyboards to inform the design of future keyboard layouts.</dd>
 
-            <dt>Procedures</dt>
-            <dd>If you choose to participate, you will be repeatedly asked to type two new pairs 
-            of letters and report which pair is easier (more comfortable) to type. </dd>
+          <dt>Procedures</dt>
+          <dd>If you choose to participate, you will be repeatedly asked to type two new pairs 
+          of letters and report which pair is easier (more comfortable) to type. </dd>
 
-            <dt>Risks</dt>
-            <dd>There are no anticipated risks or discomforts from this research that 
-            you would not normally have when typing on your own keyboard.</dd>
+          <dt>Risks</dt>
+          <dd>There are no anticipated risks or discomforts from this research that 
+          you would not normally have when typing on your own keyboard.</dd>
 
-            <dt>Benefits</dt>
-            <dd>There are no anticipated benefits to you from this research.</dd>
+          <dt>Benefits</dt>
+          <dd>There are no anticipated benefits to you from this research.</dd>
 
-            <dt>Compensation</dt>
-            <dd>If you decide to participate, you will be compensated for your participation.</dd>
+          <dt>Compensation</dt>
+          <dd>If you decide to participate, you will be compensated for your participation.</dd>
 
-            <dt>Participation</dt>
-            <dd>Taking part or not in this research study is your decision. 
-            You can decide to participate and then change your mind at any point.</dd>
+          <dt>Participation</dt>
+          <dd>Taking part or not in this research study is your decision. 
+          You can decide to participate and then change your mind at any point.</dd>
 
-            <dt>Contact Information</dt>
-            <dd>If you have any questions about the purpose, procedures, or any other issues 
-            related to this research study you may contact the Principal Investigator, 
-            Dr. Arno Klein, at arno.klein@childmind.org. </dd>
-        </dl>
-        </div>
-      `,
-      options: [
-        "I have read and understand the information on this page and I agree to participate in the study. I am 18 years of age or older.",
-        "I do not consent to participate in this study. Direct me to Prolific."
-      ],
-      required: true
-    }
-  ],
-  button_label: "Next",
+          <dt>Contact Information</dt>
+          <dd>If you have any questions about the purpose, procedures, or any other issues 
+          related to this research study you may contact the Principal Investigator, 
+          Dr. Arno Klein, at arno.klein@childmind.org. </dd>
+      </dl>
+      <p style='text-align: center; font-weight: bold; margin-top: 20px;'>
+        Do you consent to participate in this study? You must be 18 years of age or older to participate.
+      </p>
+    </div>
+  `,
+  choices: ["I consent", "I do not consent"],
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
   on_finish: function(data) {
-    if (data.response.Q0 === 1) {  // The second option (index 1) is selected
+    if (data.response === 1) {  // "I do not consent" is selected
       // If consent is not given, redirect to Prolific with a special code
       window.location.href = "https://app.prolific.co/submissions/complete?cc=XXXXXXX";
     }
-    // If the first option is selected (consent given), the experiment continues normally
   }
 };
 
@@ -392,7 +425,7 @@ function startExperimentTimer() {
 // Start button screen
 const startExperiment = {
   type: HtmlButtonResponse,
-  stimulus: `<p style="font-size: 28px;">Let's begin!</p>`,
+  stimulus: `<p style="font-size: 28px;">Ready to start? If so, press the button!</p>`,
   choices: ["Start"],
   button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
   on_finish: () => {
@@ -418,17 +451,26 @@ async function runExperiment() {
   // Add consent trial to timeline
   timeline.push(consentTrial);
 
-  // Add start screen to timeline
-  timeline.push(startExperiment);
+  // Create a conditional timeline for the rest of the experiment
+  const experimentTimeline = {
+    timeline: [
+      keyboardLayoutInfo,
+      typingInstructionsInfo,
+      startExperiment,
+      ...randomizedBigramPairs.flatMap(([bigram1, bigram2], index) => [
+        createTypingTrial(bigram1, [bigram1, bigram2], `trial-${index + 1}-1`),
+        createTypingTrial(bigram2, [bigram1, bigram2], `trial-${index + 1}-2`),
+        createComfortChoiceTrial(bigram1, bigram2, index + 1)
+      ]),
+      thankYouTrial
+    ],
+    conditional_function: function() {
+      // Only run this timeline if consent was given (i.e., the first option was selected)
+      return jsPsych.data.get().last(1).values()[0].response === 0;
+    }
+  };
 
-  // Create trials for each pair of bigrams
-  randomizedBigramPairs.forEach(([bigram1, bigram2], index) => {
-    timeline.push(createTypingTrial(bigram1, [bigram1, bigram2], `trial-${index + 1}-1`));
-    timeline.push(createTypingTrial(bigram2, [bigram1, bigram2], `trial-${index + 1}-2`));
-    timeline.push(createComfortChoiceTrial(bigram1, bigram2, index + 1));
-  });
-
-  timeline.push(thankYouTrial);
+  timeline.push(experimentTimeline);
 
   // Run the timeline
   console.log("Running experiment timeline...");
