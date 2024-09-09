@@ -1,11 +1,7 @@
 import { initJsPsych } from 'jspsych';
-import jsPsychHtmlButtonResponse from '@jspsych/plugin-html-button-response';
-import jsPsychHtmlKeyboardResponse from '@jspsych/plugin-html-keyboard-response';
-
-// Add the unhandled rejection handler here
-window.addEventListener('unhandledrejection', function(event) {
-  console.error('Unhandled promise rejection:', event.reason);
-});
+import HtmlButtonResponse from '@jspsych/plugin-html-button-response';
+import HtmlKeyboardResponse from '@jspsych/plugin-html-keyboard-response';
+import SurveyMultiChoice from '@jspsych/plugin-survey-multi-choice';
 
 // Initialize jsPsych
 const jsPsych = initJsPsych();
@@ -70,7 +66,61 @@ function setGlobalStyles() {
   document.head.appendChild(style);
 }
 
-// Typing trial function
+// Consent trial
+const consentTrial = {
+  type: SurveyMultiChoice,
+  questions: [
+    {
+      prompt: `
+        <div class='instruction'> 
+        <h2 class='jspsych-content'>Welcome</h2>
+        <dl>
+            <dt>Purpose</dt>
+            <dd>The purpose of this study is to determine how comfortable different pairs of keys 
+            are to type on computer keyboards to inform the design of future keyboard layouts.</dd>
+
+            <dt>Procedures</dt>
+            <dd>If you choose to participate, you will be repeatedly asked to type two new pairs 
+            of letters and report which pair is easier (more comfortable) to type. </dd>
+
+            <dt>Risks</dt>
+            <dd>There are no anticipated risks or discomforts from this research that 
+            you would not normally have when typing on your own keyboard.</dd>
+
+            <dt>Benefits</dt>
+            <dd>There are no anticipated benefits to you from this research.</dd>
+
+            <dt>Compensation</dt>
+            <dd>If you decide to participate, you will be compensated for your participation.</dd>
+
+            <dt>Participation</dt>
+            <dd>Taking part or not in this research study is your decision. 
+            You can decide to participate and then change your mind at any point.</dd>
+
+            <dt>Contact Information</dt>
+            <dd>If you have any questions about the purpose, procedures, or any other issues 
+            related to this research study you may contact the Principal Investigator, 
+            Dr. Arno Klein, at arno.klein@childmind.org. </dd>
+        </dl>
+        </div>
+      `,
+      options: [
+        "I have read and understand the information on this page and I agree to participate in the study. I am 18 years of age or older.",
+        "I do not consent to participate in this study. Direct me to Prolific."
+      ],
+      required: true
+    }
+  ],
+  button_label: "Next",
+  on_finish: function(data) {
+    if (data.response.Q0 === 1) {  // The second option (index 1) is selected
+      // If consent is not given, redirect to Prolific with a special code
+      window.location.href = "https://app.prolific.co/submissions/complete?cc=XXXXXXX";
+    }
+    // If the first option is selected (consent given), the experiment continues normally
+  }
+};
+
 // Typing trial function
 function createTypingTrial(bigram, bigramPair, trialId) {
   let keyData = [];
@@ -128,7 +178,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
   }
 
   return {
-    type: jsPsychHtmlKeyboardResponse,
+    type: HtmlKeyboardResponse,
     stimulus: `<div class="jspsych-content-wrapper">
                  <div class="jspsych-content">
                    <p>Type <b>${bigram}</b> ${requiredCorrectRepetitions} times in a row without mistakes.</p>
@@ -158,7 +208,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
 // Comfort choice trial
 function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
   return {
-    type: jsPsychHtmlButtonResponse,
+    type: HtmlButtonResponse,
     stimulus: `<p style="font-size: 28px;">Which pair was easier to type?</p>`,
     choices: [bigram1, bigram2, "No difference"],
     button_html: '<button class="jspsych-btn comfort-choice-button">%choice%</button>',
@@ -305,7 +355,7 @@ function endExperiment() {
 
 // Add end experiment screen
 const thankYouTrial = {
-  type: jsPsychHtmlButtonResponse,
+  type: HtmlButtonResponse,
   stimulus: `<p>Thank you for participating! Press the button to finish.</p>`,
   choices: ["Finish"],
   on_load: function() {
@@ -341,7 +391,7 @@ function startExperimentTimer() {
 
 // Start button screen
 const startExperiment = {
-  type: jsPsychHtmlButtonResponse,
+  type: HtmlButtonResponse,
   stimulus: `<p style="font-size: 28px;">Let's begin!</p>`,
   choices: ["Start"],
   button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
@@ -351,7 +401,6 @@ const startExperiment = {
   }
 };
 
-// Run the experiment
 // Run the experiment
 async function runExperiment() {
   setGlobalStyles();
@@ -365,6 +414,9 @@ async function runExperiment() {
 
   const randomizedBigramPairs = jsPsych.randomization.shuffle(bigramPairs);
   const timeline = [];
+
+  // Add consent trial to timeline
+  timeline.push(consentTrial);
 
   // Add start screen to timeline
   timeline.push(startExperiment);
