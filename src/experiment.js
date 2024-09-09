@@ -7,11 +7,27 @@ import SurveyMultiChoice from '@jspsych/plugin-survey-multi-choice';
 const jsPsych = initJsPsych();
 
 // Global variables for countdown timer and required correct repetitions
-let timeLimit = 10;  // Default time limit of 30 seconds for the entire experiment
-let requiredCorrectRepetitions = 3;  // Default requirement to type the bigram correctly 3 times
+let experimentConfig = {
+  timeLimit: 10,  // Default time limit of 10 seconds for the entire experiment
+  requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
+  useTimer: false  // Default to using the timer
+};
 
 let experimentStartTime;
 let timerInterval;
+
+// Prolific completion URL with placeholder for the completion code
+const PROLIFIC_COMPLETION_URL = "https://app.prolific.co/submissions/complete?cc=";
+// Completion code for successful completion
+const COMPLETION_CODE = "C1CL3V94";
+// Completion code for no consent
+const NO_CONSENT_CODE = "C15846F6";
+
+// Function to redirect to Prolific
+function redirectToProlific(code) {
+  console.log(`Redirecting to Prolific with code: ${code}`);
+  window.location.href = PROLIFIC_COMPLETION_URL + code;
+}
 
 // Load OSF API token
 async function loadOSFToken() {
@@ -154,8 +170,8 @@ const consentTrial = {
   button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
   on_finish: function(data) {
     if (data.response === 1) {  // "I do not consent" is selected
-      // If consent is not given, redirect to Prolific with a special code
-      window.location.href = "https://app.prolific.co/submissions/complete?cc=XXXXXXX";
+      // If consent is not given, redirect to Prolific with the no consent code
+      redirectToProlific(NO_CONSENT_CODE);
     }
   }
 };
@@ -195,7 +211,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
       }
 
       // If the required correct repetitions are reached, save the streak
-      if (correctSequenceCount === requiredCorrectRepetitions) {
+      if (correctSequenceCount === experimentConfig.requiredCorrectRepetitions) {
         keyData.push(keyLog);  // Log the final key event
 
         // End the trial after a short delay to give feedback
@@ -220,7 +236,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
     type: HtmlKeyboardResponse,
     stimulus: `<div class="jspsych-content-wrapper">
                  <div class="jspsych-content">
-                   <p style="white-space: nowrap;">Type ${requiredCorrectRepetitions} times:</p>
+                   <p style="white-space: nowrap;">Type ${experimentConfig.requiredCorrectRepetitions} times:</p>
                    <p style="white-space: nowrap;"><b>${bigram}</b></p>
                    <p id="user-input" style="font-size: 24px; letter-spacing: 2px;"></p>
                    <p id="feedback" style="color: green;"></p>
@@ -383,35 +399,36 @@ function endExperiment() {
   storeDataOnOSF(experimentData, 'csv')
     .then(() => {
       console.log("Data storage process completed");
-      // End the experiment after data is stored
-      jsPsych.endExperiment("The experiment has ended. <br>Thank you for your participation!");
+      redirectToProlific(COMPLETION_CODE);
     })
     .catch(error => {
       console.error("Error in storeDataOnOSF:", error);
-      // End the experiment even if there's an error
-      jsPsych.endExperiment("The experiment has ended. Thank you for your participation!");
+      redirectToProlific(COMPLETION_CODE);
     });
 }
 
 // Add end experiment screen
 const thankYouTrial = {
   type: HtmlButtonResponse,
-  stimulus: `<p>Thank you for participating! Press the button to finish.</p>`,
+  stimulus: `<p>Thank you for participating! <br>The experiment is now complete.</p>`,
   choices: ["Finish"],
   on_load: function() {
     console.log("Thank you trial loaded");
   },
   on_finish: function () {
     console.log("Thank you trial finished, calling endExperiment function now...");
-    endExperiment();  // This will trigger the data storage process
-    console.log("endExperiment function called, now ending the experiment");
-    jsPsych.endExperiment("The experiment has ended. Thank you for your participation!");
+    endExperiment();
   }
 };
 
 // Timer function for the entire experiment
 function startExperimentTimer() {
-  let timeRemaining = timeLimit;
+  if (!experimentConfig.useTimer) {
+    console.log("Timer is disabled.");
+    return;  // Exit the function if the timer is not to be used
+  }
+
+  let timeRemaining = experimentConfig.timeLimit;
   const timerElement = document.createElement('div');
   timerElement.id = 'timer';
   document.body.appendChild(timerElement);
@@ -424,7 +441,6 @@ function startExperimentTimer() {
       clearInterval(timerInterval);
       console.log("Time is up, ending experiment...");
       endExperiment();
-      // Remove the jsPsych.endExperiment call from here
     }
   }, 1000);
 }
@@ -432,17 +448,29 @@ function startExperimentTimer() {
 // Start button screen
 const startExperiment = {
   type: HtmlButtonResponse,
-  stimulus: `<p style="font-size: 28px;">Ready to start? <br> If so, press the button!</p>`,
+  stimulus: function() {
+    let stimulusText = `<p style="font-size: 28px;">Ready to start?</p>`;
+    if (experimentConfig.useTimer) {
+      stimulusText += `<p style="font-size: 24px;">You will have ${experimentConfig.timeLimit} seconds to complete the experiment.</p>`;
+    }
+    stimulusText += `<p style="font-size: 24px;">Press the button when you're ready to begin!</p>`;
+    return stimulusText;
+  },
   choices: ["Start"],
   button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
   on_finish: () => {
     experimentStartTime = performance.now();  // Set the start time
-    startExperimentTimer();  // Start the timer for the entire experiment
+    if (experimentConfig.useTimer) {
+      startExperimentTimer();  // Start the timer for the entire experiment (if enabled)
+    }
   }
 };
 
 // Run the experiment
-async function runExperiment() {
+async function runExperiment(options = {}) {
+  // Update experimentConfig with provided options
+  Object.assign(experimentConfig, options);
+
   setGlobalStyles();
 
   const osfToken = await loadOSFToken();
@@ -484,5 +512,5 @@ async function runExperiment() {
   jsPsych.run(timeline);
 }
 
-// Start the experiment
-runExperiment();
+// Start the experiment with options
+runExperiment({ useTimer: experimentConfig.useTimer, timeLimit: experimentConfig.timeLimit, requiredCorrectRepetitions: experimentConfig.requiredCorrectRepetitions});  // Example usage
