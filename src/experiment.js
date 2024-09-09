@@ -24,6 +24,14 @@ const COMPLETION_CODE = "C1CL3V94";
 // Completion code for no consent
 const NO_CONSENT_CODE = "C15846F6";
 
+// Get Prolific ID from URL parameters
+let prolificID = '';
+function getUrlParam(name) {
+    const urlParams = new URLSearchParams(window.location.search);
+    return urlParams.get(name);
+}
+prolificID = getUrlParam('PROLIFIC_PID') || 'unknown';
+
 // Function to redirect to Prolific
 function redirectToProlific(code) {
   console.log(`Redirecting to Prolific with code: ${code}`);
@@ -345,7 +353,7 @@ async function storeDataOnOSF(data, format = 'csv') {
 
   const osfNodeId = "jf8sc";
   const fileExtension = format === 'csv' ? 'csv' : 'json';
-  const createFileUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=experiment_data_${Date.now()}.${fileExtension}`;
+  const createFileUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=experiment_data_${prolificID}_${Date.now()}.${fileExtension}`;
 
   let fileData;
   let contentType;
