@@ -1,4 +1,6 @@
 vite-project
+package-lock.json
+package.json
 
 # OSF token
 token.json
