@@ -187,6 +187,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
     if (typedKey === expectedKey) {
       typedSequence += typedKey;
       document.querySelector('#user-input').textContent = typedSequence;  // Show typed sequence
+      document.querySelector('#error-message').textContent = "";  // Clear error message
 
       // Increase correct sequence count when a full bigram is typed
       if (typedSequence.length % bigram.length === 0) {
@@ -196,7 +197,6 @@ function createTypingTrial(bigram, bigramPair, trialId) {
       // If the required correct repetitions are reached, save the streak
       if (correctSequenceCount === requiredCorrectRepetitions) {
         keyData.push(keyLog);  // Log the final key event
-        //document.querySelector('#feedback').textContent = "Correct!";
 
         // End the trial after a short delay to give feedback
         setTimeout(() => {
