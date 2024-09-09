@@ -12,9 +12,11 @@ If you'd like to run the experiment locally (or remotely with vite):
 5. `npm install vite`
 6. `npm install jspsych @jspsych/plugin-html-button-response @jspsych/plugin-html-keyboard-response @jspsych/plugin-survey-multi-choice`
 7. Run `npm run dev` to start the preview server
-8. Visit `localhost:8080` in your browser to preview the project. You can also send the network address to people using the local area network (e.g., on campus or use VPN off campus)
-9. Run `npm run build` to generate static files for use in deployment on platforms such as GITHUB.
+8. Visit `localhost:8080` in your browser to preview the project.
 
-## Acknowledgements
+Remote production:
+7. Add ``base: 'typing/bigram-comfort-study/',`` to vite.config.js
+8. Run `npm run build` to generate static files for use in deployment on platforms such as GITHUB.
+9. mkdir /home/binarybottle/binarybottle.com/bigram-comfort-study
+10. cp -R dist/* /home/binarybottle/binarybottle.com/bigram-comfort-study/
 
-This resource was made possible thanks to [jsPsych](https://www.jspsych.org/), [Github Pages](https://pages.github.com/), and my learning of jsPsych was impossible without going through [Dr. David E Melnikoff](http://davidmelnikoff.com/)'s [jsPsych applications](https://github.com/DEMelnikoff/chunk-streak). 
