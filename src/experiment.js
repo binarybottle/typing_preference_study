@@ -7,7 +7,7 @@ import SurveyMultiChoice from '@jspsych/plugin-survey-multi-choice';
 const jsPsych = initJsPsych();
 
 // Global variables for countdown timer and required correct repetitions
-let timeLimit = 30;  // Default time limit of 30 seconds for the entire experiment
+let timeLimit = 10;  // Default time limit of 30 seconds for the entire experiment
 let requiredCorrectRepetitions = 3;  // Default requirement to type the bigram correctly 3 times
 
 let experimentStartTime;
@@ -66,14 +66,15 @@ function setGlobalStyles() {
   document.head.appendChild(style);
 }
 
-
 // First informational page
 const keyboardLayoutInfo = {
   type: HtmlButtonResponse,
   stimulus: `
     <div class='instruction'> 
       <p>It is expected that your keyboard has the following character layout:</p>
-      <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/qwerty-layout.jpg" width="500">
+      <div style="display: flex; justify-content: center; margin: 20px 0;">
+        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/qwerty-layout.jpg" width="500" style="max-width: 100%;">
+      </div>
     </div>
   `,
   choices: ["Next >"],
@@ -85,20 +86,22 @@ const typingInstructionsInfo = {
   type: HtmlButtonResponse,
   stimulus: `
     <div class='instruction'> 
-      <p>You will be asked to <strong>touch type</strong> a pair of letters three times with your left hand.</p>
-      <p>Touch type as you normally would, with left fingers above the home row characters
-        <span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span>:</p>
-      <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500">
+      <p>You will be asked to <strong>touch type</strong> a pair of letters three times with your left hand.
+         Touch type as you normally would, with left fingers above the home row letters 
+         <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span>:</span></p>
+      <div style="display: flex; justify-content: center; margin: 20px 0;">
+        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
+      </div>
       <p>For instance, you will be asked to type 
-        <span id=keystroke>a</span><span id=keystroke>b</span> three times.
-        If you type this correctly three times in a row,</p>
-      <p>then you will be asked to type another pair, say
-        <span id=keystroke>c</span><span id=keystroke>d</span> three times.
-        If you type this correctly as well,</p>
-      <p>then you will be asked which letter pair &mdash; 
-        <span id=keystroke>a</span><span id=keystroke>b</span> or 
-        <span id=keystroke>c</span><span id=keystroke>d</span> 
-        &mdash; is easier (more comfortable) for you to type.</p> 
+        <span style="white-space: nowrap;"><span id=keystroke>a</span><span id=keystroke>b</span></span> three times.</p>
+      <p>If you type this correctly three times in a row,
+      then you will be asked to type a 2nd pair such as
+        <span style="white-space: nowrap;"><span id=keystroke>c</span><span id=keystroke>d</span></span> three times.</p>
+      <p>If you type this correctly as well,
+        then you will be asked which letter pair 
+        <span style="white-space: nowrap;"> &mdash; <span id=keystroke>a</span><span id=keystroke>b</span> or 
+        <span id=keystroke>c</span><span id=keystroke>d</span> &mdash; </span> 
+        is <b>easier</b> (more comfortable) for you to type.</p> 
     </div>
   `,
   choices: ["Next >"],
@@ -115,6 +118,9 @@ const consentTrial = {
           <dt>Purpose</dt>
           <dd>The purpose of this study is to determine how comfortable different pairs of keys 
           are to type on computer keyboards to inform the design of future keyboard layouts.</dd>
+
+          <dt>Expectations</dt>
+          <dd>It is expected that you will be <b>touch typing</b> on a <b>QWERTY desktop computer keyboard</b>.</dd>
 
           <dt>Procedures</dt>
           <dd>If you choose to participate, you will be repeatedly asked to type two new pairs 
@@ -140,7 +146,7 @@ const consentTrial = {
           Dr. Arno Klein, at arno.klein@childmind.org. </dd>
       </dl>
       <p style='text-align: center; font-weight: bold; margin-top: 20px;'>
-        Do you consent to participate in this study? You must be 18 years of age or older to participate.
+        Do you consent to participate in this study? <br> You must be 18 years of age or older to participate.
       </p>
     </div>
   `,
@@ -190,7 +196,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
       // If the required correct repetitions are reached, save the streak
       if (correctSequenceCount === requiredCorrectRepetitions) {
         keyData.push(keyLog);  // Log the final key event
-        document.querySelector('#feedback').textContent = "Correct!";
+        //document.querySelector('#feedback').textContent = "Correct!";
 
         // End the trial after a short delay to give feedback
         setTimeout(() => {
@@ -205,7 +211,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
       typedSequence = "";
       correctSequenceCount = 0;
       document.querySelector('#user-input').textContent = "";  // Clear input
-      document.querySelector('#error-message').textContent = "Mistake detected. Start over.";
+      document.querySelector('#error-message').textContent = "Mistake detected. Try again.";
       keyData = [];  // Clear key data since the sequence was broken
     }
   }
@@ -214,7 +220,8 @@ function createTypingTrial(bigram, bigramPair, trialId) {
     type: HtmlKeyboardResponse,
     stimulus: `<div class="jspsych-content-wrapper">
                  <div class="jspsych-content">
-                   <p>Type <b>${bigram}</b> ${requiredCorrectRepetitions} times in a row without mistakes.</p>
+                   <p style="white-space: nowrap;">Type ${requiredCorrectRepetitions} times:</p>
+                   <p style="white-space: nowrap;"><b>${bigram}</b></p>
                    <p id="user-input" style="font-size: 24px; letter-spacing: 2px;"></p>
                    <p id="feedback" style="color: green;"></p>
                    <p id="error-message" style="color: red;"></p>
@@ -377,7 +384,7 @@ function endExperiment() {
     .then(() => {
       console.log("Data storage process completed");
       // End the experiment after data is stored
-      jsPsych.endExperiment("The experiment has ended. Thank you for your participation!");
+      jsPsych.endExperiment("The experiment has ended. <br>Thank you for your participation!");
     })
     .catch(error => {
       console.error("Error in storeDataOnOSF:", error);
@@ -425,7 +432,7 @@ function startExperimentTimer() {
 // Start button screen
 const startExperiment = {
   type: HtmlButtonResponse,
-  stimulus: `<p style="font-size: 28px;">Ready to start? If so, press the button!</p>`,
+  stimulus: `<p style="font-size: 28px;">Ready to start? <br> If so, press the button!</p>`,
   choices: ["Start"],
   button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
   on_finish: () => {
