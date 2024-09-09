@@ -24,4 +24,4 @@ Remote production (with vite):
 9. Copy bigram_[3,80]pairs.csv to bigram-prolific-study/configs/
 9. Copy public/configs/token.json (OSF token) to bigram-prolific-study/configs/
 10. Run ``npm run build`` to generate static files
-11. ``cp -R dist/* /home/binarybottle/binarybottle.com/bigram-prolific-study/``
+11. ``cp -R dist/* /home/binarybottle/binarybottle.com/typing/bigram-prolific-study/``
