@@ -11,7 +11,8 @@ const jsPsych = initJsPsych();
 let experimentConfig = {
   timeLimit: 10,  // Default time limit of 10 seconds for the entire experiment
   requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
-  useTimer: false  // Default to using the timer
+  useTimer: false,  // Default to not using the timer
+  practiceOnly: true  // If true, only run the practice set
 };
 
 let experimentStartTime;
@@ -53,18 +54,22 @@ async function loadOSFToken() {
 
 // Load bigram pairs from a CSV file or text source
 async function loadBigramPairs() {
-  try {
-    const response = await fetch('./bigram_pairs.csv');  // Replace with the correct path to your file
-    const csvText = await response.text();
-    const rows = csvText.split('\n').map(row => row.trim()).filter(row => row);
-    return rows.map(row => {
-      const bigrams = row.split(',').map(bigram => bigram.trim());
-      return jsPsych.randomization.shuffle(bigrams);  // Randomly shuffle bigrams using the jsPsych instance
-    });
-  } catch (error) {
-    console.error('Error loading bigram pairs:', error);
-    return [];
+  async function loadFile(filename) {
+    try {
+      const response = await fetch(`./${filename}`);
+      const csvText = await response.text();
+      return csvText.split('\n').map(row => row.trim()).filter(row => row)
+        .map(row => row.split(',').map(bigram => bigram.trim()));
+    } catch (error) {
+      console.error(`Error loading ${filename}:`, error);
+      return [];
+    }
   }
+
+  const introductoryPairs = await loadFile('bigram_3pairs.csv');
+  const mainPairs = await loadFile('bigram_80pairs.csv');
+
+  return { introductoryPairs, mainPairs };
 }
 
 // Add global styles for the experiment
@@ -483,36 +488,57 @@ async function runExperiment(options = {}) {
   setGlobalStyles();
 
   const osfToken = await loadOSFToken();
-  const bigramPairs = await loadBigramPairs();
-  if (bigramPairs.length === 0) {
-    jsPsych.endExperiment('No bigram pairs available');
+  const { introductoryPairs, mainPairs } = await loadBigramPairs();
+  
+  if (introductoryPairs.length === 0 || (mainPairs.length === 0 && !experimentConfig.practiceOnly)) {
+    jsPsych.endExperiment('Error loading bigram pairs');
     return;
   }
 
-  const randomizedBigramPairs = jsPsych.randomization.shuffle(bigramPairs);
+  const randomizedMainPairs = experimentConfig.practiceOnly ? [] : jsPsych.randomization.shuffle(mainPairs);
   const timeline = [];
 
   // Add consent trial to timeline
   timeline.push(consentTrial);
 
-  // Create a conditional timeline for the rest of the experiment
+  // Create the experiment timeline
   const experimentTimeline = {
     timeline: [
       keyboardLayoutInfo,
       typingInstructionsInfo,
       startExperiment,
-      ...randomizedBigramPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, [bigram1, bigram2], `trial-${index + 1}-1`),
-        createTypingTrial(bigram2, [bigram1, bigram2], `trial-${index + 1}-2`),
-        createComfortChoiceTrial(bigram1, bigram2, index + 1)
+      // Introductory pairs (always in the same order)
+      ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
+        createTypingTrial(bigram1, [bigram1, bigram2], `intro-trial-${index + 1}-1`),
+        createTypingTrial(bigram2, [bigram1, bigram2], `intro-trial-${index + 1}-2`),
+        createComfortChoiceTrial(bigram1, bigram2, `intro-${index + 1}`)
       ]),
-      thankYouTrial
     ],
     conditional_function: function() {
       // Only run this timeline if consent was given (i.e., the first option was selected)
       return jsPsych.data.get().last(1).values()[0].response === 0;
     }
   };
+
+  // If not practice only, add transition screen and main pairs
+  if (!experimentConfig.practiceOnly) {
+    experimentTimeline.timeline.push(
+      {
+        type: htmlButtonResponse,
+        stimulus: `<p>Great job! You've completed the introductory pairs. 
+                   Now we'll move on to the main part of the experiment.</p>`,
+        choices: ['Continue'],
+      },
+      ...randomizedMainPairs.flatMap(([bigram1, bigram2], index) => [
+        createTypingTrial(bigram1, [bigram1, bigram2], `main-trial-${index + 1}-1`),
+        createTypingTrial(bigram2, [bigram1, bigram2], `main-trial-${index + 1}-2`),
+        createComfortChoiceTrial(bigram1, bigram2, `main-${index + 1}`)
+      ])
+    );
+  }
+
+  // Always add thank you trial at the end
+  experimentTimeline.timeline.push(thankYouTrial);
 
   timeline.push(experimentTimeline);
 
@@ -522,4 +548,4 @@ async function runExperiment(options = {}) {
 }
 
 // Start the experiment with options
-runExperiment({ useTimer: experimentConfig.useTimer, timeLimit: experimentConfig.timeLimit, requiredCorrectRepetitions: experimentConfig.requiredCorrectRepetitions});  // Example usage
+runExperiment({ practiceOnly: experimentConfig.practiceOnly, useTimer: experimentConfig.useTimer, timeLimit: experimentConfig.timeLimit, requiredCorrectRepetitions: experimentConfig.requiredCorrectRepetitions});  // Example usage
