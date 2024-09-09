@@ -1,9 +1,10 @@
 import { defineConfig } from 'vite';
+import path from 'path';
 
 export default defineConfig({
   resolve: {
     alias: {
-      'jspsych': 'node_modules/jspsych/dist/index.js',
+      'jspsych': path.resolve(__dirname, 'node_modules/jspsych'),
     },
   },
   build: {
@@ -13,5 +14,8 @@ export default defineConfig({
         main: 'index.html',
       },
     },
+  },
+  optimizeDeps: {
+    include: ['jspsych']
   },
 });
