@@ -12,7 +12,7 @@ let experimentConfig = {
   timeLimit: 10,  // Default time limit of 10 seconds for the entire experiment
   requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
   useTimer: false,  // Default to not using the timer
-  practiceOnly: true  // If true, only run the practice set
+  practiceOnly: false  // If true, only run the practice set
 };
 
 let experimentStartTime;
