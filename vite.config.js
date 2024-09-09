@@ -3,7 +3,7 @@ import path from 'path';
 import { copyFileSync } from 'fs';
 
 export default defineConfig({
-  base: '/typing/bigram-comfort-study/',
+  base: '/typing/bigram-prolific-study/',
   resolve: {
     alias: {
       'jspsych': path.resolve(__dirname, 'node_modules/jspsych'),
