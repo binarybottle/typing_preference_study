@@ -1,7 +1,8 @@
 import { initJsPsych } from 'jspsych';
-import HtmlButtonResponse from '@jspsych/plugin-html-button-response';
-import HtmlKeyboardResponse from '@jspsych/plugin-html-keyboard-response';
-import SurveyMultiChoice from '@jspsych/plugin-survey-multi-choice';
+import htmlButtonResponse from '@jspsych/plugin-html-button-response';
+import htmlKeyboardResponse from '@jspsych/plugin-html-keyboard-response';
+import surveyMultiChoice from '@jspsych/plugin-survey-multi-choice';
+import 'jspsych/css/jspsych.css';
 
 // Initialize jsPsych
 const jsPsych = initJsPsych();
@@ -84,7 +85,7 @@ function setGlobalStyles() {
 
 // First informational page
 const keyboardLayoutInfo = {
-  type: HtmlButtonResponse,
+  type: htmlButtonResponse,
   stimulus: `
     <div class='instruction'> 
       <p>It is expected that your keyboard has the following character layout:</p>
@@ -99,7 +100,7 @@ const keyboardLayoutInfo = {
 
 // Second informational page
 const typingInstructionsInfo = {
-  type: HtmlButtonResponse,
+  type: htmlButtonResponse,
   stimulus: `
     <div class='instruction'> 
       <p>You will be asked to <strong>touch type</strong> a pair of letters three times with your left hand.
@@ -126,7 +127,7 @@ const typingInstructionsInfo = {
 
 // Consent trial
 const consentTrial = {
-  type: HtmlButtonResponse,
+  type: htmlButtonResponse,
   stimulus: `
     <div class='instruction' style='text-align: left; max-width: 800px; margin: 0 auto;'> 
       <h2 style='text-align: center;'>Welcome</h2>
@@ -233,7 +234,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
   }
 
   return {
-    type: HtmlKeyboardResponse,
+    type: htmlButtonResponse,
     stimulus: `<div class="jspsych-content-wrapper">
                  <div class="jspsych-content">
                    <p style="white-space: nowrap;">Type ${experimentConfig.requiredCorrectRepetitions} times:</p>
@@ -264,7 +265,7 @@ function createTypingTrial(bigram, bigramPair, trialId) {
 // Comfort choice trial
 function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
   return {
-    type: HtmlButtonResponse,
+    type: htmlButtonResponse,
     stimulus: `<p style="font-size: 28px;">Which pair was easier to type?</p>`,
     choices: [bigram1, bigram2, "No difference"],
     button_html: '<button class="jspsych-btn comfort-choice-button">%choice%</button>',
@@ -409,7 +410,7 @@ function endExperiment() {
 
 // Add end experiment screen
 const thankYouTrial = {
-  type: HtmlButtonResponse,
+  type: htmlButtonResponse,
   stimulus: `<p>Thank you for participating! <br>The experiment is now complete.</p>`,
   choices: ["Finish"],
   on_load: function() {
@@ -447,7 +448,7 @@ function startExperimentTimer() {
 
 // Start button screen
 const startExperiment = {
-  type: HtmlButtonResponse,
+  type: htmlButtonResponse,
   stimulus: function() {
     let stimulusText = `<p style="font-size: 28px;">Ready to start?</p>`;
     if (experimentConfig.useTimer) {
