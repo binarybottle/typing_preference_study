@@ -1,5 +1,15 @@
 # bigram-typing-comfort-experiment
-# heavily modified from jspsych-typing
+Arno Klein: binarybottle GitHub name 
+bigram-typing-comfort-experiment GitHub repo
+(heavily modified from jspsych-typing repo)
+
+## README
+
+The code takes in a list of bigram pairs and presents, and for each pair,
+presents each bigram in a web browser and instructs the user to type the 
+bigram three times in a row. Once both bigrams are typed three times in a row
+correctly, the user is asked to choose which is easier (more comfortable) to type.
+All timing and selection data are saved to OSF.io and return codes sent to Prolific.
 
 ## Build 
 

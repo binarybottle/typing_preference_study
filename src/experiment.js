@@ -1,7 +1,6 @@
 import { initJsPsych } from 'jspsych';
 import htmlButtonResponse from '@jspsych/plugin-html-button-response';
 import htmlKeyboardResponse from '@jspsych/plugin-html-keyboard-response';
-import surveyMultiChoice from '@jspsych/plugin-survey-multi-choice';
 import 'jspsych/css/jspsych.css';
 
 // Initialize jsPsych
@@ -12,7 +11,11 @@ let experimentConfig = {
   timeLimit: 10,  // Default time limit of 10 seconds for the entire experiment
   requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
   useTimer: false,  // Default to not using the timer
-  practiceOnly: false  // If true, only run the practice set
+  practiceOnly: false,  // If true, only run the practice set
+  randomizePairOrder: true,  // If true, randomize the order of bigram pairs
+  randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
+  trainingBigramFile: 'bigram_3pairs.csv',  // Default filename for training bigram pairs
+  mainBigramFile: 'bigram_2x80pairs.csv'  // Default filename for main bigram pairs
 };
 
 let experimentStartTime;
@@ -53,7 +56,7 @@ async function loadOSFToken() {
 }
 
 // Load bigram pairs from a CSV file or text source
-async function loadBigramPairs() {
+async function loadBigramPairs(trainingFile, mainFile) {
   async function loadFile(filename) {
     try {
       const response = await fetch(`./${filename}`);
@@ -66,8 +69,8 @@ async function loadBigramPairs() {
     }
   }
 
-  const introductoryPairs = await loadFile('bigram_3pairs.csv');
-  const mainPairs = await loadFile('bigram_80pairs.csv');
+  const introductoryPairs = await loadFile(trainingFile);
+  const mainPairs = await loadFile(mainFile);
 
   return { introductoryPairs, mainPairs };
 }
@@ -490,14 +493,25 @@ async function runExperiment(options = {}) {
   setGlobalStyles();
 
   const osfToken = await loadOSFToken();
-  const { introductoryPairs, mainPairs } = await loadBigramPairs();
+  const { introductoryPairs, mainPairs } = await loadBigramPairs(
+    experimentConfig.trainingBigramFile,
+    experimentConfig.mainBigramFile
+  );
   
   if (introductoryPairs.length === 0 || (mainPairs.length === 0 && !experimentConfig.practiceOnly)) {
     jsPsych.endExperiment('Error loading bigram pairs');
     return;
   }
 
-  const randomizedMainPairs = experimentConfig.practiceOnly ? [] : jsPsych.randomization.shuffle(mainPairs);
+  // Apply randomization based on configuration
+  let processedMainPairs = mainPairs;
+  if (experimentConfig.randomizePairOrder) {
+    processedMainPairs = jsPsych.randomization.shuffle(processedMainPairs);
+  }
+  if (experimentConfig.randomizeBigramsWithinPairs) {
+    processedMainPairs = processedMainPairs.map(pair => jsPsych.randomization.shuffle(pair));
+  }
+
   const timeline = [];
 
   // Add consent trial to timeline
@@ -531,7 +545,7 @@ async function runExperiment(options = {}) {
                    Now we'll move on to the main part of the experiment.</p>`,
         choices: ['Continue'],
       },
-      ...randomizedMainPairs.flatMap(([bigram1, bigram2], index) => [
+      ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
         createTypingTrial(bigram1, [bigram1, bigram2], `main-trial-${index + 1}-1`),
         createTypingTrial(bigram2, [bigram1, bigram2], `main-trial-${index + 1}-2`),
         createComfortChoiceTrial(bigram1, bigram2, `main-${index + 1}`)
@@ -550,4 +564,13 @@ async function runExperiment(options = {}) {
 }
 
 // Start the experiment with options
-runExperiment({ practiceOnly: experimentConfig.practiceOnly, useTimer: experimentConfig.useTimer, timeLimit: experimentConfig.timeLimit, requiredCorrectRepetitions: experimentConfig.requiredCorrectRepetitions});  // Example usage
+runExperiment({
+  practiceOnly: experimentConfig.practiceOnly,
+  useTimer: experimentConfig.useTimer,
+  timeLimit: experimentConfig.timeLimit,
+  requiredCorrectRepetitions: experimentConfig.requiredCorrectRepetitions,
+  randomizePairOrder: experimentConfig.randomizePairOrder,
+  randomizeBigramsWithinPairs: experimentConfig.randomizeBigramsWithinPairs,
+  trainingBigramFile: experimentConfig.trainingBigramFile,
+  mainBigramFile: experimentConfig.mainBigramFile
+});
