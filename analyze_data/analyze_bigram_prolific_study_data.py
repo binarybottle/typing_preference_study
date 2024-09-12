@@ -33,8 +33,6 @@ def calculate_bigram_timing(data):
     """
     Calculate the fastest timing for each bigram in each repeated bigram pair (within each trial) for each user.
     """
-    print("Initial data shape:", data.shape)
-
     # Sort the data
     data = data.sort_values(['user_id', 'trialId', 'bigramPair', 'bigram', 'keydownTime'])
     
@@ -53,7 +51,7 @@ def calculate_bigram_timing(data):
                 timings.append(group['keydownTime'].iloc[i+1] - group['keydownTime'].iloc[i])
         
         if not timings:
-            print(f"Warning: No valid bigram sequences found for {group.name}")
+            print(f"Warning: No valid bigram sequences found for user_id, bigramPair, bigram: {group['user_id'].iloc[0]}, \"{group['bigramPair'].iloc[0]}\", {group['bigram'].iloc[0]}")
             return pd.Series({'timing_within_bigram': np.nan})
         
         # Return the fastest timing
@@ -62,7 +60,7 @@ def calculate_bigram_timing(data):
     # Group the data and apply the calculation function
     result = data.groupby(['user_id', 'trialId', 'bigramPair', 'bigram']).apply(calculate_fastest_time).reset_index()
 
-    print("\nFinal bigram timing data shape:", result.shape)
+    print("\nFinal bigram timing data shape (timing data for unique combinations of user, trial, bigram pair, and bigram):", result.shape)
     print(result.head())
 
     return result
@@ -83,7 +81,7 @@ def calculate_median_times(bigram_timings):
     # Calculate median times grouped by bigramPair and bigram
     median_times = bigram_timings.groupby(['bigramPair', 'bigram'])['timing_within_bigram'].median().unstack()
     
-    print("\nMedian bigram timing shape:", median_times.shape)
+    print("\nMedian bigram timing shape (unique bigram pairs, unique bigrams across all pairs):", median_times.shape)
     print(median_times.head())
 
     return median_times
