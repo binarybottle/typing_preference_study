@@ -26,12 +26,12 @@ export default defineConfig({
       name: 'copy-files',
       writeBundle() {
         //copyFileSync('configs/token.json', 'dist/configs/token.json');
-        copyFileSync('bigram_tables/bigram_3pairs_LH.csv', 'dist/bigram_tables/bigram_3pairs_LH.csv');
-        copyFileSync('bigram_tables/bigram_3pairs_RH.csv', 'dist/bigram_tables/bigram_3pairs_RH.csv');
-        copyFileSync('bigram_tables/bigram_80pairs_LH.csv', 'dist/bigram_tables/bigram_80pairs_LH.csv');
-        copyFileSync('bigram_tables/bigram_80pairs_RH.csv', 'dist/bigram_tables/bigram_80pairs_RH.csv');
-        copyFileSync('bigram_tables/bigram_2x80pairs_LH.csv', 'dist/bigram_tables/bigram_2x80pairs_LH.csv');
-        copyFileSync('bigram_tables/bigram_2x80pairs_RH.csv', 'dist/bigram_tables/bigram_2x80pairs_RH.csv');
+        //copyFileSync('bigram_tables/bigram_3pairs_LH.csv', 'dist/configs/bigram_tables/bigram_3pairs_LH.csv');
+        //copyFileSync('bigram_tables/bigram_3pairs_RH.csv', 'dist/configs/bigram_tables/bigram_3pairs_RH.csv');
+        //copyFileSync('bigram_tables/bigram_80pairs_LH.csv', 'dist/configs/bigram_tables/bigram_80pairs_LH.csv');
+        //copyFileSync('bigram_tables/bigram_80pairs_RH.csv', 'dist/configs/bigram_tables/bigram_80pairs_RH.csv');
+        //copyFileSync('bigram_tables/bigram_2x80pairs_LH.csv', 'dist/configs/bigram_tables/bigram_2x80pairs_LH.csv');
+        //copyFileSync('bigram_tables/bigram_2x80pairs_RH.csv', 'dist/configs/bigram_tables/bigram_2x80pairs_RH.csv');
       }
     }
   ]
