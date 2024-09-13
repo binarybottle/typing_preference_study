@@ -14,10 +14,10 @@ let experimentConfig = {
   practiceOnly: false,  // If true, only run the practice set
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
-  trainingBigramFile: 'bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
-  //trainingBigramFile: 'bigram_3pairs_RH.csv',  // Default filename for training bigram pairs
-  mainBigramFile: 'bigram_2x80pairs_LH.csv'  // Default filename for main bigram pairs
-  //mainBigramFile: 'bigram_2x80pairs_RH.csv'  // Default filename for main bigram pairs
+  trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
+  //trainingBigramFile: 'bigram_tables/bigram_3pairs_RH.csv',  // Default filename for training bigram pairs
+  mainBigramFile: 'bigram_tables/bigram_2x80pairs_LH.csv'  // Default filename for main bigram pairs
+  //mainBigramFile: 'bigram_tables/bigram_2x80pairs_RH.csv'  // Default filename for main bigram pairs
 };
 
 let experimentStartTime;
