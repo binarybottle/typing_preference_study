@@ -29,121 +29,106 @@ def load_and_preprocess_data(folder_path):
     
     return combined_df
 
-def group_bigrams(data):
-    """
-    Sort data and group by user, trial, and bigram pair
-    """
-    # Sort the data
-    sorted_data = data.sort_values(['user_id', 'trialId', 'bigramPair', 'bigram', 'keydownTime'])
-
-    # Group by user, trial, and bigram pair
-    grouped_data = data.groupby(['user_id', 'trialId', 'bigramPair'])
-
-    return sorted_data, grouped_data 
-
-def get_chosen_and_unchosen_bigrams(grouped_data):
+def get_chosen_and_unchosen_bigrams(raw_data):
     """
     Extract the chosen and unchosen bigrams from each bigram pair (within each trial) for each user.
     
     Parameters:
-    - grouped_data: DataFrame containing the raw experimental data grouped by bigram pair
+    - raw_data: DataFrame containing the raw experimental data
     
     Returns:
     - chosen_bigrams: DataFrame of chosen bigrams
     - unchosen_bigrams: DataFrame of unchosen bigrams
     """
+    # Group by user, trial, and bigram pair
+    grouped = raw_data.groupby(['user_id', 'trialId', 'bigramPair'])
+    
     # Extract chosen bigrams
-    chosen_bigrams = grouped_data['chosenBigram']
-    bigrams = grouped_data['bigramPair']
-    """
-    unchosen_bigrams = []
-    for i,bigram in enumerate(bigrams):
-        if bigram == chosen_bigrams
-    unchosen_bigrams = [b for b in bigrams if b != chosen_bigrams][0]
-        
-    return bigrams, chosen_bigrams, unchosen_bigrams
-    """
+    chosen_bigrams = grouped.apply(lambda x: x[x['chosen'] == True]['bigram'].iloc[0]).unstack()
+    
+    # Extract unchosen bigrams
+    unchosen_bigrams = grouped.apply(lambda x: x[x['chosen'] == False]['bigram'].iloc[0]).unstack()
+    
+    return chosen_bigrams, unchosen_bigrams
 
-def calculate_bigram_times(grouped_data):
+def calculate_bigram_timing(data):
     """
-    Calculate the time to type each bigram and return data for plotting.
+    Calculate the timing for bigrams and return data for plotting.
     
     Parameters:
-    - grouped_data: The DataFrame containing bigram data grouped by bigram pair
+    - data: The DataFrame containing bigram data
     
     Returns:
-    - bigram_times: DataFrame with timing data for each bigram
+    - bigram_timings: DataFrame with timing data for each bigram
+    - bigram_pairs: List of strings representing the unique bigram pairs
     """
-    def calculate_fastest_time(grouped_data):
+    # Sort the data
+    data = data.sort_values(['user_id', 'trialId', 'bigramPair', 'keydownTime'])
+    
+    def calculate_fastest_time(group):
         # Extract bigrams from bigramPair
-        bigrams = grouped_data['bigramPair'].iloc[0].split(', ')
+        bigrams = group['bigramPair'].iloc[0].split(', ')
         
         timings = {bigram: [] for bigram in bigrams}
         
         # Calculate timing for each complete bigram
-        bigram_pairs = []
-        for i in range(len(grouped_data) - 1):
-            first_letter = grouped_data['typedKey'].iloc[i]
-            second_letter = grouped_data['typedKey'].iloc[i+1]
+        for i in range(len(group) - 1):
+            first_letter = group['typedKey'].iloc[i]
+            second_letter = group['typedKey'].iloc[i+1]
             bigram = first_letter + second_letter
             if bigram in bigrams:
-                bigram_pairs.append(bigrams)
-                key1time = grouped_data['keydownTime'].iloc[i]
-                key2time = grouped_data['keydownTime'].iloc[i+1]
-                timing = key2time - key1time
+                timing = group['keydownTime'].iloc[i+1] - group['keydownTime'].iloc[i]
                 timings[bigram].append(timing)
         
         # Get the fastest timing for each bigram
-        fastest_times = {bigram: min(times) if times else np.nan for bigram, times in timings.items()}
+        fastest_timings = {bigram: min(times) if times else np.nan for bigram, times in timings.items()}
         
-        return pd.Series(fastest_times, dtype=float)  # Ensure numeric output
-
+        return pd.Series(fastest_timings)
 
     # Group the data and apply the calculation function
-    bigram_times = grouped_data.apply(calculate_fastest_time).reset_index()
+    bigram_timings = data.groupby(['user_id', 'trialId', 'bigramPair']).apply(calculate_fastest_time).reset_index()
     
     # Melt the DataFrame to have one row per bigram timing
-    bigram_times = bigram_times.melt(id_vars=['user_id', 'trialId', 'bigramPair'], 
-                                     var_name='bigram', value_name='timing_within_bigram')
+    bigram_timings = bigram_timings.melt(id_vars=['user_id', 'trialId', 'bigramPair'], 
+                                         var_name='bigram', value_name='timing_within_bigram')
+    
+    # Convert timing_within_bigram to float, replacing any non-convertible values with NaN
+    bigram_timings['timing_within_bigram'] = pd.to_numeric(bigram_timings['timing_within_bigram'], errors='coerce')
 
     # Extract unique bigram pairs
-    #bigram_pairs = grouped_data['bigramPair'].unique().tolist()
+    bigram_pairs = data['bigramPair'].unique().tolist()
 
-    return bigram_times
+    return bigram_timings, bigram_pairs
 
-def calculate_median_typist_bigram_times(bigram_times):
+def calculate_median_times(bigram_timings):
     """
-    Calculate the median times for each bigram in each bigram pair across users.
+    Calculate the median timing for each bigram in each bigram pair across users.
     """
-    if bigram_times.empty:
-        print("No bigram times to calculate median from.")
+    if bigram_timings.empty:
+        print("No bigram timings to calculate median from.")
         return pd.DataFrame()
 
-    if not {'bigramPair', 'bigram'}.issubset(bigram_times.columns):
-        raise KeyError("'bigramPair' or 'bigram' columns are missing in the bigram_times.")
+    if not {'bigramPair', 'bigram', 'timing_within_bigram'}.issubset(bigram_timings.columns):
+        raise KeyError("Required columns are missing in the bigram timings.")
 
     # Calculate median times grouped by bigramPair and bigram
-    median_times = bigram_times.groupby(['bigramPair', 'bigram'])['timing_within_bigram'].median().unstack(fill_value=np.nan)
+    median_times = bigram_timings.groupby(['bigramPair', 'bigram'])['timing_within_bigram'].median().unstack(fill_value=np.nan)
     
     # Ensure all bigrams are represented
-    all_bigrams = bigram_times['bigram'].unique()
+    all_bigrams = bigram_timings['bigram'].unique()
     for bigram in all_bigrams:
         if bigram not in median_times.columns:
             median_times[bigram] = np.nan
 
+    print("\nMedian bigram timing shape:", median_times.shape)
+    print("\nNumber of NaN values:", median_times.isna().sum().sum())
+    print("\nNumber of unique bigrams:", len(all_bigrams))
+
     return median_times
 
-def save_median_typist_bigram_times(median_times, output_folder):
+def plot_median_bigram_timing(median_times, output_folder):
     """
-    Save the median times data to a CSV file for further analysis.
-    """
-    output_file = os.path.join(output_folder, 'median_typist_bigram_times.csv')
-    median_times.to_csv(output_file)
-    print(f"\nRaw heatmap data saved to: {output_file}")
-
-def plot_median_typist_bigram_times(median_times, output_folder):
-    """
-    Generate and save the median bigram timing plots.
+    Generate and save the median bigram timing heatmap.
     """
     # Transpose the DataFrame to have bigrams as rows and bigram pairs as columns
     median_times_t = median_times.T
@@ -177,28 +162,52 @@ def plot_median_typist_bigram_times(median_times, output_folder):
 
     print(f"\nHeatmap saved with shape: {median_times_t.shape}")
 
-    # Visualize the distribution of median times
-    melted_data = median_times.melt()
-    plt.figure(figsize=(12, 6))
-    sns.boxplot(data=melted_data, x=melted_data.columns[0], y=melted_data.columns[1])
-    plt.title('Distribution of Median Typing Times for Each Bigram')
-    plt.xlabel('Bigram')
-    plt.ylabel('Median Time (ms)')
-    plt.xticks(rotation=90)
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, 'bigram_median_times_distribution.png'))
-    plt.close()
+    # Additional diagnostic information
+    print(f"\nNumber of non-NaN values in heatmap: {np.sum(~np.isnan(median_times_t))}")
+    # Make sure that the calculation is performed over all elements, reducing to a scalar
+    percentage_non_nan = 100 * np.sum(~np.isnan(median_times_t.values.flatten())) / median_times_t.size
 
-    # Correlation between bigram pairs
-    correlation_matrix = median_times.corr()
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(correlation_matrix, annot=False, cmap='coolwarm')
-    plt.title('Correlation of Median Times Between Bigram Pairs')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, 'bigram_median_times_correlation.png'))
-    plt.close()
+    # Now percentage_non_nan should be a scalar
+    if isinstance(percentage_non_nan, (int, float)):
+        print(f"Percentage of non-NaN values: {percentage_non_nan:.2f}%")
+    else:
+        print("Error: percentage_non_nan is not a scalar value.")
 
 
+def save_heatmap_data(median_times, output_folder):
+    """
+    Save the median times data to a CSV file for further analysis.
+    """
+    output_file = os.path.join(output_folder, 'median_bigram_timing_data.csv')
+    median_times.to_csv(output_file)
+    print(f"\nRaw heatmap data saved to: {output_file}")
+
+def get_chosen_and_unchosen_bigrams(raw_data):
+    """
+    Extract the chosen and unchosen bigrams from each bigram pair (within each trial) for each user.
+    
+    Parameters:
+    - raw_data: DataFrame containing the raw experimental data
+    
+    Returns:
+    - chosen_bigrams: DataFrame of chosen bigrams
+    - unchosen_bigrams: DataFrame of unchosen bigrams
+    """
+    # Group by user and trial
+    grouped = raw_data.groupby(['user_id', 'trialId'])
+    
+    def extract_bigrams(group):
+        chosen = group['chosenBigram'].iloc[0]
+        pair = group['bigramPair'].iloc[0].split(', ')
+        unchosen = pair[0] if pair[0] != chosen else pair[1]
+        return pd.Series({'chosen': chosen, 'unchosen': unchosen})
+    
+    bigrams = grouped.apply(extract_bigrams).unstack()
+    
+    chosen_bigrams = bigrams['chosen']
+    unchosen_bigrams = bigrams['unchosen']
+    
+    return chosen_bigrams, unchosen_bigrams
 
 def plot_bigram_comparison(chosen_data, unchosen_data, bigram_pairs):
     """
@@ -284,6 +293,55 @@ def plot_choice_vs_timing(bigram_timings, chosen_bigrams, output_folder):
     plt.savefig(os.path.join(output_folder, 'chosen_bigram_vs_timing.png'))
     plt.close()
 
+def create_all_plots(raw_data, output_folder):
+    try:
+        bigram_timings, bigram_pairs = calculate_bigram_timing(raw_data)
+        if bigram_timings.empty:
+            print("No valid bigram timings found. Skipping plots.")
+            return
+
+        print("\nShape of bigram_timings:")
+        print(bigram_timings.shape)
+        print("\nColumns in bigram_timings:")
+        print(bigram_timings.columns)
+        print("\nFirst few rows of bigram_timings:")
+        print(bigram_timings.head())
+
+        median_times = calculate_median_times(bigram_timings)
+        if median_times.empty:
+            print("No median times available. Skipping plots.")
+            return
+
+        print("\nShape of median_times before plotting:")
+        print(median_times.shape)
+        print("\nColumns in median_times:")
+        print(median_times.columns)
+
+        plot_median_bigram_timing(median_times, output_folder)
+
+        save_heatmap_data(median_times, output_folder)
+
+        # Use the new function to get both chosen and unchosen bigrams
+        chosen_bigrams, unchosen_bigrams = get_chosen_and_unchosen_bigrams(raw_data)
+        
+        print("\nShape of chosen_bigrams:")
+        print(chosen_bigrams.shape)
+        print("\nShape of unchosen_bigrams:")
+        print(unchosen_bigrams.shape)
+
+        plot_bigram_comparison(chosen_bigrams, unchosen_bigrams, bigram_pairs)
+
+        # Generate bigram choice consistency plot 
+        plot_bigram_choice_consistency(chosen_bigrams, output_folder)
+
+        # Generate choice vs timing plot
+        plot_choice_vs_timing(bigram_timings, chosen_bigrams, output_folder)
+
+        print("All plots have been generated and saved in the output folder.")
+    except Exception as e:
+        print(f"An error occurred in create_all_plots: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 # Main execution
 if __name__ == "__main__":
@@ -293,83 +351,12 @@ if __name__ == "__main__":
         output_folder = os.path.join(os.path.dirname(folder_path), 'output')
         os.makedirs(output_folder, exist_ok=True)
 
-        # Load and preprocess the data
         print(f"Loading data from {folder_path}")
-        data = load_and_preprocess_data(folder_path)
-        print(f"Loaded data shape: {data.shape}")
-        print(f"Columns in data: {data.columns}")
-
-        # Save the combined data to a new CSV file
-        output_file = os.path.join(output_folder, 'combined_data.csv')
-        data.to_csv(output_file, index=False)
-        print(f"\nCombined data saved to {output_file}")
-
-        # Sort and group the data
-        sorted_data, grouped_data = group_bigrams(data)
-        for name, group in list(grouped_data)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
-
-        chosen_bigrams = grouped_data['chosenBigram']
-        bigrams = grouped_data['bigramPair']
-        for name, group in list(chosen_bigrams)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
-        for name, group in list(bigrams)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
-
-        """
-        bigrams, chosen_bigrams, unchosen_bigrams = get_chosen_and_unchosen_bigrams(grouped_data)
-        for name, group in list(chosen_bigrams)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
-        for name, group in list(unchosen_bigrams)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
-
-
-        # Get both chosen and unchosen bigrams
-        chosen_bigrams, unchosen_bigrams = get_chosen_and_unchosen_bigrams(grouped_data)
-        print("Chosen bigrams shape:", chosen_bigrams.shape)
-        print("Unchosen bigrams shape:", unchosen_bigrams.shape)
-        print("\nChosen bigrams (first 5 rows and 5 columns):")
-        print(chosen_bigrams.iloc[:5, :5])
-        print("\nUnchosen bigrams (first 5 rows and 5 columns):")
-        print(unchosen_bigrams.iloc[:5, :5])
-
+        raw_data = load_and_preprocess_data(folder_path)
+        print(f"Loaded data shape: {raw_data.shape}")
+        print(f"Columns in raw_data: {raw_data.columns}")
         
-
-        # Calculate bigram times
-        bigram_times = calculate_bigram_times(grouped_data)
-        print(bigram_times['timing_within_bigram'].head())
-        # Ensure timing_within_bigram is numeric
-        bigram_times['timing_within_bigram'] = pd.to_numeric(bigram_times['timing_within_bigram'], errors='coerce')
-        # Remove any rows where timing_within_bigram is not a number
-        bigram_times = bigram_times.dropna(subset=['timing_within_bigram'])
-
-        # Calculate, save, and plot the median typist bigram times
-        median_times = calculate_median_typist_bigram_times(bigram_times)  
-        save_median_typist_bigram_times(median_times, output_folder)
-        plot_median_typist_bigram_times(median_times, output_folder) 
-        print("\nBasic statistics of median times:")
-        print(median_times.describe())
-
-        """
-
-
-
-
-
-
-        #plot_bigram_comparison(chosen_bigrams, unchosen_bigrams, bigram_pairs)
-
-        # Generate bigram choice consistency plot 
-        #plot_bigram_choice_consistency(chosen_bigrams, output_folder)
-
-        # Generate choice vs timing plot
-        #plot_choice_vs_timing(bigram_timings, chosen_bigrams, output_folder)
-
+        create_all_plots(raw_data, output_folder)
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         import traceback
