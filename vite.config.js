@@ -26,9 +26,12 @@ export default defineConfig({
       name: 'copy-files',
       writeBundle() {
         //copyFileSync('configs/token.json', 'dist/configs/token.json');
-        copyFileSync('bigram_3pairs.csv', 'dist/bigram_3pairs.csv');
-        copyFileSync('bigram_80pairs.csv', 'dist/bigram_80pairs.csv');
-        copyFileSync('bigram_2x80pairs.csv', 'dist/bigram_2x80pairs.csv');
+        copyFileSync('bigram_3pairs_LH.csv', 'dist/bigram_3pairs_LH.csv');
+        copyFileSync('bigram_3pairs_RH.csv', 'dist/bigram_3pairs_RH.csv');
+        copyFileSync('bigram_80pairs_LH.csv', 'dist/bigram_80pairs_LH.csv');
+        copyFileSync('bigram_80pairs_RH.csv', 'dist/bigram_80pairs_RH.csv');
+        copyFileSync('bigram_2x80pairs_LH.csv', 'dist/bigram_2x80pairs_LH.csv');
+        copyFileSync('bigram_2x80pairs_RH.csv', 'dist/bigram_2x80pairs_RH.csv');
       }
     }
   ]

@@ -14,8 +14,10 @@ let experimentConfig = {
   practiceOnly: false,  // If true, only run the practice set
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
-  trainingBigramFile: 'bigram_3pairs.csv',  // Default filename for training bigram pairs
-  mainBigramFile: 'bigram_2x80pairs.csv'  // Default filename for main bigram pairs
+  trainingBigramFile: 'bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
+  //trainingBigramFile: 'bigram_3pairs_RH.csv',  // Default filename for training bigram pairs
+  mainBigramFile: 'bigram_2x80pairs_LH.csv'  // Default filename for main bigram pairs
+  //mainBigramFile: 'bigram_2x80pairs_RH.csv'  // Default filename for main bigram pairs
 };
 
 let experimentStartTime;
@@ -119,9 +121,12 @@ const typingInstructionsInfo = {
   type: htmlButtonResponse,
   stimulus: `
     <div class='instruction'> 
-      <p>You will be asked to <strong>touch type</strong> a pair of letters three times with your left hand.
-         Touch type as you normally would, with left fingers above the home row letters 
-         <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span>:</span></p>
+      <p>You will be asked to <strong>touch type</strong> a pair of letters three times.
+         Touch type as you normally would, with fingers above the home row letters 
+         <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
+         and
+         <span style="white-space: nowrap;"><span id=keystroke>;</span><span id=keystroke>L</span><span id=keystroke>K</span><span id=keystroke>J</span></span>
+         </p>
       <div style="display: flex; justify-content: center; margin: 20px 0;">
         <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
       </div>
