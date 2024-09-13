@@ -14,10 +14,10 @@ let experimentConfig = {
   practiceOnly: false,  // If true, only run the practice set
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
-  trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
-  //trainingBigramFile: 'bigram_tables/bigram_3pairs_RH.csv',  // Default filename for training bigram pairs
-  mainBigramFile: 'bigram_tables/bigram_2x80pairs_LH.csv'  // Default filename for main bigram pairs
-  //mainBigramFile: 'bigram_tables/bigram_2x80pairs_RH.csv'  // Default filename for main bigram pairs
+  //trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
+  trainingBigramFile: 'bigram_tables/bigram_3pairs_RH.csv',  // Default filename for training bigram pairs
+  //mainBigramFile: 'bigram_tables/bigram_2x80pairs_LH.csv'  // Default filename for main bigram pairs
+  mainBigramFile: 'bigram_tables/bigram_2x80pairs_RH.csv'  // Default filename for main bigram pairs
 };
 
 let experimentStartTime;
@@ -208,11 +208,22 @@ function createTypingTrial(bigram, bigramPair, trialId) {
 
   function handleKeyPress(event) {
     if (trialCompleted) return;  // Ignore keypresses after trial completion
-
-    const typedKey = event.key.toLowerCase();
-    const expectedKey = bigram[typedSequence.length % bigram.length];
+  
+    let typedKey = event.key.toLowerCase();
+    const expectedKey = bigram[typedSequence.length % bigram.length].toLowerCase();
     const keydownTime = performance.now() - trialStartTime;
-
+  
+    // Handle special cases for punctuation
+    if (typedKey === ',' || typedKey === '.' ||  typedKey === "/" || typedKey === ';' || typedKey === "'") {
+      // These keys are already correct, no need to modify
+    } else if (typedKey === 'shift') {
+      // Ignore shift key presses
+      return;
+    } else if (typedKey.length > 1) {
+      // Ignore other special keys
+      return;
+    }
+  
     const keyLog = {
       trialId: trialId,
       bigramPair: bigramPair.join(", "),
@@ -223,19 +234,18 @@ function createTypingTrial(bigram, bigramPair, trialId) {
       chosenBigram: "",
       unchosenBigram: ""
     };
-
+  
     if (typedKey === expectedKey) {
       typedSequence += typedKey;
       document.querySelector('#user-input').textContent = typedSequence;
       document.querySelector('#error-message').textContent = "";
-
+  
       if (typedSequence.length % bigram.length === 0) {
         correctSequenceCount++;
         keyData.push(keyLog);
-
+  
         if (correctSequenceCount === experimentConfig.requiredCorrectRepetitions) {
           trialCompleted = true;
-          //document.querySelector('#feedback').textContent = "Great! Moving to the next trial...";
           setTimeout(() => {
             jsPsych.finishTrial({ keyData: keyData });
           }, 1000);
