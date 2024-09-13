@@ -64,7 +64,11 @@ async function loadBigramPairs(trainingFile, mainFile) {
       const response = await fetch(`./${filename}`);
       const csvText = await response.text();
       return csvText.split('\n').map(row => row.trim()).filter(row => row)
-        .map(row => row.split(',').map(bigram => bigram.trim()));
+        .map(row => {
+          // Use a regex to split the row, preserving commas within quotes
+          return row.match(/(".*?"|[^,]+)(?=\s*,|\s*$)/g)
+                    .map(entry => entry.replace(/^"(.*)"$/, '$1').trim());
+        });
     } catch (error) {
       console.error(`Error loading ${filename}:`, error);
       return [];
@@ -210,16 +214,21 @@ function createTypingTrial(bigram, bigramPair, trialId) {
     if (trialCompleted) return;  // Ignore keypresses after trial completion
   
     let typedKey = event.key.toLowerCase();
-    const expectedKey = bigram[typedSequence.length % bigram.length].toLowerCase();
+    const expectedKey = bigram[typedSequence.length % bigram.length];
+    //const expectedKey = bigram[typedSequence.length % bigram.length].toLowerCase();
     const keydownTime = performance.now() - trialStartTime;
   
     // Handle special cases for punctuation
-    if (typedKey === ',' || typedKey === '.' ||  typedKey === "/" || typedKey === ';' || typedKey === "'") {
-      // These keys are already correct, no need to modify
-    } else if (typedKey === 'shift') {
-      // Ignore shift key presses
-      return;
-    } else if (typedKey.length > 1) {
+    if (typedKey === 'Shift' || typedKey.length > 1) {
+      return; // Ignore shift and other special keys
+    }
+
+    // For comma, we need to check both the actual comma and the string representation
+    if (expectedKey === ',' && (typedKey === ',' || typedKey === 'Comma')) {
+      typedKey = ',';
+    }
+
+    if (typedKey.length > 1) {
       // Ignore other special keys
       return;
     }
@@ -260,12 +269,22 @@ function createTypingTrial(bigram, bigramPair, trialId) {
     }
   }
 
+  // Function to safely encode HTML entities
+  function encodeHtml(str) {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
   return {
     type: htmlKeyboardResponse,
     stimulus: `<div class="jspsych-content-wrapper">
                  <div class="jspsych-content">
                    <p style="white-space: nowrap;">Type ${experimentConfig.requiredCorrectRepetitions} times:</p>
-                   <p style="white-space: nowrap;"><b>${bigram}</b></p>
+                   <p style="white-space: nowrap;"><b>${encodeHtml(bigram)}</b></p>
                    <p id="user-input" style="font-size: 24px; letter-spacing: 2px;"></p>
                    <p id="feedback" style="color: green;"></p>
                    <p id="error-message" style="color: red;"></p>
