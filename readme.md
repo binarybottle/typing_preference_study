@@ -30,9 +30,10 @@ Run the experiment locally:
 Remote production (with vite):
 
 7. Add ``base: '/typing/bigram-prolific-study/',`` to vite.config.js
-8. ``mkdir /home/binarybottle/binarybottle.com/bigram-prolific-study``
-9. ``mkdir /home/binarybottle/binarybottle.com/bigram-prolific-study/configs``
-10. ``cp -R bigram_tables /home/binarybottle/binarybottle.com/bigram-prolific-study/configs/``
-11. ``cp public/configs/token.json /home/binarybottle/binarybottle.com/bigram-prolific-study/configs/``
+8. ``$STUDY='/home/binarybottle/binarybottle.com/bigram-prolific-study'``
+8. ``mkdir $STUDY``
+9. ``mkdir $STUDY/configs``
+10. ``cp -R bigram_tables $STUDY/configs/``
+11. ``cp public/configs/token.json $STUDY/configs/``
 12. ``npm run build``
-13. ``cp -R dist/* /home/binarybottle/binarybottle.com/typing/bigram-prolific-study/``
+13. ``cp -R dist/* $STUDY/``
