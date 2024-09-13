@@ -8,8 +8,8 @@ const jsPsych = initJsPsych();
 
 // Global variables for countdown timer and required correct repetitions
 let experimentConfig = {
-  timeLimit: 10,  // Default time limit of 10 seconds for the entire experiment
   requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
+  timeLimit: 10,  // Timer default time limit of 10 seconds for the entire experiment
   useTimer: false,  // Default to not using the timer
   practiceOnly: false,  // If true, only run the practice set
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
@@ -198,54 +198,50 @@ function createTypingTrial(bigram, bigramPair, trialId) {
   let keyData = [];
   let correctSequenceCount = 0;
   let typedSequence = "";
-  const trialStartTime = performance.now();  // Start time of the trial
+  const trialStartTime = performance.now();
+  let trialCompleted = false;
 
   function handleKeyPress(event) {
+    if (trialCompleted) return;  // Ignore keypresses after trial completion
+
     const typedKey = event.key.toLowerCase();
     const expectedKey = bigram[typedSequence.length % bigram.length];
+    const keydownTime = performance.now() - trialStartTime;
 
-    const keydownTime = performance.now() - trialStartTime;  // Track keydown time
-
-    // Log only the necessary fields: expectedKey, typedKey, and chosenBigram
     const keyLog = {
       trialId: trialId,
       bigramPair: bigramPair.join(", "),
       bigram: bigram,
-      expectedKey: expectedKey,  // Save the expected key
-      typedKey: typedKey,  // Save the typed key
-      keydownTime: keydownTime.toFixed(2),  // Log the time of the key press
-      chosenBigram: ""  // To be updated after the comfort choice trial
+      expectedKey: expectedKey,
+      typedKey: typedKey,
+      keydownTime: keydownTime.toFixed(2),
+      chosenBigram: "",
+      unchosenBigram: ""
     };
 
     if (typedKey === expectedKey) {
       typedSequence += typedKey;
-      document.querySelector('#user-input').textContent = typedSequence;  // Show typed sequence
-      document.querySelector('#error-message').textContent = "";  // Clear error message
+      document.querySelector('#user-input').textContent = typedSequence;
+      document.querySelector('#error-message').textContent = "";
 
-      // Increase correct sequence count when a full bigram is typed
       if (typedSequence.length % bigram.length === 0) {
         correctSequenceCount++;
-      }
-
-      // If the required correct repetitions are reached, save the streak
-      if (correctSequenceCount === experimentConfig.requiredCorrectRepetitions) {
-        keyData.push(keyLog);  // Log the final key event
-
-        // End the trial after a short delay to give feedback
-        setTimeout(() => {
-          jsPsych.finishTrial({ keyData: keyData });  // Finish the trial and save key data
-        }, 500);
-      } else {
-        // Log intermediate correct keys contributing to the streak
         keyData.push(keyLog);
+
+        if (correctSequenceCount === experimentConfig.requiredCorrectRepetitions) {
+          trialCompleted = true;
+          //document.querySelector('#feedback').textContent = "Great! Moving to the next trial...";
+          setTimeout(() => {
+            jsPsych.finishTrial({ keyData: keyData });
+          }, 1000);
+        }
       }
     } else {
-      // If there's a mistake, reset everything and don't save any data
       typedSequence = "";
       correctSequenceCount = 0;
-      document.querySelector('#user-input').textContent = "";  // Clear input
+      document.querySelector('#user-input').textContent = "";
       document.querySelector('#error-message').textContent = "Mistake detected. Try again.";
-      keyData = [];  // Clear key data since the sequence was broken
+      keyData = [];
     }
   }
 
@@ -260,8 +256,8 @@ function createTypingTrial(bigram, bigramPair, trialId) {
                    <p id="error-message" style="color: red;"></p>
                  </div>
                </div>`,
-    choices: "ALL_KEYS",
-    response_ends_trial: false,
+    choices: "NO_KEYS",
+    trial_duration: null,
     data: {
       task: 'typing',
       trialId: trialId,
@@ -284,7 +280,7 @@ function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
   return {
     type: htmlButtonResponse,
     stimulus: `<p style="font-size: 28px;">Which pair was easier to type?</p>`,
-    choices: [bigram1, bigram2, "No difference"],
+    choices: [bigram1, bigram2],
     button_html: '<button class="jspsych-btn comfort-choice-button">%choice%</button>',
     data: {
       task: 'comfort_choice',
@@ -294,12 +290,13 @@ function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
     },
     on_finish: function (data) {
       let chosenBigram = "";
+      let unchosenBigram = "";
       if (data.response === 0) {
         chosenBigram = bigram1;
+        unchosenBigram = bigram2;
       } else if (data.response === 1) {
         chosenBigram = bigram2;
-      } else {
-        chosenBigram = "No difference";
+        unchosenBigram = bigram1;
       }
 
       // Update the previous two typing trials with the chosen bigram
@@ -310,6 +307,7 @@ function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
         if (allData[i].task === 'typing' && allData[i].keyData) {
           allData[i].keyData.forEach(keyEvent => {
             keyEvent.chosenBigram = chosenBigram;
+            keyEvent.unchosenBigram = unchosenBigram;
           });
         }
       }
@@ -327,7 +325,7 @@ function escapeCSVField(field) {
 
 // Function to convert data to CSV format
 function convertToCSV(data) {
-  const csvHeaders = ['trialId', 'bigramPair', 'bigram', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram'];
+  const csvHeaders = ['trialId', 'bigramPair', 'bigram', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram'];
   let csvContent = csvHeaders.join(',') + '\n';
 
   data.forEach(trial => {
@@ -340,7 +338,8 @@ function convertToCSV(data) {
           escapeCSVField(keyEvent.expectedKey || ''),
           escapeCSVField(keyEvent.typedKey || ''),
           keyEvent.keydownTime !== undefined ? keyEvent.keydownTime : '',
-          escapeCSVField(keyEvent.chosenBigram || '')
+          escapeCSVField(keyEvent.chosenBigram || ''),
+          escapeCSVField(keyEvent.unchosenBigram || '')
         ];
         csvContent += row.join(',') + '\n';
       });
