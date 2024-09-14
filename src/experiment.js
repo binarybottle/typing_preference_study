@@ -14,10 +14,10 @@ let experimentConfig = {
   practiceOnly: false,  // If true, only run the practice set
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
-  //trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
-  trainingBigramFile: 'bigram_tables/bigram_3pairs_RH.csv',  // Default filename for training bigram pairs
-  //mainBigramFile: 'bigram_tables/bigram_2x80pairs_LH.csv'  // Default filename for main bigram pairs
-  mainBigramFile: 'bigram_tables/bigram_2x80pairs_RH.csv'  // Default filename for main bigram pairs
+  trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
+  //trainingBigramFile: 'bigram_tables/bigram_3pairs_RH.csv',  // Default filename for training bigram pairs
+  mainBigramFile: 'bigram_tables/bigram_2x80pairs_LH.csv'  // Default filename for main bigram pairs
+  //mainBigramFile: 'bigram_tables/bigram_2x80pairs_RH.csv'  // Default filename for main bigram pairs
 };
 
 let experimentStartTime;
@@ -222,14 +222,12 @@ function createTypingTrial(bigram, bigramPair, trialId) {
     if (typedKey === 'Shift' || typedKey.length > 1) {
       return; // Ignore shift and other special keys
     }
-
     // For comma, we need to check both the actual comma and the string representation
     if (expectedKey === ',' && (typedKey === ',' || typedKey === 'Comma')) {
       typedKey = ',';
     }
-
+    // Ignore other special keys
     if (typedKey.length > 1) {
-      // Ignore other special keys
       return;
     }
   
@@ -249,9 +247,10 @@ function createTypingTrial(bigram, bigramPair, trialId) {
       document.querySelector('#user-input').textContent = typedSequence;
       document.querySelector('#error-message').textContent = "";
   
+      keyData.push(keyLog);  // Add this line to record every correct key press
+
       if (typedSequence.length % bigram.length === 0) {
         correctSequenceCount++;
-        keyData.push(keyLog);
   
         if (correctSequenceCount === experimentConfig.requiredCorrectRepetitions) {
           trialCompleted = true;
@@ -359,16 +358,18 @@ function escapeCSVField(field) {
 
 // Function to convert data to CSV format
 function convertToCSV(data) {
-  const csvHeaders = ['trialId', 'bigramPair', 'bigram', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram'];
+  const csvHeaders = ['trialId', 'bigramPair', 'bigram', 'keyPosition', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram'];
   let csvContent = csvHeaders.join(',') + '\n';
 
   data.forEach(trial => {
     if (trial.task === 'typing' && trial.keyData) {
-      trial.keyData.forEach(keyEvent => {
+      trial.keyData.forEach((keyEvent, index) => {
+        const keyPosition = (index % 2) + 1;  // Alternates between 1 and 2
         const row = [
           escapeCSVField(trial.trialId || ''),
           escapeCSVField(trial.bigramPair || ''),
           escapeCSVField(trial.correctSequence || ''),
+          keyPosition,
           escapeCSVField(keyEvent.expectedKey || ''),
           escapeCSVField(keyEvent.typedKey || ''),
           keyEvent.keydownTime !== undefined ? keyEvent.keydownTime : '',

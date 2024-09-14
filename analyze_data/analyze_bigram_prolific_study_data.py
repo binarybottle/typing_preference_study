@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 
+
 def load_and_preprocess_data(folder_path):
     """
     Load and preprocess (combine) data from multiple CSV files in a folder.
@@ -29,7 +30,7 @@ def load_and_preprocess_data(folder_path):
     
     return combined_df
 
-def group_bigrams(data):
+#def group_bigrams(data):
     """
     Sort data and group by user, trial, and bigram pair
     """
@@ -41,7 +42,7 @@ def group_bigrams(data):
 
     return sorted_data, grouped_data 
 
-def get_chosen_and_unchosen_bigrams(grouped_data):
+#def get_chosen_and_unchosen_bigrams(grouped_data):
     """
     Extract the chosen and unchosen bigrams from each bigram pair (within each trial) for each user.
     
@@ -52,64 +53,125 @@ def get_chosen_and_unchosen_bigrams(grouped_data):
     - chosen_bigrams: DataFrame of chosen bigrams
     - unchosen_bigrams: DataFrame of unchosen bigrams
     """
-    # Extract chosen bigrams
-    chosen_bigrams = grouped_data['chosenBigram']
+    # Extract un/chosen bigrams
     bigrams = grouped_data['bigramPair']
-    """
-    unchosen_bigrams = []
-    for i,bigram in enumerate(bigrams):
-        if bigram == chosen_bigrams
-    unchosen_bigrams = [b for b in bigrams if b != chosen_bigrams][0]
-        
+    chosen_bigrams = grouped_data['chosenBigram']
+    unchosen_bigrams = grouped_data['unchosenBigram']
+            
     return bigrams, chosen_bigrams, unchosen_bigrams
-    """
 
-def calculate_bigram_times(grouped_data):
+#def calculate_bigram_times(grouped_data):
     """
-    Calculate the time to type each bigram and return data for plotting.
+    Calculate the fastest time to type each bigram and return data for plotting.
     
     Parameters:
-    - grouped_data: The DataFrame containing bigram data grouped by bigram pair
+    - grouped_data: DataFrameGroupBy object containing bigram data grouped by user_id, trialId, and bigramPair
     
     Returns:
-    - bigram_times: DataFrame with timing data for each bigram
+    - bigram_times: DataFrame with fastest timing data for each bigram
     """
-    def calculate_fastest_time(grouped_data):
+    def calculate_fastest_time(group):
         # Extract bigrams from bigramPair
-        bigrams = grouped_data['bigramPair'].iloc[0].split(', ')
+        bigrams = group['bigramPair'].iloc[0].split(', ')
         
         timings = {bigram: [] for bigram in bigrams}
         
         # Calculate timing for each complete bigram
-        bigram_pairs = []
-        for i in range(len(grouped_data) - 1):
-            first_letter = grouped_data['typedKey'].iloc[i]
-            second_letter = grouped_data['typedKey'].iloc[i+1]
+        for i in range(len(group) - 1):
+            first_letter = group['typedKey'].iloc[i]
+            second_letter = group['typedKey'].iloc[i+1]
             bigram = first_letter + second_letter
             if bigram in bigrams:
-                bigram_pairs.append(bigrams)
-                key1time = grouped_data['keydownTime'].iloc[i]
-                key2time = grouped_data['keydownTime'].iloc[i+1]
+                key1time = group['keydownTime'].iloc[i]
+                key2time = group['keydownTime'].iloc[i+1]
                 timing = key2time - key1time
                 timings[bigram].append(timing)
         
         # Get the fastest timing for each bigram
         fastest_times = {bigram: min(times) if times else np.nan for bigram, times in timings.items()}
         
-        return pd.Series(fastest_times, dtype=float)  # Ensure numeric output
+        return pd.Series(fastest_times)
 
-
-    # Group the data and apply the calculation function
-    bigram_times = grouped_data.apply(calculate_fastest_time).reset_index()
+    # Apply the calculation function to each group, explicitly including the index
+    bigram_times = grouped_data.apply(calculate_fastest_time, include_groups=False).reset_index()
     
     # Melt the DataFrame to have one row per bigram timing
-    bigram_times = bigram_times.melt(id_vars=['user_id', 'trialId', 'bigramPair'], 
-                                     var_name='bigram', value_name='timing_within_bigram')
-
-    # Extract unique bigram pairs
-    #bigram_pairs = grouped_data['bigramPair'].unique().tolist()
+    id_vars = ['user_id', 'trialId', 'bigramPair']
+    value_vars = [col for col in bigram_times.columns if col not in id_vars]
+    
+    bigram_times = bigram_times.melt(id_vars=id_vars, 
+                                     value_vars=value_vars,
+                                     var_name='bigram', 
+                                     value_name='timing_within_bigram')
 
     return bigram_times
+
+
+def process_bigram_data(data):
+    """
+    Process bigram data.
+    
+    Parameters:
+    - data: DataFrame containing the raw experimental data
+    
+    Returns:
+    - processed_data: DataFrame with processed bigram data
+    """
+    # Sort the data
+    sorted_data = data.sort_values(['user_id', 'trialId', 'bigramPair', 'keydownTime'])
+    
+    # Group the sorted data by user_id, trialId, and bigramPair
+    grouped_data = sorted_data.groupby(['user_id', 'trialId', 'bigramPair'])
+
+    def process_bigram_group(group):
+        """
+        Process bigram group data.
+        
+        Parameters:
+        - group: DataFrame containing the raw experimental data
+        
+        Returns:
+        - processed_data: DataFrame with processed bigram data
+        """
+        chosen_bigram = group['chosenBigram'].iloc[0]
+        unchosen_bigram = group['unchosenBigram'].iloc[0]
+        bigram_pair = group['bigramPair'].iloc[0].split(', ')
+        
+        # Extract the four letters from the two bigrams
+        letters = ''.join(bigram_pair)
+        assert len(letters) == 4, f"Expected 4 letters, got {len(letters)} from {bigram_pair}"
+        
+        timings = {bigram: [] for bigram in bigram_pair}
+        
+        # We'll assume the correct order of keystrokes for 3 of each bigram is: 
+        # letter1, letter2, letter1, letter2, letter1, letter2, 
+        # letter3, letter4, letter3, letter4, letter3, letter4
+        expected_order = [letters[0], letters[1], letters[0], letters[1], letters[0], letters[1], 
+                        letters[2], letters[3], letters[2], letters[3], letters[2], letters[3]]
+        
+        # Calculate timings based on the expected order
+        for i in range(0, len(group) - 1, 2):
+            bigram = expected_order[i] + expected_order[i+1]
+            if bigram in bigram_pair:
+                start_time = group['keydownTime'].iloc[i]
+                end_time = group['keydownTime'].iloc[i+1]
+                timing = end_time - start_time
+                timings[bigram].append(timing)
+        
+        chosen_time = np.min(timings[chosen_bigram]) if timings[chosen_bigram] else np.nan
+        unchosen_time = np.min(timings[unchosen_bigram]) if timings[unchosen_bigram] else np.nan
+        
+        return pd.Series({
+            'chosen_bigram': chosen_bigram,
+            'unchosen_bigram': unchosen_bigram,
+            'chosen_bigram_time': chosen_time,
+            'unchosen_bigram_time': unchosen_time
+            #'expected_keystrokes': ', '.join(expected_order)
+        })
+
+    processed_bigram_data = grouped_data.apply(process_bigram_group).reset_index()
+    
+    return processed_bigram_data, grouped_data
 
 def calculate_median_typist_bigram_times(bigram_times):
     """
@@ -197,8 +259,6 @@ def plot_median_typist_bigram_times(median_times, output_folder):
     plt.tight_layout()
     plt.savefig(os.path.join(output_folder, 'bigram_median_times_correlation.png'))
     plt.close()
-
-
 
 def plot_bigram_comparison(chosen_data, unchosen_data, bigram_pairs):
     """
@@ -298,55 +358,43 @@ if __name__ == "__main__":
         data = load_and_preprocess_data(folder_path)
         print(f"Loaded data shape: {data.shape}")
         print(f"Columns in data: {data.columns}")
+        #print(data.head(10))
+        print(data[['trialId', 'bigramPair', 'bigram', 'keydownTime', 
+                    'chosenBigram', 'unchosenBigram']].head(6))
 
         # Save the combined data to a new CSV file
         output_file = os.path.join(output_folder, 'combined_data.csv')
         data.to_csv(output_file, index=False)
         print(f"\nCombined data saved to {output_file}")
 
-        # Sort and group the data
-        sorted_data, grouped_data = group_bigrams(data)
-        for name, group in list(grouped_data)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
+        # Process the bigram data
+        processed_bigram_data, grouped_data = process_bigram_data(data)
+        print(grouped_data[['trialId', 'bigramPair', 'bigram', 'keydownTime', 
+                            'chosenBigram', 'unchosenBigram']].head(6))
+        #print(processed_bigram_data.head(10))
+        print(processed_bigram_data[['trialId', 'bigramPair',  
+                                     'chosen_bigram', 'unchosen_bigram',
+                                     'chosen_bigram_time', 'unchosen_bigram_time']].head(6))
 
-        chosen_bigrams = grouped_data['chosenBigram']
-        bigrams = grouped_data['bigramPair']
-        for name, group in list(chosen_bigrams)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
-        for name, group in list(bigrams)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
+        # Error checking
+        total_pairs = len(processed_bigram_data)
+        missing_chosen = processed_bigram_data['chosen_bigram_time'].isna().sum()
+        missing_unchosen = processed_bigram_data['unchosen_bigram_time'].isna().sum()
+        print(f"Total bigram pairs processed: {total_pairs}")
+        print(f"Missing chosen bigram times: {missing_chosen} ({missing_chosen/total_pairs:.2%})")
+        print(f"Missing unchosen bigram times: {missing_unchosen} ({missing_unchosen/total_pairs:.2%})")
+        
+        # Additional statistics
+        chosen_bigrams = processed_bigram_data['chosen_bigram']
+        unchosen_bigrams = processed_bigram_data['unchosen_bigram']
+        chosen_times = processed_bigram_data['chosen_bigram_time']
+        unchosen_times = processed_bigram_data['unchosen_bigram_time']
+        avg_chosen_time = processed_bigram_data['chosen_bigram_time'].mean()
+        avg_unchosen_time = processed_bigram_data['unchosen_bigram_time'].mean()
+        print(f"Average typing time for chosen bigrams: {avg_chosen_time:.2f} ms")
+        print(f"Average typing time for unchosen bigrams: {avg_unchosen_time:.2f} ms")
 
         """
-        bigrams, chosen_bigrams, unchosen_bigrams = get_chosen_and_unchosen_bigrams(grouped_data)
-        for name, group in list(chosen_bigrams)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
-        for name, group in list(unchosen_bigrams)[:1]:
-            print(f"Group: {name}")
-            print(group.head())
-
-
-        # Get both chosen and unchosen bigrams
-        chosen_bigrams, unchosen_bigrams = get_chosen_and_unchosen_bigrams(grouped_data)
-        print("Chosen bigrams shape:", chosen_bigrams.shape)
-        print("Unchosen bigrams shape:", unchosen_bigrams.shape)
-        print("\nChosen bigrams (first 5 rows and 5 columns):")
-        print(chosen_bigrams.iloc[:5, :5])
-        print("\nUnchosen bigrams (first 5 rows and 5 columns):")
-        print(unchosen_bigrams.iloc[:5, :5])
-
-        
-
-        # Calculate bigram times
-        bigram_times = calculate_bigram_times(grouped_data)
-        print(bigram_times['timing_within_bigram'].head())
-        # Ensure timing_within_bigram is numeric
-        bigram_times['timing_within_bigram'] = pd.to_numeric(bigram_times['timing_within_bigram'], errors='coerce')
-        # Remove any rows where timing_within_bigram is not a number
-        bigram_times = bigram_times.dropna(subset=['timing_within_bigram'])
 
         # Calculate, save, and plot the median typist bigram times
         median_times = calculate_median_typist_bigram_times(bigram_times)  
