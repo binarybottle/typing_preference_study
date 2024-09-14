@@ -47,7 +47,7 @@ function redirectToProlific(code) {
 // Load OSF API token
 async function loadOSFToken() {
   try {
-    const response = await fetch('./configs/token.json');
+    const response = await fetch('./token.json');
     const data = await response.json();
     console.log('OSF API token loaded');  // Log the loaded token
     return data.osf_api_token;
