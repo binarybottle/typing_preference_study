@@ -5,18 +5,26 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
+from scipy.stats import median_abs_deviation
 
 
-def load_and_preprocess_data(folder_path):
+def load_and_preprocess_data(input_folder, output_tables_folder):
     """
     Load and preprocess (combine) data from multiple CSV files in a folder.
+
+    Parameters:
+    - input_folder: path to the folder containing the CSV files
+    - output_tables_folder: path to the folder where the combined data will be saved
+
+    Returns:
+    - combined_df: DataFrame with combined data
     """
     print("Loading and preprocessing data...")
     dataframes = []
-    for filename in os.listdir(folder_path):
+    for filename in os.listdir(input_folder):
         if filename.endswith('.csv'):
             print(f"Processing file: {filename}")
-            df = pd.read_csv(os.path.join(folder_path, filename))
+            df = pd.read_csv(os.path.join(input_folder, filename))
             
             # Extract user ID from filename (assuming format: experiment_data_USERID_*.csv)
             user_id = filename.split('_')[2]
@@ -28,20 +36,20 @@ def load_and_preprocess_data(folder_path):
     combined_df = pd.concat(dataframes, ignore_index=True)
     print(f"Loaded and combined data from {len(dataframes)} files")
     
-    output_file = os.path.join(output_folder, 'combined_data.csv')
-    data.to_csv(output_file, index=False)
+    output_file = os.path.join(output_tables_folder, 'original_combined_data.csv')
+    combined_df.to_csv(output_file, index=False)
     print(f"\nCombined data saved to {output_file}")
 
     return combined_df
 
 
-def process_bigram_data(data, output_folder):
+def process_bigram_data(data, output_tables_folder):
     """
     Process bigram data.
     
     Parameters:
     - data: DataFrame containing the raw experimental data
-    - output_folder: path to the folder where the processed data will be saved
+    - output_tables_folder: path to the folder where the processed data will be saved
     
     Returns:
     - bigram_data: DataFrame with processed bigram data
@@ -84,91 +92,113 @@ def process_bigram_data(data, output_folder):
     bigram_data = grouped_data.apply(process_bigram_group).reset_index()
     
     # Save the DataFrame to CSV
-    full_path = os.path.join(output_folder, "bigram_data.csv")    
-    bigram_data.to_csv(full_path, index=False)
-    print(f"Bigram data saved to: {full_path}")
+    output_file = os.path.join(output_tables_folder, 'bigram_data.csv')
+    bigram_data.to_csv(output_file, index=False)
+    print(f"Bigram data saved to: {output_file}")
 
     return bigram_data
 
 
-def plot_median_typist_bigram_times(bigram_data, output_folder):
+def plot_median_bigram_times(bigram_data, output_plots_folder):
     """
     Generate and save improved plots for median bigram typing times.
     
-    1. Heatmap of Median Bigram Typing Times: 
-       This shows the median typing time for each bigram pair, 
-       allowing for easy comparison between different combinations.
-    2. Bar Plot of Median Bigram Times: 
-       This provides a clear ranking of bigrams by their median typing times.
-    3. Violin Plot of Chosen vs. Unchosen Bigram Times: 
-       This compares the distribution of typing times for chosen and unchosen bigrams, 
-       which can reveal preferences in bigram selection.
-    4. Scatter Plot of Bigram1 vs Bigram2 Times: 
-       This plot shows the relationship between the typing times of the two bigrams 
-       in each pair, with the chosen bigram highlighted.
-
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
-    - output_folder: String path to the folder where plots should be saved
+    - output_plots_folder: String path to the folder where plots should be saved
     """
-    # Ensure the output folder exists
-    os.makedirs(output_folder, exist_ok=True)
+    # Prepare data
+    plot_data = bigram_data.melt(id_vars=['user_id', 'trialId', 'bigramPair', 'chosen_bigram', 'unchosen_bigram'],
+                                 value_vars=['chosen_bigram_time', 'unchosen_bigram_time'],
+                                 var_name='bigram_type', value_name='time')
     
-    # 1. Prepare data for plotting
-    plot_data = bigram_data.melt(id_vars=['user_id', 'trialId', 'bigramPair', 'chosen_bigram'],
-                                 value_vars=['bigram1_time', 'bigram2_time'],
-                                 var_name='bigram_position', value_name='time')
-    plot_data['bigram'] = np.where(plot_data['bigram_position'] == 'bigram1_time', 
-                                   plot_data['bigramPair'].str.split(', ').str[0],
-                                   plot_data['bigramPair'].str.split(', ').str[1])
-    plot_data['is_chosen'] = plot_data['bigram'] == plot_data['chosen_bigram']
+    plot_data['bigram'] = np.where(plot_data['bigram_type'] == 'chosen_bigram_time',
+                                   plot_data['chosen_bigram'],
+                                   plot_data['unchosen_bigram'])
 
-    # Calculate median times for each bigram
+    # Calculate median times and MAD for each bigram
     median_times = plot_data.groupby('bigram')['time'].median().sort_values()
+    mad_times = plot_data.groupby('bigram')['time'].apply(lambda x: median_abs_deviation(x, nan_policy='omit')).reindex(median_times.index)
 
-    # 2. Create a heatmap of median bigram times
-    plt.figure(figsize=(12, 10))
-    heatmap_data = plot_data.pivot_table(values='time', index='bigram', columns='bigram', aggfunc='median')
-    sns.heatmap(heatmap_data, cmap='YlOrRd', annot=True, fmt='.0f', cbar_kws={'label': 'Median Time (ms)'})
-    plt.title('Heatmap of Median Bigram Typing Times')
+    # Create a bar plot of median bigram times with MAD whiskers
+    fig, ax = plt.subplots(figsize=(20, 10))
+    
+    # Create x-coordinates for the bars
+    x = np.arange(len(median_times))
+    
+    # Plot bars
+    bars = ax.bar(x, median_times.values, yerr=mad_times.values, capsize=5)
+
+    # Customize the plot
+    ax.set_title('Median Typing Times for Each Bigram (with MAD)', fontsize=16)
+    ax.set_xlabel('Bigram', fontsize=12)
+    ax.set_ylabel('Median Time (ms)', fontsize=12)
+
+    # Set x-ticks and labels
+    ax.set_xticks(x)
+    ax.set_xticklabels(median_times.index, rotation=90, ha='center', fontsize=10)
+
+    # Adjust the x-axis to center labels under bars
+    ax.set_xlim(-0.5, len(x) - 0.5)
+
+    # Adjust layout to prevent cutting off labels
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, 'bigram_timing_heatmap.png'))
+
+    # Add value labels on top of each bar
+    """
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2., height,
+                 f'{height:.0f}',
+                 ha='center', va='bottom')
+    """
+
+    plt.savefig(os.path.join(output_plots_folder, 'bigram_median_times_barplot_with_mad.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
-    # 3. Create a bar plot of median bigram times
-    plt.figure(figsize=(15, 8))
-    sns.barplot(x=median_times.index, y=median_times.values, palette='viridis')
-    plt.title('Median Typing Times for Each Bigram')
-    plt.xlabel('Bigram')
-    plt.ylabel('Median Time (ms)')
-    plt.xticks(rotation=45, ha='right')
+    print(f"Plots saved in {output_plots_folder}")
+
+
+def plot_bigram_pair_boxplots(bigram_data, output_plots_folder):
+    """
+    Create a single, wide box-and-whisker plot for all bigram pairs.
+    
+    Parameters:
+    - bigram_data: DataFrame containing processed bigram data
+    - output_plots_folder: String path to the folder where plots should be saved
+    """
+    os.makedirs(output_plots_folder, exist_ok=True)
+
+    # Prepare data
+    plot_data = pd.melt(bigram_data, 
+                        id_vars=['user_id', 'trialId', 'bigramPair', 'chosen_bigram', 'unchosen_bigram'],
+                        value_vars=['chosen_bigram_time', 'unchosen_bigram_time'],
+                        var_name='bigram_type', value_name='time')
+
+    # Create the bigram column
+    plot_data['bigram'] = np.where(plot_data['bigram_type'] == 'chosen_bigram_time',
+                                   plot_data['chosen_bigram'],
+                                   plot_data['unchosen_bigram'])
+
+    # Sort bigram pairs by median time
+    pair_order = plot_data.groupby('bigramPair')['time'].median().sort_values().index
+
+    # Create the plot
+    plt.figure(figsize=(20, 10))
+    sns.boxplot(x='bigramPair', y='time', hue='bigram', data=plot_data, 
+                order=pair_order, width=0.8, fliersize=1)
+
+    plt.title('Distribution of Typing Times by Bigram Pair', fontsize=16)
+    plt.xlabel('Bigram Pair', fontsize=12)
+    plt.ylabel('Typing Time (ms)', fontsize=12)
+    plt.xticks(rotation=90)
+    plt.legend(title='Bigram', bbox_to_anchor=(1.05, 1), loc='upper left')
+
     plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, 'bigram_median_times_barplot.png'))
+    plt.savefig(os.path.join(output_plots_folder, 'bigram_pair_boxplots.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
-    # 4. Create a violin plot comparing chosen vs. unchosen bigram times
-    plt.figure(figsize=(12, 6))
-    sns.violinplot(x='is_chosen', y='time', data=plot_data, palette='Set3')
-    plt.title('Distribution of Typing Times: Chosen vs. Unchosen Bigrams')
-    plt.xlabel('Chosen Bigram')
-    plt.ylabel('Time (ms)')
-    plt.xticks([0, 1], ['Unchosen', 'Chosen'])
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, 'chosen_vs_unchosen_times_violin.png'))
-    plt.close()
-
-    # 5. Create a scatter plot of bigram1 vs bigram2 times
-    plt.figure(figsize=(10, 10))
-    sns.scatterplot(data=bigram_data, x='bigram1_time', y='bigram2_time', hue='chosen_bigram', style='chosen_bigram')
-    plt.title('Bigram1 Time vs Bigram2 Time')
-    plt.xlabel('Bigram1 Time (ms)')
-    plt.ylabel('Bigram2 Time (ms)')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_folder, 'bigram1_vs_bigram2_scatter.png'))
-    plt.close()
-
-    print(f"Plots saved in {output_folder}")
-
+    print(f"Bigram pair box plot saved in {output_plots_folder}")
 
 
 
@@ -264,13 +294,16 @@ if __name__ == "__main__":
         # LOAD_AND_PREPROCESS_DATA
         ##########################
         # Set the paths for input data and output
-        folder_path = '/Users/arno.klein/Downloads/osf'  # Update this path to your data folder
-        output_folder = os.path.join(os.path.dirname(folder_path), 'output')
-        os.makedirs(output_folder, exist_ok=True)
+        input_folder = '/Users/arno.klein/Downloads/osf'  # Update this path to your data folder
+        output_folder = os.path.join(os.path.dirname(input_folder), 'output')
+        output_tables_folder = os.path.join(output_folder, 'tables')
+        output_plots_folder = os.path.join(output_folder, 'plots')
+        os.makedirs(output_tables_folder, exist_ok=True)
+        os.makedirs(output_plots_folder, exist_ok=True)
 
         # Load, combine, and save the data
-        print(f"Loading data from {folder_path}")
-        data = load_and_preprocess_data(folder_path)
+        print(f"Loading data from {input_folder}")
+        data = load_and_preprocess_data(input_folder, output_tables_folder)
         print(f"Loaded data shape: {data.shape}")
         data.info()
         print(data[['trialId', 'bigramPair', 'bigram', 'typedKey', 'keydownTime', 
@@ -280,7 +313,7 @@ if __name__ == "__main__":
         # PROCESS_BIGRAM_DATA
         ##########################
         # Process the bigram data
-        bigram_data = process_bigram_data(data)
+        bigram_data = process_bigram_data(data, output_tables_folder)
 
         # Display the results
         bigram_data.info()
@@ -307,8 +340,8 @@ if __name__ == "__main__":
         ##########################
         # PLOTS
         ##########################
-        plot_median_typist_bigram_times(bigram_data, output_folder)
-
+        plot_median_bigram_times(bigram_data, output_plots_folder)
+        plot_bigram_pair_boxplots(bigram_data, output_plots_folder)
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
