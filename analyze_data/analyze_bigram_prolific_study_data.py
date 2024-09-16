@@ -8,6 +8,26 @@ from scipy import stats
 from scipy.stats import median_abs_deviation
 
 
+
+def display_information(dframe, dframe_name, print_headers, nlines=6):
+    """
+    Display information about a DataFrame.
+
+    Parameters:
+    - dframe: DataFrame to display information about
+    - dframe_name: name of the DataFrame
+    - print_headers: list of headers to print
+    - nlines: number of lines to print
+    """
+    print('')
+    print("Information about {0}:".format(dframe_name))
+    dframe.info()
+    print('')
+    print("Sample output:")
+    print(dframe[print_headers].head(nlines))
+    print('')
+
+
 def load_and_preprocess_data(input_folder, output_tables_folder):
     """
     Load and preprocess (combine) data from multiple CSV files in a folder.
@@ -19,7 +39,7 @@ def load_and_preprocess_data(input_folder, output_tables_folder):
     Returns:
     - combined_df: DataFrame with combined data
     """
-    print("Loading and preprocessing data...")
+    print(f"Loading data from {input_folder}...")
     dataframes = []
     for filename in os.listdir(input_folder):
         if filename.endswith('.csv'):
@@ -33,9 +53,16 @@ def load_and_preprocess_data(input_folder, output_tables_folder):
             
             dataframes.append(df)
     
+    # Combine the dataframes
     combined_df = pd.concat(dataframes, ignore_index=True)
     print(f"Loaded and combined data from {len(dataframes)} files")
-    
+
+    # Display information about the combined DataFrame
+    print_headers = ['trialId', 'bigramPair', 'bigram', 'typedKey', 
+                     'keydownTime', 'chosenBigram', 'unchosenBigram']
+    display_information(combined_df, "original data", print_headers, nlines=6)
+
+    # Save the combined DataFrame to a CSV file
     output_file = os.path.join(output_tables_folder, 'original_combined_data.csv')
     combined_df.to_csv(output_file, index=False)
     print(f"\nCombined data saved to {output_file}")
@@ -45,20 +72,28 @@ def load_and_preprocess_data(input_folder, output_tables_folder):
 
 def process_bigram_data(data, output_tables_folder):
     """
-    Process bigram data.
+    Process bigram data and identify inconsistent choices.
     
     Parameters:
     - data: DataFrame containing the raw experimental data
     - output_tables_folder: path to the folder where the processed data will be saved
     
     Returns:
-    - bigram_data: DataFrame with processed bigram data
+    - bigram_data: DataFrame with processed bigram data including inconsistency information
     """
-    # Sort the data by user_id, trialId, bigramPair, and keydownTime
-    sorted_data = data.sort_values(['user_id', 'trialId', 'bigramPair', 'keydownTime'])
+    # Define a function to normalize bigram pairs
+    def normalize_bigram_pair(bigram_pair):
+        """Normalize bigram pairs by sorting them alphabetically."""
+        return ', '.join(sorted(bigram_pair.split(', ')))
+
+    # Normalize the bigramPair to handle reverse pairs
+    data['normalized_bigramPair'] = data['bigramPair'].apply(normalize_bigram_pair)
+
+    # Sort the data by user_id, trialId, normalized_bigramPair, and keydownTime
+    sorted_data = data.sort_values(['user_id', 'trialId', 'normalized_bigramPair', 'keydownTime'])
     
-    # Group the sorted data by user_id, trialId, and bigramPair
-    grouped_data = sorted_data.groupby(['user_id', 'trialId', 'bigramPair'])
+    # Group the sorted data by user_id and normalized_bigramPair
+    grouped_data = sorted_data.groupby(['user_id', 'normalized_bigramPair'])
 
     def process_bigram_group(group):
         bigram_pair = group['bigramPair'].iloc[0].split(', ')
@@ -78,6 +113,14 @@ def process_bigram_data(data, output_tables_folder):
         # Calculate the fastest time for each bigram
         fastest_times = {bigram: min(times) if times else np.nan for bigram, times in timings.items()}
         
+        # Inconsistency check: Compare the choices for different orderings of the same pair
+        inconsistent = False
+        reverse_pair = ', '.join(reversed(bigram_pair))
+        if len(group) > 1:  # Check for multiple entries for this bigram pair
+            reverse_chosen = group['chosenBigram'].iloc[1]  # Assuming the reverse ordering is the next one
+            if reverse_chosen != chosen_bigram:
+                inconsistent = True
+        
         return pd.Series({
             'bigram1': bigram_pair[0],
             'bigram2': bigram_pair[1],
@@ -86,11 +129,18 @@ def process_bigram_data(data, output_tables_folder):
             'bigram1_time': fastest_times[bigram_pair[0]],
             'bigram2_time': fastest_times[bigram_pair[1]],
             'chosen_bigram_time': fastest_times[chosen_bigram],
-            'unchosen_bigram_time': fastest_times[unchosen_bigram]
+            'unchosen_bigram_time': fastest_times[unchosen_bigram],
+            'inconsistent': inconsistent
         })
 
     bigram_data = grouped_data.apply(process_bigram_group).reset_index()
-    
+
+    # Display information about the combined DataFrame
+    print_headers = ['bigram1', 'bigram2', 
+                     'chosen_bigram', 'unchosen_bigram', 
+                     'chosen_bigram_time', 'unchosen_bigram_time', 'inconsistent']
+    display_information(bigram_data, "bigram data", print_headers, nlines=6)
+  
     # Save the DataFrame to CSV
     output_file = os.path.join(output_tables_folder, 'bigram_data.csv')
     bigram_data.to_csv(output_file, index=False)
@@ -99,9 +149,136 @@ def process_bigram_data(data, output_tables_folder):
     return bigram_data
 
 
+#def process_bigram_data(data, output_tables_folder):
+    """
+    Process bigram data and identify inconsistent choices.
+    
+    Parameters:
+    - data: DataFrame containing the raw experimental data
+    - output_tables_folder: path to the folder where the processed data will be saved
+    
+    Returns:
+    - bigram_data: DataFrame with processed bigram data including inconsistency information
+    """
+    # Sort the data by user_id, trialId, bigramPair, and keydownTime
+    sorted_data = data.sort_values(['user_id', 'trialId', 'bigramPair', 'keydownTime'])
+    
+    # Group the sorted data by user_id, bigramPair
+    grouped_data = sorted_data.groupby(['user_id', 'bigramPair'])
+
+    def process_bigram_group(group):
+        bigram_pair = group['bigramPair'].iloc[0].split(', ')
+        chosen_bigram = group['chosenBigram'].iloc[0]
+        unchosen_bigram = group['unchosenBigram'].iloc[0]
+        
+        # Calculate timings for both bigrams
+        timings = {bigram: [] for bigram in bigram_pair}
+        for i in range(0, len(group) - 1, 2):
+            bigram = group['bigram'].iloc[i]
+            if bigram in bigram_pair:
+                start_time = group['keydownTime'].iloc[i]
+                end_time = group['keydownTime'].iloc[i + 1]
+                timing = end_time - start_time
+                timings[bigram].append(timing)
+        
+        # Calculate the fastest time for each bigram
+        fastest_times = {bigram: min(times) if times else np.nan for bigram, times in timings.items()}
+        
+        # Inconsistency check: Reverse the pair and check the chosen bigram
+        inconsistent = False
+        reverse_pair = ', '.join(reversed(bigram_pair))
+        if reverse_pair in group['bigramPair'].values:
+            reverse_chosen = group[group['bigramPair'] == reverse_pair]['chosenBigram'].iloc[0]
+            if reverse_chosen != chosen_bigram:
+                inconsistent = True
+        
+        return pd.Series({
+            'bigram1': bigram_pair[0],
+            'bigram2': bigram_pair[1],
+            'chosen_bigram': chosen_bigram,
+            'unchosen_bigram': unchosen_bigram,
+            'bigram1_time': fastest_times[bigram_pair[0]],
+            'bigram2_time': fastest_times[bigram_pair[1]],
+            'chosen_bigram_time': fastest_times[chosen_bigram],
+            'unchosen_bigram_time': fastest_times[unchosen_bigram],
+            'inconsistent': inconsistent
+        })
+
+    # Apply the function to each group and combine the results
+    bigram_data = grouped_data.apply(process_bigram_group).reset_index()
+
+    # Display information about the combined DataFrame
+    print_headers = ['bigramPair', 'bigram1', 'bigram2', 'chosen_bigram', 'unchosen_bigram', 
+                     'chosen_bigram_time', 'unchosen_bigram_time', 'inconsistent']
+    display_information(bigram_data, "bigram data", print_headers, nlines=6)
+  
+    # Save the DataFrame to CSV
+    output_file = os.path.join(output_tables_folder, 'bigram_data.csv')
+    bigram_data.to_csv(output_file, index=False)
+    print(f"Bigram data saved to: {output_file}")
+
+    return bigram_data
+
+
+def analyze_inconsistencies(bigram_data):
+    """
+    Analyze and report inconsistencies in bigram data.
+
+    Parameters: 
+    - bigram_data: DataFrame containing the processed bigram data
+    - output_tables_folder: path to the folder where the analysis results will be saved
+
+    Returns:
+    - None 
+    """
+    total_users = bigram_data['user_id'].nunique()
+    total_pairs = bigram_data['bigram1'].nunique()
+
+    print("\nValue counts of 'inconsistent':")
+    print(bigram_data['inconsistent'].value_counts())
+
+    # Users with inconsistencies
+    users_with_inconsistencies = bigram_data[bigram_data['inconsistent'] == 'True']['user_id'].nunique()
+
+    # Total inconsistent pairs
+    total_inconsistent_pairs = bigram_data[bigram_data['inconsistent'] == 'True'].nunique()
+
+    """
+    # Inconsistent pairs per user
+    inconsistent_pairs_per_user = bigram_data[bigram_data['inconsistent'] != 'True'].groupby('user_id')['inconsistent'].first().apply(lambda x: len(x.split(',')))
+
+    # Most common inconsistent pairs
+    inconsistent_pair_counts = bigram_data[bigram_data['inconsistent'] != 'True']['inconsistent']['bigramPair'].value_counts()
+
+    print("\nInconsistency Statistics:")
+    print(f"Total users: {total_users}")
+    print(f"Total bigram pairs: {total_pairs}")
+    print(f"Users with inconsistencies: {users_with_inconsistencies} ({users_with_inconsistencies/total_users:.2%})")
+    print(f"Total inconsistent pairs: {total_inconsistent_pairs} ({total_inconsistent_pairs/total_pairs:.2%})")
+    if inconsistent_pairs_per_user.empty:
+        print("\nNo inconsistent pairs found.")
+    else:
+        print(f"\nInconsistent pairs per user:")
+        print(f"  Mean: {inconsistent_pairs_per_user.mean():.2f}")
+        print(f"  Median: {inconsistent_pairs_per_user.median():.2f}")
+        print(f"  Max: {inconsistent_pairs_per_user.max()}")
+    print(f"\nTop 5 most common inconsistent pairs:")
+    print(inconsistent_pair_counts.head().to_string())
+
+    # Return the statistics for further use if needed
+    return {
+        'total_users': total_users,
+        'total_pairs': total_pairs,
+        'users_with_inconsistencies': users_with_inconsistencies,
+        'total_inconsistent_pairs': total_inconsistent_pairs,
+        'inconsistent_pairs_per_user': inconsistent_pairs_per_user,
+        'inconsistent_pair_counts': inconsistent_pair_counts
+    }
+    """
+
 def plot_median_bigram_times(bigram_data, output_plots_folder):
     """
-    Generate and save improved plots for median bigram typing times.
+    Generate and save bar plot for median bigram typing times.
     
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
@@ -156,50 +333,148 @@ def plot_median_bigram_times(bigram_data, output_plots_folder):
     plt.savefig(os.path.join(output_plots_folder, 'bigram_median_times_barplot_with_mad.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
-    print(f"Plots saved in {output_plots_folder}")
+    print(f"plot_median_bigram_times plot saved in {output_plots_folder}")
+
+
+def plot_paired_bar(bigram_data, output_plots_folder):
+    # Prepare data
+    plot_data = bigram_data.groupby('bigramPair').agg({
+        'chosen_bigram_time': 'median',
+        'unchosen_bigram_time': 'median'
+    }).reset_index()
+
+    plot_data = plot_data.melt(id_vars=['bigramPair'], 
+                               value_vars=['chosen_bigram_time', 'unchosen_bigram_time'],
+                               var_name='Type', value_name='Time')
+
+    # Sort by chosen bigram time
+    order = plot_data[plot_data['Type'] == 'chosen_bigram_time'].sort_values('Time')['bigramPair']
+
+    # Create plot
+    plt.figure(figsize=(15, len(order) * 0.4))
+    sns.barplot(x='Time', y='bigramPair', hue='Type', data=plot_data, order=order)
+    
+    plt.title('Median Typing Times: Chosen vs Unchosen Bigrams')
+    plt.xlabel('Median Typing Time (ms)')
+    plt.ylabel('Bigram Pair')
+    plt.legend(title='', labels=['Chosen', 'Unchosen'])
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'paired_bar_plot.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_scatter(bigram_data, output_plots_folder):
+    # Prepare data
+    plot_data = bigram_data.groupby('bigramPair').agg({
+        'chosen_bigram_time': 'median',
+        'unchosen_bigram_time': 'median'
+    }).reset_index()
+
+    # Create plot
+    plt.figure(figsize=(10, 10))
+    sns.scatterplot(data=plot_data, x='chosen_bigram_time', y='unchosen_bigram_time')
+    
+    # Add diagonal line
+    max_val = max(plot_data['chosen_bigram_time'].max(), plot_data['unchosen_bigram_time'].max())
+    plt.plot([0, max_val], [0, max_val], 'r--')
+    
+    plt.title('Chosen vs Unchosen Bigram Typing Times')
+    plt.xlabel('Chosen Bigram Median Time (ms)')
+    plt.ylabel('Unchosen Bigram Median Time (ms)')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'scatter_plot.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+def plot_heatmap(bigram_data, output_plots_folder):
+    # Prepare data
+    plot_data = bigram_data.groupby('bigramPair').agg({
+        'chosen_bigram_time': 'median',
+        'unchosen_bigram_time': 'median'
+    }).reset_index()
+    
+    plot_data['time_difference'] = plot_data['unchosen_bigram_time'] - plot_data['chosen_bigram_time']
+    
+    # Create plot
+    plt.figure(figsize=(12, len(plot_data) * 0.4))
+    sns.heatmap(plot_data[['time_difference']].T, annot=True, fmt='.0f', cmap='RdYlGn_r',
+                xticklabels=plot_data['bigramPair'], yticklabels=False, cbar_kws={'label': 'Time Difference (ms)'})
+    
+    plt.title('Difference in Typing Times (Unchosen - Chosen)')
+    plt.xlabel('Bigram Pair')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'heatmap_plot.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+
+
+
+
 
 
 def plot_bigram_pair_boxplots(bigram_data, output_plots_folder):
     """
-    Create a single, wide box-and-whisker plot for all bigram pairs.
+    Create two vertical panels with pairs of horizontal bar-and-whisker plots for bigram pairs.
     
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
     - output_plots_folder: String path to the folder where plots should be saved
     """
-    os.makedirs(output_plots_folder, exist_ok=True)
-
     # Prepare data
-    plot_data = pd.melt(bigram_data, 
-                        id_vars=['user_id', 'trialId', 'bigramPair', 'chosen_bigram', 'unchosen_bigram'],
-                        value_vars=['chosen_bigram_time', 'unchosen_bigram_time'],
-                        var_name='bigram_type', value_name='time')
+    plot_data = bigram_data.copy()
+    plot_data['chosen_bigram_time'] = pd.to_numeric(plot_data['chosen_bigram_time'], errors='coerce')
+    plot_data['unchosen_bigram_time'] = pd.to_numeric(plot_data['unchosen_bigram_time'], errors='coerce')
 
-    # Create the bigram column
-    plot_data['bigram'] = np.where(plot_data['bigram_type'] == 'chosen_bigram_time',
-                                   plot_data['chosen_bigram'],
-                                   plot_data['unchosen_bigram'])
+    # Sort bigram pairs by median time of chosen bigrams
+    pair_order = plot_data.groupby('bigramPair')['chosen_bigram_time'].median().sort_values().index
 
-    # Sort bigram pairs by median time
-    pair_order = plot_data.groupby('bigramPair')['time'].median().sort_values().index
+    # Set up the plot
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, len(pair_order) * 0.5), sharey=True)
+    fig.suptitle('Distribution of Typing Times by Bigram Pair', fontsize=16)
 
-    # Create the plot
-    plt.figure(figsize=(20, 10))
-    sns.boxplot(x='bigramPair', y='time', hue='bigram', data=plot_data, 
-                order=pair_order, width=0.8, fliersize=1)
+    # Set titles for the two panels
+    ax1.set_title("Easier", fontsize=14)
+    ax2.set_title("Harder", fontsize=14)
 
-    plt.title('Distribution of Typing Times by Bigram Pair', fontsize=16)
-    plt.xlabel('Bigram Pair', fontsize=12)
-    plt.ylabel('Typing Time (ms)', fontsize=12)
-    plt.xticks(rotation=90)
-    plt.legend(title='Bigram', bbox_to_anchor=(1.05, 1), loc='upper left')
+    # Prepare data for plotting
+    easier_data = []
+    harder_data = []
+    labels = []
+
+    for bigram_pair in pair_order:
+        pair_data = plot_data[plot_data['bigramPair'] == bigram_pair]
+        bigram1, bigram2 = bigram_pair.split(', ')
+        
+        easier_data.append(pair_data[pair_data['chosen_bigram'] == bigram1]['chosen_bigram_time'].clip(upper=600))
+        easier_data.append(pair_data[pair_data['chosen_bigram'] == bigram2]['chosen_bigram_time'].clip(upper=600))
+        
+        harder_data.append(pair_data[pair_data['unchosen_bigram'] == bigram1]['unchosen_bigram_time'].clip(upper=600))
+        harder_data.append(pair_data[pair_data['unchosen_bigram'] == bigram2]['unchosen_bigram_time'].clip(upper=600))
+        
+        labels.extend([bigram1, bigram2])
+
+    # Plot the data
+    parts1 = ax1.boxplot(easier_data, vert=False, labels=labels, widths=0.6, showfliers=False)
+    parts2 = ax2.boxplot(harder_data, vert=False, labels=labels, widths=0.6, showfliers=False)
+
+    # Customize the plot
+    for ax in [ax1, ax2]:
+        ax.set_xlim(0, 600)
+        ax.set_xlabel('Typing Time (ms)', fontsize=12)
+        ax.tick_params(axis='y', which='major', labelsize=8)
+
+    # Remove y-axis labels from the right panel
+    ax2.set_yticklabels([])
 
     plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, 'bigram_pair_boxplots.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_plots_folder, 'bigram_pair_horizontal_boxplots.png'), dpi=300, bbox_inches='tight')
     plt.close()
 
-    print(f"Bigram pair box plot saved in {output_plots_folder}")
-
+    print(f"Bigram pair horizontal box plot saved in {output_plots_folder}")
 
 
 def plot_bigram_comparison(chosen_data, unchosen_data, bigram_pairs):
@@ -302,19 +577,18 @@ if __name__ == "__main__":
         os.makedirs(output_plots_folder, exist_ok=True)
 
         # Load, combine, and save the data
-        print(f"Loading data from {input_folder}")
         data = load_and_preprocess_data(input_folder, output_tables_folder)
-        print(f"Loaded data shape: {data.shape}")
-        data.info()
-        print(data[['trialId', 'bigramPair', 'bigram', 'typedKey', 'keydownTime', 
-                    'chosenBigram', 'unchosenBigram']].head(6))
 
         ##########################
         # PROCESS_BIGRAM_DATA
         ##########################
         # Process the bigram data
         bigram_data = process_bigram_data(data, output_tables_folder)
+        
+        # Analyze the inconsistencies
+        analyze_inconsistencies(bigram_data)
 
+        """
         # Display the results
         bigram_data.info()
         print(bigram_data[['trialId', 'bigramPair', 
@@ -337,11 +611,19 @@ if __name__ == "__main__":
         bigram_data['faster_is_chosen'] = bigram_data['faster_bigram'] == bigram_data['chosen_bigram']
         print(f"Percentage of times the faster bigram was chosen: {bigram_data['faster_is_chosen'].mean()*100:.2f}%")
 
+        """
+
         ##########################
         # PLOTS
         ##########################
+        """
         plot_median_bigram_times(bigram_data, output_plots_folder)
-        plot_bigram_pair_boxplots(bigram_data, output_plots_folder)
+        plot_paired_bar(bigram_data, output_plots_folder)
+        plot_scatter(bigram_data, output_plots_folder)
+        plot_heatmap(bigram_data, output_plots_folder)
+        """
+
+        #plot_bigram_pair_boxplots(bigram_data, output_plots_folder)
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
