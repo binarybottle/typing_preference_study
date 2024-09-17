@@ -88,6 +88,26 @@ def process_bigram_data(data, output_tables_folder):
     Returns:
     - bigram_data: DataFrame with processed bigram data
     """
+
+    def normalize_bigram_pair(bigram_pair):
+        """
+        Normalize a bigram pair by alphabetically ordering the two bigrams.
+        
+        Parameters:
+        - bigram_pair: A string representing the bigram pair (e.g., 'de, ef').
+        
+        Returns:
+        - normalized_pair: A string representing the alphabetically ordered bigram pair.
+        """
+        # Split the bigram pair by the comma and space to get individual bigrams
+        bigrams = bigram_pair.split(', ')
+        
+        # Sort the bigrams alphabetically and rejoin them into a normalized pair
+        sorted_bigram_pair = ', '.join(sorted(bigrams))
+        
+        return sorted_bigram_pair
+    
+
     def get_fastest_interkey_times(group):
         """Compute the shortest inter-key time for each bigram in the pair."""
         group = group.sort_values('keydownTime')
@@ -96,7 +116,7 @@ def process_bigram_data(data, output_tables_folder):
         min_times = {}
         best_rows = {}
 
-        # Iterate through the rows in pairs
+        # Iterate through the rows for the bigram pair of group1
         for i in range(0, len(group) - 1, 2):
             if group['keyPosition'].iloc[i] == 1 and group['keyPosition'].iloc[i + 1] == 2:
                 start_time = group['keydownTime'].iloc[i]
@@ -114,7 +134,6 @@ def process_bigram_data(data, output_tables_folder):
                     min_times[current_bigram] = interkey_time
                     best_rows[current_bigram] = group.iloc[[i, i + 1]].copy()
                     best_rows[current_bigram]['min_interkey_time'] = interkey_time
-
         #print("")
         #print(group)
         #print(best_rows.keys())
@@ -123,16 +142,10 @@ def process_bigram_data(data, output_tables_folder):
         # Combine the best rows for each bigram
         if len(best_rows) == 2:
             bigram1, bigram2 = best_rows.keys()
-
-            # Ensure the bigrams belong to the same bigramPair
-            bigram_pair = best_rows[bigram1]['bigramPair'].iloc[0]
-            if bigram_pair != best_rows[bigram2]['bigramPair'].iloc[0]:
-                print(f"Mismatched bigramPair for bigram1: {bigram1}, bigram2: {bigram2}")
-                return pd.DataFrame()
-
+            bigram_pair = best_rows[bigram1]['bigramPair']
             chosen_bigram = best_rows[bigram1]['chosenBigram'].iloc[0]
             unchosen_bigram = best_rows[bigram1]['unchosenBigram'].iloc[0]
-
+            
             # Determine chosen and unchosen bigram times
             if chosen_bigram == bigram1:
                 chosen_bigram_time = min_times[bigram1]
@@ -141,8 +154,15 @@ def process_bigram_data(data, output_tables_folder):
                 chosen_bigram_time = min_times[bigram2]
                 unchosen_bigram_time = min_times[bigram1]
 
+            # Is the chosen bigram consistent across both sequences of the bigram pair?
+            if group['chosenBigram'].nunique() == 1:
+                is_consistent = True
+            else:
+                is_consistent = False
+
             result = pd.DataFrame({
-                'bigram_pair': tuple(bigram_pair.split(', ')),
+                'sorted_bigram_pair': best_rows[bigram1]['sorted_bigram_pair'],
+                'bigram_pair': bigram_pair,
                 'bigram1': bigram1,
                 'bigram2': bigram2,
                 'bigram1_time': min_times[bigram1],
@@ -155,8 +175,7 @@ def process_bigram_data(data, output_tables_folder):
                 'keydownTime_bigram1_second': best_rows[bigram1]['keydownTime'].iloc[1],
                 'keydownTime_bigram2_first': best_rows[bigram2]['keydownTime'].iloc[0],
                 'keydownTime_bigram2_second': best_rows[bigram2]['keydownTime'].iloc[1],
-                'inconsistent': group['chosenBigram'].nunique() > 1
-
+                'is_consistent': is_consistent
             })
             
             # Copy over important metadata that's the same for both bigrams in the pair
@@ -167,19 +186,22 @@ def process_bigram_data(data, output_tables_folder):
         else:
             print(f"Unexpected number of bigrams ({len(best_rows)}) for bigramPair: {group['bigramPair'].iloc[0]}")
             return pd.DataFrame()  # Return an empty DataFrame if we don't have exactly 2 bigrams
-   
-    # Iterate through each unique combination of user_id, trialId, and bigramPair
-    unique_combinations = data[['user_id', 'bigramPair']].drop_duplicates()
+
+    # Sort the bigram pairs
+    data['sorted_bigram_pair'] = data['bigramPair'].apply(normalize_bigram_pair)
+
+    # Iterate through each unique combination of user_id and sorted_bigram_pair
+    unique_combinations = data[['user_id', 'sorted_bigram_pair']].drop_duplicates()
     result_list = []
     for _, row in unique_combinations.iterrows():
         user_id = row['user_id']
-        bigram_pair = row['bigramPair']
+        sorted_bigram_pair = row['sorted_bigram_pair']
 
-        # Filter data for the specific user_id, trialId, and bigramPair
+        # Filter data for the specific user_id and bigramPair
         group = data[(data['user_id'] == user_id) & 
-                     (data['bigramPair'] == bigram_pair)]
+                     (data['sorted_bigram_pair'] == sorted_bigram_pair)]
 
-        # Apply the processing function for each group
+        # Apply the filtering function to each group
         filtered_group = get_fastest_interkey_times(group)
 
         # Append the result to the result list
@@ -189,9 +211,9 @@ def process_bigram_data(data, output_tables_folder):
     bigram_data = pd.concat(result_list).reset_index(drop=True)
 
     # Display information about the bigram DataFrame
-    print_headers = ['user_id', 'bigram_pair', 
+    print_headers = ['sorted_bigram_pair','bigram_pair', 
                      'chosen_bigram', 'unchosen_bigram', 
-                     'chosen_bigram_time', 'unchosen_bigram_time', 'inconsistent']
+                     'chosen_bigram_time', 'unchosen_bigram_time', 'is_consistent']
     display_information(bigram_data, "bigram data", print_headers, nlines=12)
 
     # Save and return the bigram data
@@ -207,20 +229,20 @@ def analyze_inconsistencies(bigram_data):
     total_users = bigram_data['user_id'].nunique()
     total_pairs = bigram_data['bigram_pair'].nunique()
 
-    print("\nValue counts of 'inconsistent':")
-    print(bigram_data['inconsistent'].value_counts())
+    print("\nValue counts of 'is_consistent':")
+    print(bigram_data['is_consistent'].value_counts())
 
     # Users with inconsistencies
-    users_with_inconsistencies = bigram_data[bigram_data['inconsistent'] == True]['user_id'].nunique()
+    users_with_inconsistencies = bigram_data[bigram_data['is_consistent'] == False]['user_id'].nunique()
 
     # Total inconsistent pairs
-    total_inconsistent_pairs = bigram_data[bigram_data['inconsistent'] == True]['bigram_pair'].nunique()
+    total_inconsistent_pairs = bigram_data[bigram_data['is_consistent'] == False]['bigram_pair'].nunique()
 
     # Inconsistent pairs per user
-    inconsistent_pairs_per_user = bigram_data[bigram_data['inconsistent'] == True].groupby('user_id')['inconsistent'].count()
+    inconsistent_pairs_per_user = bigram_data[bigram_data['is_consistent'] == False].groupby('user_id')['is_consistent'].count()
 
     # Most common inconsistent pairs
-    inconsistent_pair_counts = bigram_data[bigram_data['inconsistent'] == True]['bigram_pair'].value_counts()
+    inconsistent_pair_counts = bigram_data[bigram_data['is_consistent'] == False]['bigram_pair'].value_counts()
 
     print("\nInconsistency Statistics:")
     print(f"Total users: {total_users}")
