@@ -89,7 +89,7 @@ def process_bigram_data(data, output_tables_folder):
     - bigram_data: DataFrame with processed bigram data
     """
 
-    def normalize_bigram_pair(bigram_pair):
+    def sort_bigram_pair(bigram_pair):
         """
         Normalize a bigram pair by alphabetically ordering the two bigrams.
         
@@ -110,6 +110,7 @@ def process_bigram_data(data, output_tables_folder):
 
     def get_fastest_interkey_times(group):
         """Compute the shortest inter-key time for each bigram in the pair."""
+        
         group = group.sort_values('keydownTime')
 
         # Initialize dicts to track minimum inter-key times for each bigram
@@ -136,13 +137,14 @@ def process_bigram_data(data, output_tables_folder):
                     best_rows[current_bigram]['min_interkey_time'] = interkey_time
         #print("")
         #print(group)
+        #print(group['chosenBigram'].nunique())
         #print(best_rows.keys())
         #print(best_rows)
 
         # Combine the best rows for each bigram
         if len(best_rows) == 2:
             bigram1, bigram2 = best_rows.keys()
-            bigram_pair = best_rows[bigram1]['bigramPair']
+            bigram_pair = best_rows[bigram1]['bigramPair'].iloc[0]
             chosen_bigram = best_rows[bigram1]['chosenBigram'].iloc[0]
             unchosen_bigram = best_rows[bigram1]['unchosenBigram'].iloc[0]
             
@@ -159,6 +161,11 @@ def process_bigram_data(data, output_tables_folder):
                 is_consistent = True
             else:
                 is_consistent = False
+
+                # Check inconsistencies
+                #print_headers = ['bigramPair', 'chosenBigram']
+                #display_information(group, "group", print_headers, nlines=30)
+
 
             result = pd.DataFrame({
                 'sorted_bigram_pair': best_rows[bigram1]['sorted_bigram_pair'],
@@ -188,12 +195,13 @@ def process_bigram_data(data, output_tables_folder):
             return pd.DataFrame()  # Return an empty DataFrame if we don't have exactly 2 bigrams
 
     # Sort the bigram pairs
-    data['sorted_bigram_pair'] = data['bigramPair'].apply(normalize_bigram_pair)
+    data['sorted_bigram_pair'] = data['bigramPair'].apply(sort_bigram_pair)
 
     # Iterate through each unique combination of user_id and sorted_bigram_pair
     unique_combinations = data[['user_id', 'sorted_bigram_pair']].drop_duplicates()
     result_list = []
     for _, row in unique_combinations.iterrows():
+
         user_id = row['user_id']
         sorted_bigram_pair = row['sorted_bigram_pair']
 
@@ -210,6 +218,8 @@ def process_bigram_data(data, output_tables_folder):
     # Concatenate all the results into a single DataFrame
     bigram_data = pd.concat(result_list).reset_index(drop=True)
 
+    bigram_data = bigram_data.drop_duplicates()
+
     # Display information about the bigram DataFrame
     print_headers = ['sorted_bigram_pair','bigram_pair', 
                      'chosen_bigram', 'unchosen_bigram', 
@@ -222,7 +232,7 @@ def process_bigram_data(data, output_tables_folder):
     return bigram_data
 
 
-def analyze_inconsistencies(bigram_data):
+def analyze_inconsistencies(bigram_data, output_plots_folder):
     """
     Analyze and report inconsistencies in bigram data.
     """
@@ -256,8 +266,19 @@ def analyze_inconsistencies(bigram_data):
         print(f"  Mean: {inconsistent_pairs_per_user.mean():.2f}")
         print(f"  Median: {inconsistent_pairs_per_user.median():.2f}")
         print(f"  Max: {inconsistent_pairs_per_user.max()}")
-    print(f"\nTop 5 most common inconsistent pairs:")
-    print(inconsistent_pair_counts.head().to_string())
+    print(f"\nTop most common inconsistent pairs:")
+    print(inconsistent_pair_counts.head(10).to_string())
+
+    # Plot the histogram of inconsistent pair counts
+    plt.figure(figsize=(12,6))
+    plt.hist(inconsistent_pair_counts, bins=10, color='black', edgecolor='black')
+    plt.title('Histogram of inconsistent pair counts')
+    plt.xlabel('Number of participants')
+    plt.ylabel('Number of bigram pairs')
+    plt.grid(False)
+    plt.show()
+    plt.savefig(os.path.join(output_plots_folder, 'inconsistent_pair_counts.png'), dpi=300, bbox_inches='tight')
+    plt.close()
 
     # Return the statistics for further use if needed
     return {
@@ -268,8 +289,6 @@ def analyze_inconsistencies(bigram_data):
         'inconsistent_pairs_per_user': inconsistent_pairs_per_user,
         'inconsistent_pair_counts': inconsistent_pair_counts
     }
-
-
 
 
 def plot_median_bigram_times(bigram_data, output_plots_folder):
@@ -384,94 +403,6 @@ def plot_scatter(bigram_data, output_plots_folder):
     plt.close()
 
 
-def plot_heatmap(bigram_data, output_plots_folder):
-    # Prepare data
-    plot_data = bigram_data.groupby('bigram_pair').agg({
-        'chosen_bigram_time': 'median',
-        'unchosen_bigram_time': 'median'
-    }).reset_index()
-    
-    plot_data['time_difference'] = plot_data['unchosen_bigram_time'] - plot_data['chosen_bigram_time']
-    
-    # Create plot
-    plt.figure(figsize=(12, len(plot_data) * 0.4))
-    sns.heatmap(plot_data[['time_difference']].T, annot=True, fmt='.0f', cmap='RdYlGn_r',
-                xticklabels=plot_data['bigram_pair'], yticklabels=False, cbar_kws={'label': 'Time Difference (ms)'})
-    
-    plt.title('Difference in Typing Times (Unchosen - Chosen)')
-    plt.xlabel('Bigram Pair')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, 'heatmap_plot.png'), dpi=300, bbox_inches='tight')
-    plt.close()
-
-
-
-
-
-
-
-
-def plot_bigram_pair_boxplots(bigram_data, output_plots_folder):
-    """
-    Create two vertical panels with pairs of horizontal bar-and-whisker plots for bigram pairs.
-    
-    Parameters:
-    - bigram_data: DataFrame containing processed bigram data
-    - output_plots_folder: String path to the folder where plots should be saved
-    """
-    # Prepare data
-    plot_data = bigram_data.copy()
-    plot_data['chosen_bigram_time'] = pd.to_numeric(plot_data['chosen_bigram_time'], errors='coerce')
-    plot_data['unchosen_bigram_time'] = pd.to_numeric(plot_data['unchosen_bigram_time'], errors='coerce')
-
-    # Sort bigram pairs by median time of chosen bigrams
-    pair_order = plot_data.groupby('bigram_pair')['chosen_bigram_time'].median().sort_values().index
-
-    # Set up the plot
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, len(pair_order) * 0.5), sharey=True)
-    fig.suptitle('Distribution of Typing Times by Bigram Pair', fontsize=16)
-
-    # Set titles for the two panels
-    ax1.set_title("Easier", fontsize=14)
-    ax2.set_title("Harder", fontsize=14)
-
-    # Prepare data for plotting
-    easier_data = []
-    harder_data = []
-    labels = []
-
-    for bigram_pair in pair_order:
-        pair_data = plot_data[plot_data['bigram_pair'] == bigram_pair]
-        bigram1, bigram2 = bigram_pair.split(', ')
-        
-        easier_data.append(pair_data[pair_data['chosen_bigram'] == bigram1]['chosen_bigram_time'].clip(upper=600))
-        easier_data.append(pair_data[pair_data['chosen_bigram'] == bigram2]['chosen_bigram_time'].clip(upper=600))
-        
-        harder_data.append(pair_data[pair_data['unchosen_bigram'] == bigram1]['unchosen_bigram_time'].clip(upper=600))
-        harder_data.append(pair_data[pair_data['unchosen_bigram'] == bigram2]['unchosen_bigram_time'].clip(upper=600))
-        
-        labels.extend([bigram1, bigram2])
-
-    # Plot the data
-    parts1 = ax1.boxplot(easier_data, vert=False, labels=labels, widths=0.6, showfliers=False)
-    parts2 = ax2.boxplot(harder_data, vert=False, labels=labels, widths=0.6, showfliers=False)
-
-    # Customize the plot
-    for ax in [ax1, ax2]:
-        ax.set_xlim(0, 600)
-        ax.set_xlabel('Typing Time (ms)', fontsize=12)
-        ax.tick_params(axis='y', which='major', labelsize=8)
-
-    # Remove y-axis labels from the right panel
-    ax2.set_yticklabels([])
-
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, 'bigram_pair_horizontal_boxplots.png'), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    print(f"Bigram pair horizontal box plot saved in {output_plots_folder}")
-
 
 def plot_bigram_comparison(chosen_data, unchosen_data, bigram_pairs):
     """
@@ -582,7 +513,7 @@ if __name__ == "__main__":
         bigram_data = process_bigram_data(data, output_tables_folder)
         
         # Analyze the inconsistencies
-        analyze_inconsistencies(bigram_data)
+        analyze_inconsistencies(bigram_data, output_plots_folder)
 
         """
         # Display the results
@@ -612,13 +543,10 @@ if __name__ == "__main__":
         ##########################
         # PLOTS
         ##########################
-        """
         plot_median_bigram_times(bigram_data, output_plots_folder)
         plot_paired_bar(bigram_data, output_plots_folder)
         plot_scatter(bigram_data, output_plots_folder)
-        plot_heatmap(bigram_data, output_plots_folder)
-        """
-
+        #plot_bigram_comparison(chosen_data, unchosen_data, bigram_pairs)
         #plot_bigram_pair_boxplots(bigram_data, output_plots_folder)
 
     except Exception as e:
