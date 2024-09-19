@@ -8,10 +8,10 @@ const jsPsych = initJsPsych();
 
 // Global variables for countdown timer and required correct repetitions
 let experimentConfig = {
-  requiredCorrectRepetitions: 5,  // Default requirement to type the bigram correctly 3 times
+  requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
   timeLimit: 10,  // Timer default time limit of 10 seconds for the entire experiment
   useTimer: false,  // Default to not using the timer
-  practiceOnly: true,  // If true, only run the practice set
+  practiceOnly: false,  // If true, only run the practice set
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
   trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
@@ -125,36 +125,25 @@ const typingInstructionsInfo = {
   type: htmlButtonResponse,
   stimulus: `
     <div class='instruction'> 
-      <p>You will be asked to <strong>touch type</strong> pairs of letters.
-         Touch type as you normally would, with left fingers above the home row letters 
+      <p>You will be asked to <strong>touch type</strong> a pair of letters three times.
+         Touch type as you normally would, with fingers above the home row letters 
          <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
-         and right fingers above the home row letters 
-         <span style="white-space: nowrap;"><span id=keystroke>J</span><span id=keystroke>K</span><span id=keystroke>L</span><span id=keystroke>;</span></span>
+         and
+         <span style="white-space: nowrap;"><span id=keystroke>;</span><span id=keystroke>L</span><span id=keystroke>K</span><span id=keystroke>J</span></span>
          </p>
       <div style="display: flex; justify-content: center; margin: 20px 0;">
         <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
       </div>
       <p>For instance, you will be asked to type 
-        <span style="white-space: nowrap;">
-          <span id=keystroke>a</span><span id=keystroke>b</span> 
-          <span id=keystroke> </span>
-          <span id=keystroke>c</span><span id=keystroke>d</span>
-          <span id=keystroke> </span>
-          <span id=keystroke>a</span><span id=keystroke>b</span>
-          <span id=keystroke> </span>
-          <span id=keystroke>c</span><span id=keystroke>d</span>
-          <span id=keystroke> </span>          
-          <span id=keystroke>a</span><span id=keystroke>b</span> 
-          <span id=keystroke> </span>
-          <span id=keystroke>c</span><span id=keystroke>d</span>
-        </span>
-      </p>
-      <p>If you type this correctly, then you will be asked which letter pair 
+        <span style="white-space: nowrap;"><span id=keystroke>a</span><span id=keystroke>b</span></span> three times.</p>
+      <p>If you type this correctly three times in a row,
+      then you will be asked to type a 2nd pair such as
+        <span style="white-space: nowrap;"><span id=keystroke>c</span><span id=keystroke>d</span></span> three times.</p>
+      <p>If you type this correctly as well,
+        then you will be asked which letter pair 
         <span style="white-space: nowrap;"> &mdash; <span id=keystroke>a</span><span id=keystroke>b</span> or 
         <span id=keystroke>c</span><span id=keystroke>d</span> &mdash; </span> 
-        is <b>easier</b> (more comfortable) for you to type. 
-        Sometimes the two pairs may seem equally easy, 
-        but please choose the one that is even slightly easier.</p> 
+        is <b>easier</b> (more comfortable) for you to type.</p> 
     </div>
   `,
   choices: ["Next >"],
@@ -214,63 +203,72 @@ const consentTrial = {
 };
 
 // Typing trial function
-function createTypingTrial(bigram1, bigram2, trialId, repetitions = requiredCorrectRepetitions) {
+function createTypingTrial(bigram, bigramPair, trialId) {
   let keyData = [];
+  let correctSequenceCount = 0;
   let typedSequence = "";
   const trialStartTime = performance.now();
   let trialCompleted = false;
-  const fullSequence = (bigram1 + ' ' + bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim();
-
 
   function handleKeyPress(event) {
-    if (trialCompleted) return;
-
+    if (trialCompleted) return;  // Ignore keypresses after trial completion
+  
     let typedKey = event.key.toLowerCase();
-    const expectedKey = fullSequence[typedSequence.length];
+    const expectedKey = bigram[typedSequence.length % bigram.length];
+    //const expectedKey = bigram[typedSequence.length % bigram.length].toLowerCase();
     const keydownTime = performance.now() - trialStartTime;
-
+  
     // Handle special cases for punctuation
     if (typedKey === 'Shift' || typedKey.length > 1) {
       return; // Ignore shift and other special keys
     }
+    // For comma, we need to check both the actual comma and the string representation
     if (expectedKey === ',' && (typedKey === ',' || typedKey === 'Comma')) {
       typedKey = ',';
     }
+    // Ignore other special keys
     if (typedKey.length > 1) {
       return;
     }
-
+  
     const keyLog = {
       trialId: trialId,
-      bigramPair: `${bigram1}, ${bigram2}`,
+      bigramPair: bigramPair.join(", "),
+      bigram: bigram,
       expectedKey: expectedKey,
       typedKey: typedKey,
       keydownTime: keydownTime.toFixed(2),
       chosenBigram: "",
       unchosenBigram: ""
     };
-
+  
     if (typedKey === expectedKey) {
       typedSequence += typedKey;
       document.querySelector('#user-input').textContent = typedSequence;
       document.querySelector('#error-message').textContent = "";
+  
+      keyData.push(keyLog);  // Add this line to record every correct key press
 
-      keyData.push(keyLog);
-
-      if (typedSequence === fullSequence) {
-        trialCompleted = true;
-        setTimeout(() => {
-          jsPsych.finishTrial({ keyData: keyData });
-        }, 1000);
+      if (typedSequence.length % bigram.length === 0) {
+        correctSequenceCount++;
+  
+        if (correctSequenceCount === experimentConfig.requiredCorrectRepetitions) {
+          trialCompleted = true;
+          setTimeout(() => {
+            jsPsych.finishTrial({ keyData: keyData });
+          }, 1000);
+        }
       }
     } else {
       typedSequence = "";
+      correctSequenceCount = 0;
       document.querySelector('#user-input').textContent = "";
       document.querySelector('#error-message').textContent = "Mistake detected. Try again.";
       keyData = [];
     }
   }
 
+  // Function to safely encode HTML entities
   function encodeHtml(str) {
     return str
       .replace(/&/g, '&amp;')
@@ -284,8 +282,8 @@ function createTypingTrial(bigram1, bigram2, trialId, repetitions = requiredCorr
     type: htmlKeyboardResponse,
     stimulus: `<div class="jspsych-content-wrapper">
                  <div class="jspsych-content">
-                   <p style="white-space: nowrap;">Type the following sequence (with spaces between letter pairs):</p>
-                   <p style="white-space: nowrap;"><b>${encodeHtml(fullSequence)}</b></p>
+                   <p style="white-space: nowrap;">Type ${experimentConfig.requiredCorrectRepetitions} times:</p>
+                   <p style="white-space: nowrap;"><b>${encodeHtml(bigram)}</b></p>
                    <p id="user-input" style="font-size: 24px; letter-spacing: 2px;"></p>
                    <p id="feedback" style="color: green;"></p>
                    <p id="error-message" style="color: red;"></p>
@@ -296,8 +294,8 @@ function createTypingTrial(bigram1, bigram2, trialId, repetitions = requiredCorr
     data: {
       task: 'typing',
       trialId: trialId,
-      correctSequence: fullSequence,
-      bigramPair: `${bigram1}, ${bigram2}`,
+      correctSequence: bigram,
+      bigramPair: bigramPair.join(", "),
       keyData: []
     },
     on_load: function () {
@@ -561,7 +559,8 @@ async function runExperiment(options = {}) {
       startExperiment,
       // Introductory pairs (always in the same order)
       ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`, 5),
+        createTypingTrial(bigram1, [bigram1, bigram2], `intro-trial-${index + 1}-1`),
+        createTypingTrial(bigram2, [bigram1, bigram2], `intro-trial-${index + 1}-2`),
         createComfortChoiceTrial(bigram1, bigram2, `intro-${index + 1}`)
       ]),
     ],
@@ -570,7 +569,6 @@ async function runExperiment(options = {}) {
       return jsPsych.data.get().last(1).values()[0].response === 0;
     }
   };
-
 
   // If not practice only, add transition screen and main pairs
   if (!experimentConfig.practiceOnly) {
@@ -582,7 +580,8 @@ async function runExperiment(options = {}) {
         choices: ['Continue'],
       },
       ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`, 5),
+        createTypingTrial(bigram1, [bigram1, bigram2], `main-trial-${index + 1}-1`),
+        createTypingTrial(bigram2, [bigram1, bigram2], `main-trial-${index + 1}-2`),
         createComfortChoiceTrial(bigram1, bigram2, `main-${index + 1}`)
       ])
     );
