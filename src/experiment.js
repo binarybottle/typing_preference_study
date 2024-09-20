@@ -11,7 +11,7 @@ let experimentConfig = {
   requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
   timeLimit: 10,  // Timer default time limit of 10 seconds for the entire experiment
   useTimer: false,  // Default to not using the timer
-  practiceOnly: true,  // If true, only run the practice set
+  practiceOnly: false,  // If true, only run the practice set
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
   trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
@@ -213,26 +213,29 @@ const consentTrial = {
   }
 };
 
+// Function to update the color of individual letters as they're typed
+function updateLetterColors(index, color, bold = false) {
+  const letterSpans = document.querySelectorAll('.letter');
+  if (letterSpans[index]) {
+    letterSpans[index].style.color = color;
+    letterSpans[index].style.fontWeight = bold ? 'bold' : 'normal';
+  }
+}
+
 // Function to flash all letters red when a mistake is made
 function flashAllLettersRed() {
   const letterSpans = document.querySelectorAll('.letter');
   letterSpans.forEach(span => {
-    span.style.color = 'red';  // Set the color of all letters to red
+    span.style.color = 'red';
+    span.style.fontWeight = 'normal';  // Reset font weight
   });
 
   setTimeout(() => {
     letterSpans.forEach(span => {
-      span.style.color = '';  // Reset the color after 500ms
+      span.style.color = '';
+      span.style.fontWeight = 'normal';
     });
   }, 500);  // Flash red for 500ms
-}
-
-// Function to update the color of individual letters as they're typed
-function updateLetterColors(index, color) {
-  const letterSpans = document.querySelectorAll('.letter');
-  if (letterSpans[index]) {
-    letterSpans[index].style.color = color;
-  }
 }
 
 function createTypingTrial(bigram1, bigram2, trialId, repetitions) {
@@ -255,7 +258,7 @@ function createTypingTrial(bigram1, bigram2, trialId, repetitions) {
 
     if (typedKey === expectedKey) {
       typedSequence += typedKey;
-      updateLetterColors(typedSequence.length - 1, 'green');
+      updateLetterColors(typedSequence.length - 1, 'green', true);  // Added true for bold
       keyData.push({
         expectedKey: expectedKey,
         typedKey: typedKey,
@@ -288,7 +291,7 @@ function createTypingTrial(bigram1, bigram2, trialId, repetitions) {
     stimulus: `
     <div class="jspsych-content-wrapper">
       <div class="jspsych-content">
-        <p>Type the following sequence:</p>
+        <p>Type the following letter pairs separated by a space:</p>
         <p id="sequence" style="font-size: 24px; letter-spacing: 2px;">
           ${fullSequence.split('').map(letter => `<span class="letter">${letter}</span>`).join('')}
         </p>
@@ -365,29 +368,38 @@ function convertToCSV(data) {
   const csvHeaders = ['trialId', 'bigramPair', 'bigramPairSequence', 'bigram', 'keyPosition', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram'];
   let csvContent = csvHeaders.join(',') + '\n';
 
-  let trialCounter = 1;
+  let mainTrialCounter = 1;
 
   data.forEach(trial => {
     if (trial.task === 'typing' && trial.keyData) {
       const bigramPair = trial.bigramPair;
-      const bigramPairSequence = trial.fullSequence; // Assuming we store the full sequence in the trial data
+      const bigramPairSequence = trial.fullSequence;
+      const bigrams = bigramPair.split(', ');
 
-      let currentBigram = '';
-      trial.keyData.forEach((keyEvent, index) => {
-        // Skip rows with empty expectedKey
+      let validKeyCounter = 0;
+
+      // Determine if this is an intro trial or main trial
+      let trialId;
+      if (trial.trialId.startsWith('intro-trial-')) {
+        trialId = trial.trialId;  // Keep the original intro trial ID
+      } else {
+        trialId = `trial${mainTrialCounter}`;
+        mainTrialCounter++;
+      }
+
+      trial.keyData.forEach((keyEvent) => {
+        // Skip rows with empty expectedKey or space
         if (!keyEvent.expectedKey || keyEvent.expectedKey === ' ') {
           return;
         }
 
-        const keyPosition = (index % 2) + 1;
-        
-        // Update currentBigram when we start a new bigram
-        if (keyPosition === 1) {
-          currentBigram = bigramPair.split(', ')[Math.floor(index / 4)];
-        }
+        validKeyCounter++;
+        const bigramIndex = Math.floor((validKeyCounter - 1) / 2) % 2;
+        const currentBigram = bigrams[bigramIndex];
+        const keyPosition = (validKeyCounter % 2 === 1) ? 1 : 2;
 
         const row = [
-          `trial${trialCounter}`,
+          escapeCSVField(trialId),
           escapeCSVField(bigramPair),
           escapeCSVField(bigramPairSequence),
           escapeCSVField(currentBigram),
@@ -400,8 +412,6 @@ function convertToCSV(data) {
         ];
         csvContent += row.join(',') + '\n';
       });
-
-      trialCounter++;
     }
   });
 
@@ -541,6 +551,7 @@ const startExperiment = {
 };
 
 // Run the experiment
+// Run the experiment
 async function runExperiment(options = {}) {
   // Update experimentConfig with provided options
   Object.assign(experimentConfig, options);
@@ -590,13 +601,12 @@ async function runExperiment(options = {}) {
     }
   };
 
-
-  // If not practice only, add transition screen and main pairs
+  // Add transition screen and main pairs if not practiceOnly
   if (!experimentConfig.practiceOnly) {
     experimentTimeline.timeline.push(
       {
         type: htmlButtonResponse,
-        stimulus: `<p>Great job! You've completed the introductory pairs.<br>
+        stimulus: `<p>Great job! You've completed the practice session.<br>
                    Now we'll move on to the main part of the experiment.</p>`,
         choices: ['Continue'],
       },
@@ -607,7 +617,7 @@ async function runExperiment(options = {}) {
     );
   }
 
-  // Always add thank you trial at the end
+  // Add thank you trial at the end
   experimentTimeline.timeline.push(thankYouTrial);
 
   timeline.push(experimentTimeline);
