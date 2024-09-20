@@ -8,7 +8,7 @@ const jsPsych = initJsPsych();
 
 // Global variables for countdown timer and required correct repetitions
 let experimentConfig = {
-  requiredCorrectRepetitions: 5,  // Default requirement to type the bigram correctly 3 times
+  requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
   timeLimit: 10,  // Timer default time limit of 10 seconds for the entire experiment
   useTimer: false,  // Default to not using the timer
   practiceOnly: true,  // If true, only run the practice set
@@ -213,14 +213,34 @@ const consentTrial = {
   }
 };
 
-// Typing trial function
-function createTypingTrial(bigram1, bigram2, trialId, repetitions = requiredCorrectRepetitions) {
+// Function to flash all letters red when a mistake is made
+function flashAllLettersRed() {
+  const letterSpans = document.querySelectorAll('.letter');
+  letterSpans.forEach(span => {
+    span.style.color = 'red';  // Set the color of all letters to red
+  });
+
+  setTimeout(() => {
+    letterSpans.forEach(span => {
+      span.style.color = '';  // Reset the color after 500ms
+    });
+  }, 500);  // Flash red for 500ms
+}
+
+// Function to update the color of individual letters as they're typed
+function updateLetterColors(index, color) {
+  const letterSpans = document.querySelectorAll('.letter');
+  if (letterSpans[index]) {
+    letterSpans[index].style.color = color;
+  }
+}
+
+function createTypingTrial(bigram1, bigram2, trialId, repetitions) {
   let keyData = [];
   let typedSequence = "";
   const trialStartTime = performance.now();
   let trialCompleted = false;
-  const fullSequence = (bigram1 + ' ' + bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim();
-
+  const fullSequence = (bigram1 + ' ' + bigram2 + ' ').repeat(repetitions).trim();
 
   function handleKeyPress(event) {
     if (trialCompleted) return;
@@ -229,83 +249,65 @@ function createTypingTrial(bigram1, bigram2, trialId, repetitions = requiredCorr
     const expectedKey = fullSequence[typedSequence.length];
     const keydownTime = performance.now() - trialStartTime;
 
-    // Handle special cases for punctuation
-    if (typedKey === 'Shift' || typedKey.length > 1) {
-      return; // Ignore shift and other special keys
-    }
-    if (expectedKey === ',' && (typedKey === ',' || typedKey === 'Comma')) {
-      typedKey = ',';
-    }
-    if (typedKey.length > 1) {
+    if (event.key === 'Shift' || event.key.length > 1) {
       return;
     }
 
-    const keyLog = {
-      trialId: trialId,
-      bigramPair: `${bigram1}, ${bigram2}`,
-      expectedKey: expectedKey,
-      typedKey: typedKey,
-      keydownTime: keydownTime.toFixed(2),
-      chosenBigram: "",
-      unchosenBigram: ""
-    };
-
     if (typedKey === expectedKey) {
       typedSequence += typedKey;
-      document.querySelector('#user-input').textContent = typedSequence;
-      document.querySelector('#error-message').textContent = "";
-
-      keyData.push(keyLog);
+      updateLetterColors(typedSequence.length - 1, 'green');
+      keyData.push({
+        expectedKey: expectedKey,
+        typedKey: typedKey,
+        keydownTime: keydownTime.toFixed(2),
+        chosenBigram: "",
+        unchosenBigram: ""
+      });
 
       if (typedSequence === fullSequence) {
         trialCompleted = true;
         setTimeout(() => {
-          jsPsych.finishTrial({ keyData: keyData });
+          jsPsych.finishTrial({
+            keyData: keyData,
+            task: 'typing',
+            bigramPair: `${bigram1}, ${bigram2}`,
+            fullSequence: fullSequence,
+            trialId: trialId
+          });
         }, 1000);
       }
     } else {
+      flashAllLettersRed();
       typedSequence = "";
-      document.querySelector('#user-input').textContent = "";
-      document.querySelector('#error-message').textContent = "Mistake detected. Try again.";
       keyData = [];
     }
   }
 
-  function encodeHtml(str) {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
   return {
     type: htmlKeyboardResponse,
-    stimulus: `<div class="jspsych-content-wrapper">
-                 <div class="jspsych-content">
-                   <p style="white-space: nowrap;">Type the following sequence (with spaces between letter pairs):</p>
-                   <p style="white-space: nowrap;"><b>${encodeHtml(fullSequence)}</b></p>
-                   <p id="user-input" style="font-size: 24px; letter-spacing: 2px;"></p>
-                   <p id="feedback" style="color: green;"></p>
-                   <p id="error-message" style="color: red;"></p>
-                 </div>
-               </div>`,
+    stimulus: `
+    <div class="jspsych-content-wrapper">
+      <div class="jspsych-content">
+        <p>Type the following sequence:</p>
+        <p id="sequence" style="font-size: 24px; letter-spacing: 2px;">
+          ${fullSequence.split('').map(letter => `<span class="letter">${letter}</span>`).join('')}
+        </p>
+      </div>
+    </div>`,
     choices: "NO_KEYS",
     trial_duration: null,
-    data: {
-      task: 'typing',
-      trialId: trialId,
-      correctSequence: fullSequence,
-      bigramPair: `${bigram1}, ${bigram2}`,
-      keyData: []
-    },
-    on_load: function () {
+    on_load: function() {
       document.addEventListener('keydown', handleKeyPress);
     },
-    on_finish: function (data) {
+    on_finish: function(data) {
       document.removeEventListener('keydown', handleKeyPress);
       data.keyData = keyData;
+      data.task = 'typing';
+      data.bigramPair = `${bigram1}, ${bigram2}`;
+      data.fullSequence = fullSequence;
+      data.trialId = trialId;
+      jsPsych.data.write(data);
+      console.log("Typing Trial Data:", data);
     }
   };
 }
@@ -360,26 +362,46 @@ function escapeCSVField(field) {
 
 // Function to convert data to CSV format
 function convertToCSV(data) {
-  const csvHeaders = ['trialId', 'bigramPair', 'bigram', 'keyPosition', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram'];
+  const csvHeaders = ['trialId', 'bigramPair', 'bigramPairSequence', 'bigram', 'keyPosition', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram'];
   let csvContent = csvHeaders.join(',') + '\n';
+
+  let trialCounter = 1;
 
   data.forEach(trial => {
     if (trial.task === 'typing' && trial.keyData) {
+      const bigramPair = trial.bigramPair;
+      const bigramPairSequence = trial.fullSequence; // Assuming we store the full sequence in the trial data
+
+      let currentBigram = '';
       trial.keyData.forEach((keyEvent, index) => {
-        const keyPosition = (index % 2) + 1;  // Alternates between 1 and 2
+        // Skip rows with empty expectedKey
+        if (!keyEvent.expectedKey || keyEvent.expectedKey === ' ') {
+          return;
+        }
+
+        const keyPosition = (index % 2) + 1;
+        
+        // Update currentBigram when we start a new bigram
+        if (keyPosition === 1) {
+          currentBigram = bigramPair.split(', ')[Math.floor(index / 4)];
+        }
+
         const row = [
-          escapeCSVField(trial.trialId || ''),
-          escapeCSVField(trial.bigramPair || ''),
-          escapeCSVField(trial.correctSequence || ''),
+          `trial${trialCounter}`,
+          escapeCSVField(bigramPair),
+          escapeCSVField(bigramPairSequence),
+          escapeCSVField(currentBigram),
           keyPosition,
-          escapeCSVField(keyEvent.expectedKey || ''),
-          escapeCSVField(keyEvent.typedKey || ''),
+          escapeCSVField(keyEvent.expectedKey),
+          escapeCSVField(keyEvent.typedKey),
           keyEvent.keydownTime !== undefined ? keyEvent.keydownTime : '',
           escapeCSVField(keyEvent.chosenBigram || ''),
           escapeCSVField(keyEvent.unchosenBigram || '')
         ];
         csvContent += row.join(',') + '\n';
       });
+
+      trialCounter++;
     }
   });
 
@@ -389,6 +411,7 @@ function convertToCSV(data) {
 // Function to store data on OSF
 async function storeDataOnOSF(data, format = 'csv') {
   console.log("Received data for upload:", data);
+
   const osfToken = await loadOSFToken();
   console.log("Using OSF API token:", osfToken);
 
@@ -406,7 +429,7 @@ async function storeDataOnOSF(data, format = 'csv') {
 
   if (format === 'csv') {
     console.log("Converting data to CSV format...");
-    fileData = convertToCSV(data);
+    fileData = convertToCSV(data);  // Use the new CSV conversion logic
     contentType = 'text/csv';
   } else {
     console.log("Converting data to JSON format...");
@@ -435,25 +458,21 @@ async function storeDataOnOSF(data, format = 'csv') {
     console.log('Data successfully stored on OSF');
   } catch (error) {
     console.error('Error storing data on OSF:', error);
-    throw error;  // Re-throw the error so it can be caught in endExperiment
+    throw error;
   }
 }
 
 // End the experiment and upload data to OSF
 function endExperiment() {
-  console.log("endExperiment function is called...");
   const experimentData = jsPsych.data.get().values();
   console.log("All experiment data:", experimentData);
 
-  // Log each trial's data for further confirmation
-  experimentData.forEach((trial, index) => {
-    console.log(`Trial ${index + 1} data:`, trial);
-  });
+  // Filter out any empty or invalid data
+  const validData = experimentData.filter(trial => trial.task === 'typing' && trial.keyData && trial.keyData.length > 0);
+  console.log("Valid data for CSV:", validData);
 
-  console.log("Attempting to store data on OSF...");
-  storeDataOnOSF(experimentData, 'csv')
+  storeDataOnOSF(validData, 'csv')
     .then(() => {
-      console.log("Data storage process completed");
       redirectToProlific(COMPLETION_CODE);
     })
     .catch(error => {
@@ -561,7 +580,7 @@ async function runExperiment(options = {}) {
       startExperiment,
       // Introductory pairs (always in the same order)
       ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`, 5),
+        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`, experimentConfig.requiredCorrectRepetitions),
         createComfortChoiceTrial(bigram1, bigram2, `intro-${index + 1}`)
       ]),
     ],
@@ -582,7 +601,7 @@ async function runExperiment(options = {}) {
         choices: ['Continue'],
       },
       ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`, 5),
+        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`, experimentConfig.requiredCorrectRepetitions),
         createComfortChoiceTrial(bigram1, bigram2, `main-${index + 1}`)
       ])
     );
