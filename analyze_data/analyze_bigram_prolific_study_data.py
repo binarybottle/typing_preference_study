@@ -8,7 +8,6 @@ from scipy import stats
 from scipy.stats import median_abs_deviation
 
 
-
 def display_information(dframe, title, print_headers, nlines):
     """
     Display information about a DataFrame.
@@ -67,7 +66,7 @@ def load_and_preprocess_data(input_folder, output_tables_folder):
     # Display information about the combined DataFrame
     verbose = True
     if verbose:
-        print_headers = ['trialId', 'bigramPair', 'bigram', 'typedKey', 
+        print_headers = ['trialId', 'bigramPair', 'bigram', 'keyPosition', 'typedKey', 
                         'keydownTime', 'chosenBigram', 'unchosenBigram']
         display_information(filtered_combined_df, "original data", print_headers, nlines=6)
 
@@ -78,6 +77,38 @@ def load_and_preprocess_data(input_folder, output_tables_folder):
 
     return filtered_combined_df
 
+
+def load_improbable_pairs(file_path):
+    """
+    Load improbable bigram pairs from a CSV file.
+
+    Parameters:
+    - file_path: String, path to the CSV file containing improbable bigram pairs
+
+    Returns:
+    - improbable_pairs: List of tuples, each containing a pair of bigrams where one is highly improbable
+    """
+    try:
+        # Read the CSV file
+        df = pd.read_csv(file_path)
+        
+        # Ensure the CSV has the correct columns
+        if 'probable_bigram' not in df.columns or 'improbable_bigram' not in df.columns:
+            raise ValueError("CSV file must contain 'probable_bigram' and 'improbable_bigram' columns")
+        
+        # Convert DataFrame to list of tuples
+        improbable_pairs = list(df[['probable_bigram', 'improbable_bigram']].itertuples(index=False, name=None))
+        
+        print(f"Loaded {len(improbable_pairs)} improbable bigram pairs from {file_path}")
+        return improbable_pairs
+    
+    except FileNotFoundError:
+        print(f"Error: File not found at {file_path}")
+        return []
+    except Exception as e:
+        print(f"Error loading improbable pairs: {str(e)}")
+        return []
+    
 
 def process_bigram_data(data, output_tables_folder):
     """
@@ -113,15 +144,20 @@ def process_bigram_data(data, output_tables_folder):
     def get_fastest_interkey_times(group):
         """Compute the shortest inter-key time for each bigram in the pair."""
         
-        group = group.sort_values('keydownTime')
+        group = group.sort_values(['keydownTime', 'keyPosition'])
+        #print_headers = ['trialId', 'bigramPair', 'bigram', 'keyPosition', 
+        #                 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram']
+        #display_information(data, "sorted_bigram_pair", print_headers, nlines=24)
 
         # Initialize dicts to track minimum inter-key times for each bigram
         min_times = {}
         best_rows = {}
 
-        # Iterate through the rows for the bigram pair of group1
-        for i in range(0, len(group) - 1, 2):
+        # Iterate through the rows for the bigram pair of group
+        for i in range(0, len(group) - 1):
             if group['keyPosition'].iloc[i] == 1 and group['keyPosition'].iloc[i + 1] == 2:
+                #print(f"{group['typedKey'].iloc[i]} {group['keyPosition'].iloc[i]} "
+                #    f"{group['typedKey'].iloc[i + 1]} {group['keyPosition'].iloc[i + 1]}")
                 start_time = group['keydownTime'].iloc[i]
                 end_time = group['keydownTime'].iloc[i + 1]
                 interkey_time = end_time - start_time
@@ -159,6 +195,7 @@ def process_bigram_data(data, output_tables_folder):
             if group['chosenBigram'].nunique() == 1:
                 is_consistent = True
             else:
+                #print(group['chosenBigram'].unique())
                 is_consistent = False
                 # Check inconsistencies
                 #print_headers = ['bigramPair', 'chosenBigram']
@@ -197,8 +234,8 @@ def process_bigram_data(data, output_tables_folder):
     verbose = False
     if verbose:
         print_headers = ['trialId', 'sorted_bigram_pair', 'bigramPair', 'bigram', 'typedKey', 
-                        'keydownTime', 'chosenBigram', 'unchosenBigram']
-        display_information(data, "sorted_bigram_pair", print_headers, nlines=24)
+                         'keydownTime', 'chosenBigram', 'unchosenBigram']
+        display_information(data, "sorted_bigram_pair", print_headers, nlines=240)
         ## Check sample output:
         ## sorted_bigram_pair bigram_pair chosen_bigram unchosen_bigram  chosen_bigram_time  unchosen_bigram_time  is_consistent
         ## qx, zw      qx, zw            qx              zw               268.6                 228.1          False
@@ -212,7 +249,7 @@ def process_bigram_data(data, output_tables_folder):
         user_id = row['user_id']
         sorted_bigram_pair = row['sorted_bigram_pair']
 
-        # Filter data for the specific user_id and bigramPair
+        # Filter data for the specific user_id and sorted_bigram_pair
         group = data[(data['user_id'] == user_id) & 
                      (data['sorted_bigram_pair'] == sorted_bigram_pair)]
 
@@ -234,8 +271,8 @@ def process_bigram_data(data, output_tables_folder):
     verbose = True
     if verbose:
         print_headers = ['user_id', 'sorted_bigram_pair','bigram_pair', 
-                        'chosen_bigram', 'unchosen_bigram', 
-                        'chosen_bigram_time', 'unchosen_bigram_time', 'is_consistent']
+                         'chosen_bigram', 'unchosen_bigram', 
+                         'chosen_bigram_time', 'unchosen_bigram_time', 'is_consistent']
         display_information(bigram_data, "bigram data", print_headers, nlines=10)
         """
         # Sample output (n=10):
@@ -287,6 +324,72 @@ def process_bigram_data(data, output_tables_folder):
     return bigram_data
 
 
+def analyze_improbable_choices(bigram_data, improbable_pairs, threshold=0.9):
+    """
+    Analyze bigram choices to detect improbable selections.
+
+    The line row['chosen_bigram'] == pair[1] checks if the bigram that was actually chosen 
+    (row['chosen_bigram']) is equal to the improbable bigram (pair[1]).
+    This line returns True if the improbable bigram was chosen, and False otherwise.
+    For example, if we have an improbable pair ('th', 'xz'):
+    'th' is pair[0] (probable)
+    'xz' is pair[1] (improbable)
+    If a participant chose 'xz' over 'th', row['chosen_bigram'] == pair[1] would be True, 
+    flagging this as an improbable choice.
+
+    Parameters:
+    - bigram_data: DataFrame containing processed bigram data
+    - improbable_pairs: List of tuples, each containing a pair of bigrams where one is highly improbable
+    - threshold: Float, the threshold for flagging a user (default 0.9)
+
+    Returns:
+    - suspicious_users: DataFrame containing users with suspiciously high rates of improbable choices
+    """
+    def is_improbable_choice(row):
+        for pair in improbable_pairs:
+            if set(pair) == set([row['chosen_bigram'], row['unchosen_bigram']]):
+                return row['chosen_bigram'] == pair[1]  # True if the improbable bigram was chosen
+        return False
+
+    # Add a column indicating if each choice was improbable
+    bigram_data['improbable_choice'] = bigram_data.apply(is_improbable_choice, axis=1)
+
+    # Display information about the bigram DataFrame
+    verbose = False
+    if verbose:
+        print_headers = ['improbable_choice','bigram_pair', 
+                         'chosen_bigram', 'unchosen_bigram', 'is_consistent']
+        display_information(bigram_data, "improbable_choice", print_headers, nlines=100)
+
+    # Count the number of improbable choices for each user
+    user_improbable_counts = bigram_data.groupby('user_id')['improbable_choice'].sum().astype(int)
+
+    # Identify users with suspiciously high numbers of improbable choices
+    suspicious_users = user_improbable_counts[user_improbable_counts >= threshold].reset_index()
+    suspicious_users.columns = ['user_id', 'improbable_choice_count']
+
+    # Calculate overall statistics
+    total_users = bigram_data['user_id'].nunique()
+    total_choices = len(bigram_data)
+    total_improbable_choices = bigram_data['improbable_choice'].sum()
+    total_suspicious = len(suspicious_users)
+    avg_improbable_count = user_improbable_counts.mean()
+
+    print("\n____ Improbable Bigram Choice Analysis ____\n")
+    print(f"Total users analyzed: {total_users}")
+    print(f"Total choices analyzed: {total_choices}")
+    print(f"Total improbable choices: {total_improbable_choices}")
+    print(f"Users with suspiciously high improbable choice counts: {total_suspicious}")
+    print(f"Percentage of suspicious users: {(total_suspicious / total_users) * 100:.2f}%")
+    print(f"Average improbable choice count across all users: {avg_improbable_count:.2f}")
+
+    if not suspicious_users.empty:
+        print("\nTop 10 users with highest improbable choice counts:")
+        print(suspicious_users.sort_values('improbable_choice_count', ascending=False).head(10))
+
+    return suspicious_users
+
+
 def analyze_choice_inconsistencies(bigram_data):
     """
     Analyze and report inconsistencies in bigram data.
@@ -325,7 +428,7 @@ def analyze_choice_inconsistencies(bigram_data):
 
     # Group by 'inconsistency_count' and count the frequency of each value
     consistency_frequencies = bigram_data['is_consistent'].value_counts().sort_index(ascending=False)
-    print("\nFrequency of consistent bigram pairs (of {0} total):".format(total_pairs_times_users))
+    print("Frequency of consistent bigram pairs (of {0} total):".format(total_pairs_times_users))
     for count, freq in consistency_frequencies.items():
         print(f"{count}: {freq}")
 
@@ -339,7 +442,7 @@ def analyze_choice_inconsistencies(bigram_data):
     user_inconsistency_counts = inconsistent_pairs_per_user.value_counts().sort_index(ascending=False)
     print(f"\nFrequency of inconsistent pairs per user (of {total_pairs} pairs):")
     for count, freq in user_inconsistency_counts.items():
-        print(f"{count} inconsist pairs: {freq} users")
+        print(f"{count} inconsistent pairs: {freq} users")
     
     if inconsistent_pairs_per_user.empty:
         print("\nNo inconsistent pairs found.")
@@ -702,6 +805,18 @@ if __name__ == "__main__":
         # Process the bigram data
         bigram_data = process_bigram_data(data, output_tables_folder)
         
+        # Analyze improbable choices
+        # Load improbable pairs from CSV file
+        current_dir = os.getcwd()  # Get the current working directory
+        parent_dir = os.path.dirname(current_dir)  # Get the parent directory
+        improbable_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_80pairs_LH_15gotchas.csv')
+        improbable_pairs = load_improbable_pairs(improbable_pairs_file)
+        if improbable_pairs:
+            # Analyze improbable choices
+            suspicious_users = analyze_improbable_choices(bigram_data, improbable_pairs, threshold=0.8)
+        else:
+            print("Skipping improbable choices analysis due to missing or invalid improbable pairs data.")
+
         # Analyze the bigram choice inconsistencies
         bigram_choice_inconsistency_stats = analyze_choice_inconsistencies(bigram_data)
 
