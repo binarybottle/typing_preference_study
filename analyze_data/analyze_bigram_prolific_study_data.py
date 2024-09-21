@@ -20,9 +20,9 @@ def display_information(dframe, title, print_headers, nlines):
     """
     print('')
     print(f"{title}:")
-    dframe.info()
-    print('')
-    print("Sample output:")
+    #dframe.info()
+    #print('')
+    #print("Sample output:")
     
     # Temporarily set the option to display more rows
     with pd.option_context('display.max_rows', nlines):
@@ -122,32 +122,11 @@ def process_bigram_data(data, output_tables_folder):
     - bigram_data: DataFrame with processed bigram data
     """
 
-    def sort_bigram_pair(bigram_pair):
-        """
-        Normalize a bigram pair by alphabetically ordering the two bigrams.
-        
-        Parameters:
-        - bigram_pair: A string representing the bigram pair (e.g., 'de, ef').
-        
-        Returns:
-        - normalized_pair: A string representing the alphabetically ordered bigram pair.
-        """
-        # Split the bigram pair by the comma and space to get individual bigrams
-        bigrams = bigram_pair.split(', ')
-        
-        # Sort the bigrams alphabetically and rejoin them into a normalized pair
-        sorted_bigram_pair = ', '.join(sorted(bigrams))
-        
-        return sorted_bigram_pair
-    
-
-    def get_fastest_interkey_times(group):
+    def get_fastest_interkey_times(group, group_reversed):
         """Compute the shortest inter-key time for each bigram in the pair."""
         
         group = group.sort_values(['keydownTime', 'keyPosition'])
-        #print_headers = ['trialId', 'bigramPair', 'bigram', 'keyPosition', 
-        #                 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram']
-        #display_information(data, "sorted_bigram_pair", print_headers, nlines=24)
+        group_reversed = group_reversed.sort_values(['keydownTime', 'keyPosition'])
 
         # Initialize dicts to track minimum inter-key times for each bigram
         min_times = {}
@@ -156,8 +135,6 @@ def process_bigram_data(data, output_tables_folder):
         # Iterate through the rows for the bigram pair of group
         for i in range(0, len(group) - 1):
             if group['keyPosition'].iloc[i] == 1 and group['keyPosition'].iloc[i + 1] == 2:
-                #print(f"{group['typedKey'].iloc[i]} {group['keyPosition'].iloc[i]} "
-                #    f"{group['typedKey'].iloc[i + 1]} {group['keyPosition'].iloc[i + 1]}")
                 start_time = group['keydownTime'].iloc[i]
                 end_time = group['keydownTime'].iloc[i + 1]
                 interkey_time = end_time - start_time
@@ -173,8 +150,6 @@ def process_bigram_data(data, output_tables_folder):
                     min_times[current_bigram] = interkey_time
                     best_rows[current_bigram] = group.iloc[[i, i + 1]].copy()
                     best_rows[current_bigram]['min_interkey_time'] = interkey_time
-        # Check best_rows
-        #print(best_rows)
 
         # Combine the best rows for each bigram
         if len(best_rows) == 2:
@@ -191,32 +166,27 @@ def process_bigram_data(data, output_tables_folder):
                 chosen_bigram_time = min_times[bigram2]
                 unchosen_bigram_time = min_times[bigram1]
 
-            # Is the chosen bigram consistent across both sequences of the bigram pair?
-            if group['chosenBigram'].nunique() == 1:
-                is_consistent = True
-            else:
-                #print(group['chosenBigram'].unique())
-                is_consistent = False
-                # Check inconsistencies
-                #print_headers = ['bigramPair', 'chosenBigram']
-                #display_information(group, "group", print_headers, nlines=30)
+            # Check if the chosen bigram is consistent across both sequences of the bigram pair
+            group_chosen = set(group['chosenBigram'].unique())
+            group_reversed_chosen = set(group_reversed['chosenBigram'].unique())
+            is_consistent = (len(group_chosen) == 1 and len(group_reversed_chosen) == 1 and
+                            group_chosen == group_reversed_chosen)
 
             result = pd.DataFrame({
-                'sorted_bigram_pair': best_rows[bigram1]['sorted_bigram_pair'],
-                'bigram_pair': bigram_pair,
-                'bigram1': bigram1,
-                'bigram2': bigram2,
-                'bigram1_time': min_times[bigram1],
-                'bigram2_time': min_times[bigram2],
-                'chosen_bigram': chosen_bigram,
-                'unchosen_bigram': unchosen_bigram,
-                'chosen_bigram_time': chosen_bigram_time,
-                'unchosen_bigram_time': unchosen_bigram_time,
-                'keydownTime_bigram1_first': best_rows[bigram1]['keydownTime'].iloc[0],
-                'keydownTime_bigram1_second': best_rows[bigram1]['keydownTime'].iloc[1],
-                'keydownTime_bigram2_first': best_rows[bigram2]['keydownTime'].iloc[0],
-                'keydownTime_bigram2_second': best_rows[bigram2]['keydownTime'].iloc[1],
-                'is_consistent': is_consistent
+                'bigram_pair': [bigram_pair],
+                'bigram1': [bigram1],
+                'bigram2': [bigram2],
+                'bigram1_time': [min_times[bigram1]],
+                'bigram2_time': [min_times[bigram2]],
+                'chosen_bigram': [chosen_bigram],
+                'unchosen_bigram': [unchosen_bigram],
+                'chosen_bigram_time': [chosen_bigram_time],
+                'unchosen_bigram_time': [unchosen_bigram_time],
+                'keydownTime_bigram1_first': [best_rows[bigram1]['keydownTime'].iloc[0]],
+                'keydownTime_bigram1_second': [best_rows[bigram1]['keydownTime'].iloc[1]],
+                'keydownTime_bigram2_first': [best_rows[bigram2]['keydownTime'].iloc[0]],
+                'keydownTime_bigram2_second': [best_rows[bigram2]['keydownTime'].iloc[1]],
+                'is_consistent': [is_consistent]
             })
             
             # Copy over important metadata that's the same for both bigrams in the pair
@@ -228,33 +198,27 @@ def process_bigram_data(data, output_tables_folder):
             print(f"Unexpected number of bigrams ({len(best_rows)}) for bigramPair: {group['bigramPair'].iloc[0]}")
             return pd.DataFrame()  # Return an empty DataFrame if we don't have exactly 2 bigrams
 
-    # Sort the bigram pairs
-    data['sorted_bigram_pair'] = data['bigramPair'].apply(sort_bigram_pair)
-    # Display information about the sorted bigram DataFrame
-    verbose = False
-    if verbose:
-        print_headers = ['trialId', 'sorted_bigram_pair', 'bigramPair', 'bigram', 'typedKey', 
-                         'keydownTime', 'chosenBigram', 'unchosenBigram']
-        display_information(data, "sorted_bigram_pair", print_headers, nlines=240)
-        ## Check sample output:
-        ## sorted_bigram_pair bigram_pair chosen_bigram unchosen_bigram  chosen_bigram_time  unchosen_bigram_time  is_consistent
-        ## qx, zw      qx, zw            qx              zw               268.6                 228.1          False
-        ## fg, fr      fr, fg            fr              fg               187.6                 178.5           True
-
-    # Iterate through each unique combination of user_id and sorted_bigram_pair
-    unique_combinations = data[['user_id', 'sorted_bigram_pair']].drop_duplicates()
+    # Iterate through each unique combination of user_id and bigramPair
+    unique_combinations = data[['user_id', 'bigramPair']].drop_duplicates()
     result_list = []
     for _, row in unique_combinations.iterrows():
 
         user_id = row['user_id']
-        sorted_bigram_pair = row['sorted_bigram_pair']
+        bigramPair = row['bigramPair']
 
-        # Filter data for the specific user_id and sorted_bigram_pair
+        # Reverse the bigram pair
+        bigram_pair_list = bigramPair.split(', ')
+        reversed_bigrams = bigram_pair_list[::-1]
+        reversed_pair = ', '.join(reversed_bigrams)
+
+        # Filter data for the specific user_id and bigramPair
         group = data[(data['user_id'] == user_id) & 
-                     (data['sorted_bigram_pair'] == sorted_bigram_pair)]
+                     (data['bigramPair'] == bigramPair)]
+        group_reversed = data[(data['user_id'] == user_id) & 
+                              (data['bigramPair'] == reversed_pair)]
 
         # Apply the filtering function to each group
-        filtered_group = get_fastest_interkey_times(group)
+        filtered_group = get_fastest_interkey_times(group, group_reversed)
 
         # Append the result to the result list
         result_list.append(filtered_group)
@@ -264,58 +228,32 @@ def process_bigram_data(data, output_tables_folder):
 
     bigram_data = bigram_data.drop_duplicates()
 
-    # Sort the DataFrame by the 'sorted_bigram_pair' column
-    bigram_data = bigram_data.sort_values(by='sorted_bigram_pair').reset_index(drop=True)
+    # Sort the DataFrame by the 'bigram_pair' column
+    bigram_data = bigram_data.sort_values(by='bigram_pair').reset_index(drop=True)
 
     # Display information about the bigram DataFrame
     verbose = True
     if verbose:
-        print_headers = ['user_id', 'sorted_bigram_pair','bigram_pair', 
-                         'chosen_bigram', 'unchosen_bigram', 
-                         'chosen_bigram_time', 'unchosen_bigram_time', 'is_consistent']
+        print_headers = ['user_id', 'bigram_pair', 
+                        'chosen_bigram', 'unchosen_bigram', 
+                        'chosen_bigram_time', 'unchosen_bigram_time', 'is_consistent']
         display_information(bigram_data, "bigram data", print_headers, nlines=10)
         """
-        # Sample output (n=10):
-        user_id  sorted_bigram_pair bigram_pair chosen_bigram unchosen_bigram  chosen_bigram_time  unchosen_bigram_time  is_consistent
-        30   5fbdeff4c07497273f7e0544             ad, da      ad, da            ad              da                53.0                  49.0           True
-        31   5b48f2d0ff7497000125165e             ad, da      ad, da            ad              da               131.0                 164.0          False
-        32   62a42874616cea6120350ad9             ad, da      da, ad            da              ad               154.0                 246.0           True
-        33   5d61384895d04000195ab0c8             ad, da      ad, da            ad              da               125.4                 139.2           True
-        34   66b98cc4ac8818b483737e93             ad, da      ad, da            da              ad               118.0                 119.0           True
-        35   5be8320f19860d00010f79ec             ad, da      da, ad            da              ad                55.7                  70.6          False
-        36   5bca82b08f8de5000114a424             ad, da      da, ad            ad              da               118.6                 207.8          False
-        37   663eb5f6c16577126961c8bf             ad, da      da, ad            da              ad               100.0                  84.0           True
-        38   66a7dbfbc78674868afa3b59             ad, da      ad, da            da              ad                70.9                 121.3          False
-        39   652e8a91bedec6c1f5a04a15             ad, da      ad, da            ad              da               224.5                 216.7          False
+        Sample output:      user_id bigram_pair chosen_bigram unchosen_bigram  chosen_bigram_time  unchosen_bigram_time  is_consistent
+        0  66378d5028334d42107809e3      aa, dd            dd              aa               166.1                 197.1           True
+        1  614e1a28a1851394f80ede61      aa, dd            dd              aa               161.7                 168.1           True
+        2  5c4eb384c9c8550001720152      aa, dd            aa              dd               222.7                 193.1          False
 
-        # Original raw data for user_id 652e8a91bedec6c1f5a04a15 (final row of above):
-        trialId	bigramPair	bigram	keyPosition	expectedKey	typedKey	keydownTime	chosenBigram	unchosenBigram
-        ad,da:                                                          _interkey times_
-        main-trial-129-1	ad, da	ad	1	a	a	1126623.2	ad	da
-        main-trial-129-1	ad, da	ad	2	d	d	1126894.6	ad	da  271.4
-        main-trial-129-1	ad, da	ad	1	a	a	1127128.7	ad	da  
-        main-trial-129-1	ad, da	ad	2	d	d	1127355.3	ad	da  226.6
-        main-trial-129-1	ad, da	ad	1	a	a	1127582.1	ad	da
-        main-trial-129-1	ad, da	ad	2	d	d	1127821.2	ad	da  239.1
-        main-trial-129-2	ad, da	da	1	d	d	1129793.9	ad	da
-        main-trial-129-2	ad, da	da	2	a	a	1130035	    ad	da  241.1
-        main-trial-129-2	ad, da	da	1	d	d	1130265	    ad	da
-        main-trial-129-2	ad, da	da	2	a	a	1130481.7	ad	da  216.7 = min time for da
-        main-trial-129-2	ad, da	da	1	d	d	1130720.1	ad	da
-        main-trial-129-2	ad, da	da	2	a	a	1130948.8	ad	da  228.7
-        da,ad:
-        main-trial-96-1	da, ad	da	1	d	d	875175.5	da	ad
-        main-trial-96-1	da, ad	da	2	a	a	875469.3	da	ad  293.8
-        main-trial-96-1	da, ad	da	1	d	d	875755	    da	ad
-        main-trial-96-1	da, ad	da	2	a	a	876008	    da	ad  253
-        main-trial-96-1	da, ad	da	1	d	d	876282.9	da	ad
-        main-trial-96-1	da, ad	da	2	a	a	876550.8	da	ad  267.9
-        main-trial-96-2	da, ad	ad	1	a	a	878626.6	da	ad
-        main-trial-96-2	da, ad	ad	2	d	d	878880.8	da	ad  254.2
-        main-trial-96-2	da, ad	ad	1	a	a	879133.9	da	ad
-        main-trial-96-2	da, ad	ad	2	d	d	879358.4	da	ad  224.5 = min time for ad
-        main-trial-96-2	da, ad	ad	1	a	a	879610.3	da	ad
-        main-trial-96-2	da, ad	ad	2	d	d	879850.9	da	ad  240.6 
+        # Original raw data for user_id 5c4eb384c9c8550001720152 (final row of above):
+        trialId	bigramPair	bigramPairSequence	bigram	keyPosition	expectedKey	typedKey	keydownTime	chosenBigram	unchosenBigram
+        trial89	aa, dd	aa dd aa dd aa dd	aa	1	a	a	733758.7	aa	dd
+        trial89	aa, dd	aa dd aa dd aa dd	aa	2	a	a	734066.5	aa	dd    min time chosen: 222.7
+        trial89	aa, dd	aa dd aa dd aa dd	dd	1	d	d	734687.4	aa	dd
+        trial89	aa, dd	aa dd aa dd aa dd	dd	2	d	d	734880.5	aa	dd    min time unchosen: 193.1
+        trial89	aa, dd	aa dd aa dd aa dd	aa	1	a	a	735261.5	aa	dd
+        trial89	aa, dd	aa dd aa dd aa dd	aa	2	a	a	735484.2	aa	dd    min time chosen: 222.7
+        trial89	aa, dd	aa dd aa dd aa dd	dd	1	d	d	735894.9	aa	dd
+        ...
         """
 
     # Save and return the bigram data
@@ -324,7 +262,7 @@ def process_bigram_data(data, output_tables_folder):
     return bigram_data
 
 
-def analyze_improbable_choices(bigram_data, improbable_pairs, threshold=0.9):
+def analyze_improbable_choices(bigram_data, improbable_pairs, threshold=5):
     """
     Analyze bigram choices to detect improbable selections.
 
@@ -348,21 +286,22 @@ def analyze_improbable_choices(bigram_data, improbable_pairs, threshold=0.9):
     def is_improbable_choice(row):
         for pair in improbable_pairs:
             if set(pair) == set([row['chosen_bigram'], row['unchosen_bigram']]):
-                return row['chosen_bigram'] == pair[1]  # True if the improbable bigram was chosen
-        return False
+                if row['chosen_bigram'] == pair[1]:  # If the improbable bigram was chosen
+                    return pair[1]  # Return the improbable bigram
+        return None
 
     # Add a column indicating if each choice was improbable
-    bigram_data['improbable_choice'] = bigram_data.apply(is_improbable_choice, axis=1)
+    bigram_data['improbable_chosen'] = bigram_data.apply(is_improbable_choice, axis=1)
 
     # Display information about the bigram DataFrame
     verbose = False
     if verbose:
-        print_headers = ['improbable_choice','bigram_pair', 
+        print_headers = ['improbable_chosen', 'bigram_pair', 
                          'chosen_bigram', 'unchosen_bigram', 'is_consistent']
         display_information(bigram_data, "improbable_choice", print_headers, nlines=100)
 
     # Count the number of improbable choices for each user
-    user_improbable_counts = bigram_data.groupby('user_id')['improbable_choice'].sum().astype(int)
+    user_improbable_counts = bigram_data.groupby('user_id')['improbable_chosen'].apply(lambda x: x.notnull().sum())
 
     # Identify users with suspiciously high numbers of improbable choices
     suspicious_users = user_improbable_counts[user_improbable_counts >= threshold].reset_index()
@@ -371,9 +310,12 @@ def analyze_improbable_choices(bigram_data, improbable_pairs, threshold=0.9):
     # Calculate overall statistics
     total_users = bigram_data['user_id'].nunique()
     total_choices = len(bigram_data)
-    total_improbable_choices = bigram_data['improbable_choice'].sum()
+    total_improbable_choices = bigram_data['improbable_chosen'].notnull().sum()
     total_suspicious = len(suspicious_users)
     avg_improbable_count = user_improbable_counts.mean()
+
+    # Calculate frequency of improbable bigrams chosen
+    improbable_bigram_freq = bigram_data['improbable_chosen'].value_counts(dropna=True)
 
     print("\n____ Improbable Bigram Choice Analysis ____\n")
     print(f"Total users analyzed: {total_users}")
@@ -387,7 +329,10 @@ def analyze_improbable_choices(bigram_data, improbable_pairs, threshold=0.9):
         print("\nTop 10 users with highest improbable choice counts:")
         print(suspicious_users.sort_values('improbable_choice_count', ascending=False).head(10))
 
-    return suspicious_users
+    print("\nFrequency of improbable bigrams chosen:")
+    print(improbable_bigram_freq)
+
+    return suspicious_users, improbable_bigram_freq
 
 
 def analyze_choice_inconsistencies(bigram_data):
@@ -404,9 +349,9 @@ def analyze_choice_inconsistencies(bigram_data):
     total_users = bigram_data['user_id'].nunique()
 
     # Total bigram pairs
-    total_pairs = bigram_data['sorted_bigram_pair'].nunique()
+    total_pairs = bigram_data['bigram_pair'].nunique()
 
-    # Total sorted bigram pairs
+    # Total bigram pairs
     total_pairs_times_users = total_pairs * total_users
 
     # Inconsistencies
@@ -625,6 +570,12 @@ def plot_chosen_vs_unchosen_times_barplot(bigram_data, output_plots_folder):
     """
     Generate and save bar plot for chosen vs. unchosen bigram typing times.
     
+    Y-axis: Each bigram pair (e.g., 'th, ht', 'er, re', etc.)
+    X-axis: Median typing time in milliseconds
+    Bars: For each bigram pair, there are two bars:
+    One representing the median typing time when this bigram was chosen
+    One representing the median typing time when this bigram was not chosen
+
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
     - output_plots_folder: String path to the folder where plots should be saved
@@ -813,7 +764,7 @@ if __name__ == "__main__":
         improbable_pairs = load_improbable_pairs(improbable_pairs_file)
         if improbable_pairs:
             # Analyze improbable choices
-            suspicious_users = analyze_improbable_choices(bigram_data, improbable_pairs, threshold=0.8)
+            suspicious_users = analyze_improbable_choices(bigram_data, improbable_pairs, threshold=5)
         else:
             print("Skipping improbable choices analysis due to missing or invalid improbable pairs data.")
 
