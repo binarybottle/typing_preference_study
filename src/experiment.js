@@ -6,18 +6,18 @@ import 'jspsych/css/jspsych.css';
 // Initialize jsPsych
 const jsPsych = initJsPsych();
 
-// Global variables for countdown timer and required correct repetitions
+// Global variables and configuration
 let experimentConfig = {
-  requiredCorrectRepetitions: 3,  // Default requirement to type the bigram correctly 3 times
-  timeLimit: 10,  // Timer default time limit of 10 seconds for the entire experiment
-  useTimer: false,  // Default to not using the timer
-  practiceOnly: false,  // If true, only run the practice set
-  randomizePairOrder: true,  // If true, randomize the order of bigram pairs
-  randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
-  trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
-  //trainingBigramFile: 'bigram_tables/bigram_3pairs_RH.csv',  // Default filename for training bigram pairs
-  mainBigramFile: 'bigram_tables/bigram_2x80pairs_LH.csv'  // Default filename for main bigram pairs
-  //mainBigramFile: 'bigram_tables/bigram_2x80pairs_RH.csv'  // Default filename for main bigram pairs
+  requiredCorrectRepetitions: 3,
+  timeLimit: 10,
+  useTimer: false,
+  practiceOnly: false,
+  randomizePairOrder: true,
+  randomizeBigramsWithinPairs: false,
+  trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',
+  mainBigramFile: 'bigram_tables/bigram_2x80pairs_LH.csv',
+  character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./',
+  ncharacters: 3,
 };
 
 let experimentStartTime;
@@ -25,9 +25,7 @@ let timerInterval;
 
 // Prolific completion URL with placeholder for the completion code
 const PROLIFIC_COMPLETION_URL = "https://app.prolific.co/submissions/complete?cc=";
-// Completion code for successful completion
 const COMPLETION_CODE = "C1CL3V94";
-// Completion code for no consent
 const NO_CONSENT_CODE = "C15846F6";
 
 // Get Prolific ID from URL parameters
@@ -49,7 +47,7 @@ async function loadOSFToken() {
   try {
     const response = await fetch('./token.json');
     const data = await response.json();
-    console.log('OSF API token loaded');  // Log the loaded token
+    console.log('OSF API token loaded');
     return data.osf_api_token;
   } catch (error) {
     console.error('Error loading OSF token:', error);
@@ -65,7 +63,6 @@ async function loadBigramPairs(trainingFile, mainFile) {
       const csvText = await response.text();
       return csvText.split('\n').map(row => row.trim()).filter(row => row)
         .map(row => {
-          // Use a regex to split the row, preserving commas within quotes
           return row.match(/(".*?"|[^,]+)(?=\s*,|\s*$)/g)
                     .map(entry => entry.replace(/^"(.*)"$/, '$1').trim());
         });
@@ -101,65 +98,22 @@ function setGlobalStyles() {
       font-size: 20px;
       color: #000;
     }
+    .slider-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 20px 0;
+    }
+    .slider {
+      width: 300px;
+      margin: 0 10px;
+    }
+    .slider.inactive {
+      opacity: 0.5;
+    }
   `;
   document.head.appendChild(style);
 }
-
-// First informational page
-const keyboardLayoutInfo = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class='instruction'> 
-      <p>It is expected that your keyboard has the following character layout:</p>
-      <div style="display: flex; justify-content: center; margin: 20px 0;">
-        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/qwerty-layout.jpg" width="500" style="max-width: 100%;">
-      </div>
-    </div>
-  `,
-  choices: ["Next >"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
-};
-
-// Second informational page
-const typingInstructionsInfo = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class='instruction'> 
-      <p>You will be asked to <strong>touch type</strong> pairs of letters.
-         Touch type as you normally would, with left fingers above the home row letters 
-         <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
-         and right fingers above the home row letters 
-         <span style="white-space: nowrap;"><span id=keystroke>J</span><span id=keystroke>K</span><span id=keystroke>L</span><span id=keystroke>;</span></span>
-         </p>
-      <div style="display: flex; justify-content: center; margin: 20px 0;">
-        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
-      </div>
-      <p>For instance, you will be asked to type 
-        <span style="white-space: nowrap;">
-          <span id=keystroke>a</span><span id=keystroke>b</span> 
-          <span id=keystroke> </span>
-          <span id=keystroke>c</span><span id=keystroke>d</span>
-          <span id=keystroke> </span>
-          <span id=keystroke>a</span><span id=keystroke>b</span>
-          <span id=keystroke> </span>
-          <span id=keystroke>c</span><span id=keystroke>d</span>
-          <span id=keystroke> </span>          
-          <span id=keystroke>a</span><span id=keystroke>b</span> 
-          <span id=keystroke> </span>
-          <span id=keystroke>c</span><span id=keystroke>d</span>
-        </span>
-      </p>
-      <p>If you type this correctly, then you will be asked which letter pair 
-        <span style="white-space: nowrap;"> &mdash; <span id=keystroke>a</span><span id=keystroke>b</span> or 
-        <span id=keystroke>c</span><span id=keystroke>d</span> &mdash; </span> 
-        is <b>easier</b> (more comfortable) for you to type. 
-        Sometimes the two pairs may seem equally easy, 
-        but please choose the one that is even slightly easier.</p> 
-    </div>
-  `,
-  choices: ["Next >"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
-};
 
 // Consent trial
 const consentTrial = {
@@ -207,11 +161,62 @@ const consentTrial = {
   button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
   on_finish: function(data) {
     if (data.response === 1) {  // "I do not consent" is selected
-      // If consent is not given, redirect to Prolific with the no consent code
       redirectToProlific(NO_CONSENT_CODE);
     }
   }
 };
+
+// First informational page
+const keyboardLayoutInfo = {
+  type: htmlButtonResponse,
+  stimulus: `
+    <div class='instruction'> 
+      <p>It is expected that your keyboard has the following character layout:</p>
+      <div style="display: flex; justify-content: center; margin: 20px 0;">
+        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/qwerty-layout.jpg" width="500" style="max-width: 100%;">
+      </div>
+    </div>
+  `,
+  choices: ["Next >"],
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
+};
+
+// Second informational page
+const typingInstructionsInfo = {
+  type: htmlButtonResponse,
+  stimulus: `
+    <div class='instruction'> 
+      <p>You will be asked to <strong>touch type</strong> text containing pairs of letters.
+         Touch type as you normally would, with left fingers above the home row letters 
+         <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
+         and right fingers above the home row letters 
+         <span style="white-space: nowrap;"><span id=keystroke>J</span><span id=keystroke>K</span><span id=keystroke>L</span><span id=keystroke>;</span></span>
+         </p>
+      <div style="display: flex; justify-content: center; margin: 20px 0;">
+        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
+      </div>
+      <p>After typing the text, you will be asked which pair of letters was easier to type,
+         and how much easier it was.</p>
+    </div>
+  `,
+  choices: ["Next >"],
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
+};
+
+// Function to generate random text with spaces
+function generateRandomText(ncharacters, character_list) {
+  let text = '';
+  let nextSpace = 5 + Math.floor(Math.random() * 4); // 5-8 characters
+  for (let i = 0; i < ncharacters; i++) {
+    if (i === nextSpace) {
+      text += ' ';
+      nextSpace = i + 5 + Math.floor(Math.random() * 4);
+    } else {
+      text += character_list[Math.floor(Math.random() * character_list.length)];
+    }
+  }
+  return text.replace(/\s+/g, ' '); // Ensure only single spaces
+}
 
 // Function to update the color of individual letters as they're typed
 function updateLetterColors(index, color, bold = false) {
@@ -222,34 +227,23 @@ function updateLetterColors(index, color, bold = false) {
   }
 }
 
-// Function to flash all letters red when a mistake is made
-function flashAllLettersRed() {
-  const letterSpans = document.querySelectorAll('.letter');
-  letterSpans.forEach(span => {
-    span.style.color = 'red';
-    span.style.fontWeight = 'normal';  // Reset font weight
-  });
-
-  setTimeout(() => {
-    letterSpans.forEach(span => {
-      span.style.color = '';
-      span.style.fontWeight = 'normal';
-    });
-  }, 500);  // Flash red for 500ms
-}
-
-function createTypingTrial(bigram1, bigram2, trialId, repetitions) {
-  let keyData = [];
+// Function to create the typing trial
+function createTypingTrial(bigram1, bigram2, trialId) {
+  const text1 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
+  const text2 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
+  const bigramRepetition1 = ` ${(bigram1 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim()}`;
+  const bigramRepetition2 = ` ${(bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim()}`;
+  const alternatingBigrams = ` ${((bigram1 + ' ' + bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions)).trim()}`;
+  
+  const fullText = `${text1}${bigramRepetition1} ${text2}${bigramRepetition2} ${alternatingBigrams}`;
+  
   let typedSequence = "";
+  let keyData = [];
   const trialStartTime = performance.now();
-  let trialCompleted = false;
-  const fullSequence = (bigram1 + ' ' + bigram2 + ' ').repeat(repetitions).trim();
 
   function handleKeyPress(event) {
-    if (trialCompleted) return;
-
     let typedKey = event.key.toLowerCase();
-    const expectedKey = fullSequence[typedSequence.length];
+    const expectedKey = fullText[typedSequence.length];
     const keydownTime = performance.now() - trialStartTime;
 
     if (event.key === 'Shift' || event.key.length > 1) {
@@ -258,101 +252,175 @@ function createTypingTrial(bigram1, bigram2, trialId, repetitions) {
 
     if (typedKey === expectedKey) {
       typedSequence += typedKey;
-      updateLetterColors(typedSequence.length - 1, 'green', true);  // Added true for bold
+      updateLetterColors(typedSequence.length - 1, 'gray');
       keyData.push({
         expectedKey: expectedKey,
         typedKey: typedKey,
-        keydownTime: keydownTime.toFixed(2),
-        chosenBigram: "",
-        unchosenBigram: ""
+        isCorrect: true,
+        keydownTime: keydownTime.toFixed(2)
       });
 
-      if (typedSequence === fullSequence) {
-        trialCompleted = true;
-        setTimeout(() => {
-          jsPsych.finishTrial({
-            keyData: keyData,
-            task: 'typing',
-            bigramPair: `${bigram1}, ${bigram2}`,
-            fullSequence: fullSequence,
-            trialId: trialId
-          });
-        }, 1000);
+      if (typedSequence === fullText) {
+        showSlider(bigram1, bigram2, trialId, fullText, keyData);
       }
     } else {
-      flashAllLettersRed();
-      typedSequence = "";
-      keyData = [];
+      const randomText1End = text1.length;
+      const bigram1End = randomText1End + bigramRepetition1.length + 1;
+      const randomText2End = bigram1End + text2.length;
+      const bigram2End = randomText2End + bigramRepetition2.length + 1;
+
+      // Allow mistakes in random text parts
+      if (typedSequence.length < randomText1End || 
+          (typedSequence.length > bigram1End && typedSequence.length < randomText2End)) {
+        keyData.push({
+          expectedKey: expectedKey,
+          typedKey: typedKey,
+          isCorrect: false,
+          keydownTime: keydownTime.toFixed(2)
+        });
+      } else {
+        // Reset to the beginning of the current bigram section if a mistake is made
+        if (typedSequence.length < bigram1End) {
+          typedSequence = text1;
+        } else if (typedSequence.length < bigram2End) {
+          typedSequence = fullText.substring(0, bigram1End + text2.length);
+        } else {
+          typedSequence = fullText.substring(0, bigram2End);
+        }
+        updateLetterColors();
+      }
     }
+
+    // Force update of the display
+    document.getElementById('text-to-type').innerHTML = fullText.split('').map((char, index) => 
+      `<span class="letter" style="${
+        (index >= text1.length && index < text1.length + bigramRepetition1.length) || 
+        (index >= text1.length + bigramRepetition1.length + 1 + text2.length && 
+         index < text1.length + bigramRepetition1.length + 1 + text2.length + bigramRepetition2.length) ||
+        (index >= fullText.length - alternatingBigrams.length) 
+          ? 'font-weight: bold;' : ''
+      }${
+        index < typedSequence.length ? 'color: gray;' : ''
+      }">${char}</span>`
+    ).join('');
   }
 
   return {
     type: htmlKeyboardResponse,
     stimulus: `
-    <div class="jspsych-content-wrapper">
-      <div class="jspsych-content">
-        <p>Type the following letter pairs separated by a space:</p>
-        <p id="sequence" style="font-size: 24px; letter-spacing: 2px;">
-          ${fullSequence.split('').map(letter => `<span class="letter">${letter}</span>`).join('')}
-        </p>
-      </div>
-    </div>`,
+      <div class="jspsych-content-wrapper">
+        <div class="jspsych-content">
+          <p>Type the following text:</p>
+          <p id="text-to-type" style="font-size: 24px; letter-spacing: 2px; white-space: pre-wrap;">
+            ${fullText.split('').map((char, index) => 
+              `<span class="letter" style="${
+                (index >= text1.length && index < text1.length + bigramRepetition1.length) || 
+                (index >= text1.length + bigramRepetition1.length + 1 + text2.length && 
+                 index < text1.length + bigramRepetition1.length + 1 + text2.length + bigramRepetition2.length) ||
+                (index >= fullText.length - alternatingBigrams.length) 
+                  ? 'font-weight: bold;' : ''
+              }">${char}</span>`
+            ).join('')}
+          </p>
+        </div>
+      </div>`,
     choices: "NO_KEYS",
-    trial_duration: null,
     on_load: function() {
       document.addEventListener('keydown', handleKeyPress);
     },
     on_finish: function(data) {
       document.removeEventListener('keydown', handleKeyPress);
-      data.keyData = keyData;
-      data.task = 'typing';
-      data.bigramPair = `${bigram1}, ${bigram2}`;
-      data.fullSequence = fullSequence;
-      data.trialId = trialId;
-      jsPsych.data.write(data);
-      console.log("Typing Trial Data:", data);
     }
   };
 }
 
-// Comfort choice trial
-function createComfortChoiceTrial(bigram1, bigram2, trialIndex) {
-  return {
-    type: htmlButtonResponse,
-    stimulus: `<p style="font-size: 28px;">Which pair was easier to type?</p>`,
-    choices: [bigram1, bigram2],
-    button_html: '<button class="jspsych-btn comfort-choice-button">%choice%</button>',
-    data: {
-      task: 'comfort_choice',
-      bigram1: bigram1,
-      bigram2: bigram2,
-      trialId: `trial-${trialIndex}-choice`
-    },
-    on_finish: function (data) {
-      let chosenBigram = "";
-      let unchosenBigram = "";
-      if (data.response === 0) {
+function showSlider(bigram1, bigram2, trialId, fullText, keyData) {
+  const sliderHtml = `
+    <p>Which was easier to type?</p>
+    <div class="slider-container">
+      <span>${bigram1}</span>
+      <input type="range" min="-100" max="100" value="0" class="slider inactive" id="comfortSlider">
+      <span>${bigram2}</span>
+    </div>
+    <button id="nextButton" style="display: none;">Next</button>
+  `;
+
+  document.querySelector('.jspsych-content').innerHTML += sliderHtml;
+
+  const slider = document.getElementById('comfortSlider');
+  const nextButton = document.getElementById('nextButton');
+
+  slider.addEventListener('click', function(e) {
+    if (this.classList.contains('inactive')) {
+      const sliderRect = this.getBoundingClientRect();
+      const clickPosition = (e.clientX - sliderRect.left) / sliderRect.width;
+      this.value = Math.round((clickPosition * 200) - 100);
+      this.classList.remove('inactive');
+    }
+    nextButton.style.display = 'block';
+  });
+
+  nextButton.addEventListener('click', function() {
+    let sliderValue = parseInt(slider.value);
+    
+    let chosenBigram, unchosenBigram;
+    if (sliderValue === 0) {
+      // Randomly choose if the slider is at 0
+      if (Math.random() < 0.5) {
         chosenBigram = bigram1;
         unchosenBigram = bigram2;
-      } else if (data.response === 1) {
+        sliderValue = -1;  // Slight preference for the left bigram
+      } else {
         chosenBigram = bigram2;
         unchosenBigram = bigram1;
+        sliderValue = 1;  // Slight preference for the right bigram
       }
-
-      // Update the previous two typing trials with the chosen bigram
-      const allData = jsPsych.data.get().values();
-      const currentTrialIndex = allData.length - 1;
-      
-      for (let i = currentTrialIndex - 1; i >= currentTrialIndex - 2; i--) {
-        if (allData[i].task === 'typing' && allData[i].keyData) {
-          allData[i].keyData.forEach(keyEvent => {
-            keyEvent.chosenBigram = chosenBigram;
-            keyEvent.unchosenBigram = unchosenBigram;
-          });
-        }
-      }
+    } else {
+      chosenBigram = sliderValue < 0 ? bigram1 : bigram2;
+      unchosenBigram = sliderValue < 0 ? bigram2 : bigram1;
     }
+
+    const bigramTimes = calculateBigramTimes(keyData, bigram1, bigram2);
+
+    jsPsych.finishTrial({
+      task: 'typing_and_choice',
+      trialId: trialId,
+      text: fullText,
+      sliderValue: sliderValue,
+      chosenBigram: chosenBigram,
+      unchosenBigram: unchosenBigram,
+      chosenBigramTime: bigramTimes[chosenBigram],
+      unchosenBigramTime: bigramTimes[unchosenBigram],
+      keyData: keyData
+    });
+  });
+}
+
+function calculateBigramTimes(keyData, bigram1, bigram2) {
+  const bigramTimes = {
+    [bigram1]: [],
+    [bigram2]: []
   };
+
+  for (let i = 0; i < keyData.length - 1; i++) {
+    const currentBigram = keyData[i].typedKey + keyData[i+1].typedKey;
+    if (currentBigram === bigram1 || currentBigram === bigram2) {
+      const time = keyData[i+1].keydownTime - keyData[i].keydownTime;
+      bigramTimes[currentBigram].push(time);
+    }
+  }
+
+  return {
+    [bigram1]: calculateMedian(bigramTimes[bigram1]),
+    [bigram2]: calculateMedian(bigramTimes[bigram2])
+  };
+}
+
+function calculateMedian(arr) {
+  if (arr.length === 0) return null;
+  const sorted = arr.sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
 // Function to escape commas and wrap fields in quotes if necessary
@@ -365,106 +433,62 @@ function escapeCSVField(field) {
 
 // Function to convert data to CSV format
 function convertToCSV(data) {
-  const csvHeaders = ['trialId', 'bigramPair', 'bigramPairSequence', 'bigram', 'keyPosition', 'expectedKey', 'typedKey', 'keydownTime', 'chosenBigram', 'unchosenBigram'];
-  let csvContent = csvHeaders.join(',') + '\n';
+  const rawHeaders = ['user_id', 'trialId', 'expectedKey', 'typedKey', 'isCorrect', 'keydownTime'];
+  const summaryHeaders = ['user_id', 'trialId', 'text', 'sliderValue', 'chosenBigram', 'unchosenBigram', 'chosenBigramTime', 'unchosenBigramTime'];
 
-  let mainTrialCounter = 1;
+  let rawContent = rawHeaders.join(',') + '\n';
+  let summaryContent = summaryHeaders.join(',') + '\n';
 
   data.forEach(trial => {
-    if (trial.task === 'typing' && trial.keyData) {
-      const bigramPair = trial.bigramPair;
-      const bigramPairSequence = trial.fullSequence;
-      const bigrams = bigramPair.split(', ');
-
-      let validKeyCounter = 0;
-
-      // Determine if this is an intro trial or main trial
-      let trialId;
-      if (trial.trialId.startsWith('intro-trial-')) {
-        trialId = trial.trialId;  // Keep the original intro trial ID
-      } else {
-        trialId = `trial${mainTrialCounter}`;
-        mainTrialCounter++;
-      }
-
-      trial.keyData.forEach((keyEvent) => {
-        // Skip rows with empty expectedKey or space
-        if (!keyEvent.expectedKey || keyEvent.expectedKey === ' ') {
-          return;
-        }
-
-        validKeyCounter++;
-        const bigramIndex = Math.floor((validKeyCounter - 1) / 2) % 2;
-        const currentBigram = bigrams[bigramIndex];
-        const keyPosition = (validKeyCounter % 2 === 1) ? 1 : 2;
-
-        const row = [
-          escapeCSVField(trialId),
-          escapeCSVField(bigramPair),
-          escapeCSVField(bigramPairSequence),
-          escapeCSVField(currentBigram),
-          keyPosition,
+    if (trial.task === 'typing_and_choice') {
+      // Raw data
+      trial.keyData.forEach(keyEvent => {
+        const rawRow = [
+          prolificID,
+          trial.trialId,
           escapeCSVField(keyEvent.expectedKey),
           escapeCSVField(keyEvent.typedKey),
-          keyEvent.keydownTime !== undefined ? keyEvent.keydownTime : '',
-          escapeCSVField(keyEvent.chosenBigram || ''),
-          escapeCSVField(keyEvent.unchosenBigram || '')
+          keyEvent.isCorrect,
+          keyEvent.keydownTime
         ];
-        csvContent += row.join(',') + '\n';
+        rawContent += rawRow.join(',') + '\n';
       });
+
+      // Summary data
+      const summaryRow = [
+        prolificID,
+        trial.trialId,
+        escapeCSVField(trial.text),
+        trial.sliderValue,
+        escapeCSVField(trial.chosenBigram),
+        escapeCSVField(trial.unchosenBigram),
+        trial.chosenBigramTime,
+        trial.unchosenBigramTime
+      ];
+      summaryContent += summaryRow.join(',') + '\n';
     }
   });
 
-  return csvContent;
+  return { rawContent, summaryContent };
 }
 
-// Function to store data on OSF
-async function storeDataOnOSF(data, format = 'csv') {
-  console.log("Received data for upload:", data);
-
+// Functionunction to store data on OSF
+async function storeDataOnOSF(data) {
   const osfToken = await loadOSFToken();
-  console.log("Using OSF API token:", osfToken);
-
   if (!osfToken) {
     console.error('Error: OSF API token not available. Data will not be stored on OSF.');
     return;
   }
 
   const osfNodeId = "jf8sc";
-  const fileExtension = format === 'csv' ? 'csv' : 'json';
-  const createFileUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=experiment_data_${prolificID}_${Date.now()}.${fileExtension}`;
+  const { rawContent, summaryContent } = convertToCSV(data);
 
-  let fileData;
-  let contentType;
-
-  if (format === 'csv') {
-    console.log("Converting data to CSV format...");
-    fileData = convertToCSV(data);  // Use the new CSV conversion logic
-    contentType = 'text/csv';
-  } else {
-    console.log("Converting data to JSON format...");
-    fileData = JSON.stringify(data);
-    contentType = 'application/json';
-  }
+  const rawDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=raw_data_${prolificID}_${Date.now()}.csv`;
+  const summaryDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=summary_data_${prolificID}_${Date.now()}.csv`;
 
   try {
-    console.log(`Attempting to upload data to OSF. URL: ${createFileUrl}`);
-    const uploadResponse = await fetch(createFileUrl, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${osfToken}`,
-        'Content-Type': contentType,
-      },
-      body: fileData,
-    });
-
-    console.log("OSF Upload Response:", uploadResponse);
-
-    if (!uploadResponse.ok) {
-      const errorDetails = await uploadResponse.text();
-      throw new Error(`Upload error! Status: ${uploadResponse.status}, Details: ${errorDetails}`);
-    }
-
+    await uploadToOSF(rawDataUrl, rawContent, osfToken);
+    await uploadToOSF(summaryDataUrl, summaryContent, osfToken);
     console.log('Data successfully stored on OSF');
   } catch (error) {
     console.error('Error storing data on OSF:', error);
@@ -472,44 +496,27 @@ async function storeDataOnOSF(data, format = 'csv') {
   }
 }
 
-// End the experiment and upload data to OSF
-function endExperiment() {
-  const experimentData = jsPsych.data.get().values();
-  console.log("All experiment data:", experimentData);
+async function uploadToOSF(url, data, token) {
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'text/csv',
+    },
+    body: data,
+  });
 
-  // Filter out any empty or invalid data
-  const validData = experimentData.filter(trial => trial.task === 'typing' && trial.keyData && trial.keyData.length > 0);
-  console.log("Valid data for CSV:", validData);
-
-  storeDataOnOSF(validData, 'csv')
-    .then(() => {
-      redirectToProlific(COMPLETION_CODE);
-    })
-    .catch(error => {
-      console.error("Error in storeDataOnOSF:", error);
-      redirectToProlific(COMPLETION_CODE);
-    });
-}
-
-// Add end experiment screen
-const thankYouTrial = {
-  type: htmlButtonResponse,
-  stimulus: `<p>Thank you for participating! <br>The experiment is now complete.</p>`,
-  choices: ["Finish"],
-  on_load: function() {
-    console.log("Thank you trial loaded");
-  },
-  on_finish: function () {
-    console.log("Thank you trial finished, calling endExperiment function now...");
-    endExperiment();
+  if (!response.ok) {
+    const errorDetails = await response.text();
+    throw new Error(`Upload error! Status: ${response.status}, Details: ${errorDetails}`);
   }
-};
+}
 
 // Timer function for the entire experiment
 function startExperimentTimer() {
   if (!experimentConfig.useTimer) {
     console.log("Timer is disabled.");
-    return;  // Exit the function if the timer is not to be used
+    return;
   }
 
   let timeRemaining = experimentConfig.timeLimit;
@@ -543,14 +550,46 @@ const startExperiment = {
   choices: ["Start"],
   button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
   on_finish: () => {
-    experimentStartTime = performance.now();  // Set the start time
+    experimentStartTime = performance.now();
     if (experimentConfig.useTimer) {
-      startExperimentTimer();  // Start the timer for the entire experiment (if enabled)
+      startExperimentTimer();
     }
   }
 };
 
-// Run the experiment
+// End the experiment and upload data to OSF
+function endExperiment() {
+  const experimentData = jsPsych.data.get().values();
+  console.log("All experiment data:", experimentData);
+
+  // Filter out any empty or invalid data
+  const validData = experimentData.filter(trial => trial.task === 'typing_and_choice' && trial.keyData && trial.keyData.length > 0);
+  console.log("Valid data for CSV:", validData);
+
+  storeDataOnOSF(validData)
+    .then(() => {
+      redirectToProlific(COMPLETION_CODE);
+    })
+    .catch(error => {
+      console.error("Error in storeDataOnOSF:", error);
+      redirectToProlific(COMPLETION_CODE);
+    });
+}
+
+// Add end experiment screen
+const thankYouTrial = {
+  type: htmlButtonResponse,
+  stimulus: `<p>Thank you for participating! <br>The experiment is now complete.</p>`,
+  choices: ["Finish"],
+  on_load: function() {
+    console.log("Thank you trial loaded");
+  },
+  on_finish: function () {
+    console.log("Thank you trial finished, calling endExperiment function now...");
+    endExperiment();
+  }
+};
+
 // Run the experiment
 async function runExperiment(options = {}) {
   // Update experimentConfig with provided options
@@ -589,10 +628,8 @@ async function runExperiment(options = {}) {
       keyboardLayoutInfo,
       typingInstructionsInfo,
       startExperiment,
-      // Introductory pairs (always in the same order)
       ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`, experimentConfig.requiredCorrectRepetitions),
-        createComfortChoiceTrial(bigram1, bigram2, `intro-${index + 1}`)
+        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`)
       ]),
     ],
     conditional_function: function() {
@@ -607,12 +644,11 @@ async function runExperiment(options = {}) {
       {
         type: htmlButtonResponse,
         stimulus: `<p>Great job! You've completed the practice session.<br>
-                   Now we'll move on to the main part of the experiment.</p>`,
+                    Now we'll move on to the main part of the experiment.</p>`,
         choices: ['Continue'],
       },
       ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`, experimentConfig.requiredCorrectRepetitions),
-        createComfortChoiceTrial(bigram1, bigram2, `main-${index + 1}`)
+        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`)
       ])
     );
   }
@@ -636,5 +672,7 @@ runExperiment({
   randomizePairOrder: experimentConfig.randomizePairOrder,
   randomizeBigramsWithinPairs: experimentConfig.randomizeBigramsWithinPairs,
   trainingBigramFile: experimentConfig.trainingBigramFile,
-  mainBigramFile: experimentConfig.mainBigramFile
+  mainBigramFile: experimentConfig.mainBigramFile,
+  character_list: experimentConfig.character_list,
+  ncharacters: experimentConfig.ncharacters
 });
