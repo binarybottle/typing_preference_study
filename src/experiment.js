@@ -215,7 +215,7 @@ function generateRandomText(ncharacters, character_list) {
       text += character_list[Math.floor(Math.random() * character_list.length)];
     }
   }
-  return text.replace(/\s+/g, ' '); // Ensure only single spaces
+  return text.replace(/\s+/g, ' ').trim(); // Ensure only single spaces and trim any leading/trailing spaces
 }
 
 // Function to update the color of individual letters as they're typed
@@ -231,15 +231,39 @@ function updateLetterColors(index, color, bold = false) {
 function createTypingTrial(bigram1, bigram2, trialId) {
   const text1 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
   const text2 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
-  const bigramRepetition1 = ` ${(bigram1 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim()}`;
-  const bigramRepetition2 = ` ${(bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim()}`;
-  const alternatingBigrams = ` ${((bigram1 + ' ' + bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions)).trim()}`;
+  const bigramRepetition1 = (bigram1 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim();
+  const bigramRepetition2 = (bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim();
+  const alternatingBigrams = ((bigram1 + ' ' + bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions)).trim();
   
-  const fullText = `${text1}${bigramRepetition1} ${text2}${bigramRepetition2} ${alternatingBigrams}`;
+  // Combine all parts and ensure no more than one space between parts
+  const fullText = `${text1} ${bigramRepetition1} ${text2} ${bigramRepetition2} ${alternatingBigrams}`.replace(/\s+/g, ' ');
   
   let typedSequence = "";
   let keyData = [];
   const trialStartTime = performance.now();
+
+  // Calculate section boundaries
+  const randomText1End = text1.length;
+  const bigram1Start = randomText1End + 1; // Include the space before bigram1
+  const bigram1End = bigram1Start + bigramRepetition1.length;
+  const randomText2Start = bigram1End + 1;
+  const randomText2End = randomText2Start + text2.length;
+  const bigram2Start = randomText2End + 1; // Include the space before bigram2
+  const bigram2End = bigram2Start + bigramRepetition2.length;
+  const alternatingBigramsStart = bigram2End + 1;
+
+  function updateDisplay() {
+    document.getElementById('text-to-type').innerHTML = fullText.split('').map((char, index) => 
+      `<span class="letter" style="${
+        (index >= bigram1Start && index < bigram1End) || 
+        (index >= bigram2Start && index < bigram2End) ||
+        (index >= alternatingBigramsStart) 
+          ? 'font-weight: bold;' : ''
+      }${
+        index < typedSequence.length ? 'color: gray;' : ''
+      }">${char}</span>`
+    ).join('');
+  }
 
   function handleKeyPress(event) {
     let typedKey = event.key.toLowerCase();
@@ -252,7 +276,6 @@ function createTypingTrial(bigram1, bigram2, trialId) {
 
     if (typedKey === expectedKey) {
       typedSequence += typedKey;
-      updateLetterColors(typedSequence.length - 1, 'gray');
       keyData.push({
         expectedKey: expectedKey,
         typedKey: typedKey,
@@ -264,14 +287,9 @@ function createTypingTrial(bigram1, bigram2, trialId) {
         showSlider(bigram1, bigram2, trialId, fullText, keyData);
       }
     } else {
-      const randomText1End = text1.length;
-      const bigram1End = randomText1End + bigramRepetition1.length + 1;
-      const randomText2End = bigram1End + text2.length;
-      const bigram2End = randomText2End + bigramRepetition2.length + 1;
-
       // Allow mistakes in random text parts
       if (typedSequence.length < randomText1End || 
-          (typedSequence.length > bigram1End && typedSequence.length < randomText2End)) {
+          (typedSequence.length >= randomText2Start && typedSequence.length < randomText2End)) {
         keyData.push({
           expectedKey: expectedKey,
           typedKey: typedKey,
@@ -281,28 +299,16 @@ function createTypingTrial(bigram1, bigram2, trialId) {
       } else {
         // Reset to the beginning of the current bigram section if a mistake is made
         if (typedSequence.length < bigram1End) {
-          typedSequence = text1;
+          typedSequence = fullText.substring(0, bigram1Start);
         } else if (typedSequence.length < bigram2End) {
-          typedSequence = fullText.substring(0, bigram1End + text2.length);
+          typedSequence = fullText.substring(0, bigram2Start);
         } else {
-          typedSequence = fullText.substring(0, bigram2End);
+          typedSequence = fullText.substring(0, alternatingBigramsStart);
         }
-        updateLetterColors();
       }
     }
 
-    // Force update of the display
-    document.getElementById('text-to-type').innerHTML = fullText.split('').map((char, index) => 
-      `<span class="letter" style="${
-        (index >= text1.length && index < text1.length + bigramRepetition1.length) || 
-        (index >= text1.length + bigramRepetition1.length + 1 + text2.length && 
-         index < text1.length + bigramRepetition1.length + 1 + text2.length + bigramRepetition2.length) ||
-        (index >= fullText.length - alternatingBigrams.length) 
-          ? 'font-weight: bold;' : ''
-      }${
-        index < typedSequence.length ? 'color: gray;' : ''
-      }">${char}</span>`
-    ).join('');
+    updateDisplay();
   }
 
   return {
@@ -314,10 +320,9 @@ function createTypingTrial(bigram1, bigram2, trialId) {
           <p id="text-to-type" style="font-size: 24px; letter-spacing: 2px; white-space: pre-wrap;">
             ${fullText.split('').map((char, index) => 
               `<span class="letter" style="${
-                (index >= text1.length && index < text1.length + bigramRepetition1.length) || 
-                (index >= text1.length + bigramRepetition1.length + 1 + text2.length && 
-                 index < text1.length + bigramRepetition1.length + 1 + text2.length + bigramRepetition2.length) ||
-                (index >= fullText.length - alternatingBigrams.length) 
+                (index >= bigram1Start && index < bigram1End) || 
+                (index >= bigram2Start && index < bigram2End) ||
+                (index >= alternatingBigramsStart) 
                   ? 'font-weight: bold;' : ''
               }">${char}</span>`
             ).join('')}
@@ -339,7 +344,7 @@ function showSlider(bigram1, bigram2, trialId, fullText, keyData) {
     <p>Which was easier to type?</p>
     <div class="slider-container">
       <span>${bigram1}</span>
-      <input type="range" min="-100" max="100" value="0" class="slider inactive" id="comfortSlider">
+      <input type="range" min="-100" max="100" value="0" class="slider" id="comfortSlider">
       <span>${bigram2}</span>
     </div>
     <button id="nextButton" style="display: none;">Next</button>
@@ -350,15 +355,16 @@ function showSlider(bigram1, bigram2, trialId, fullText, keyData) {
   const slider = document.getElementById('comfortSlider');
   const nextButton = document.getElementById('nextButton');
 
-  slider.addEventListener('click', function(e) {
-    if (this.classList.contains('inactive')) {
-      const sliderRect = this.getBoundingClientRect();
-      const clickPosition = (e.clientX - sliderRect.left) / sliderRect.width;
-      this.value = Math.round((clickPosition * 200) - 100);
-      this.classList.remove('inactive');
+  function activateSlider() {
+    if (!slider.classList.contains('active')) {
+      slider.classList.add('active');
+      nextButton.style.display = 'block';
     }
-    nextButton.style.display = 'block';
-  });
+  }
+
+  slider.addEventListener('mousedown', activateSlider);
+  slider.addEventListener('touchstart', activateSlider);
+  slider.addEventListener('input', activateSlider);
 
   nextButton.addEventListener('click', function() {
     let sliderValue = parseInt(slider.value);
