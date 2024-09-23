@@ -99,7 +99,7 @@ def load_improbable_pairs(file_path):
         # Convert DataFrame to list of tuples
         improbable_pairs = list(df[['probable_bigram', 'improbable_bigram']].itertuples(index=False, name=None))
         
-        print(f"Loaded {len(improbable_pairs)} improbable bigram pairs from {file_path}")
+        print(f"Loaded {len(improbable_pairs)} bigram pairs from {file_path} where one bigram is an improbable choice.")
         return improbable_pairs
     
     except FileNotFoundError:
@@ -319,7 +319,7 @@ def analyze_improbable_choices(bigram_data, improbable_pairs, threshold=5):
     print(f"Total users analyzed: {total_users}")
     print(f"Total choices analyzed: {total_choices}")
     print(f"Total improbable choices: {total_improbable_choices}")
-    print(f"Users with suspiciously high improbable choice counts: {total_suspicious}")
+    print(f"Users with >{threshold} improbable choices: {total_suspicious}")
     print(f"Percentage of suspicious users: {(total_suspicious / total_users) * 100:.2f}%")
     print(f"Average improbable choice count across all users: {avg_improbable_count:.2f}")
 
