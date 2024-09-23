@@ -11,7 +11,7 @@ let experimentConfig = {
   requiredCorrectRepetitions: 3,
   timeLimit: 10,
   useTimer: false,
-  practiceOnly: true,
+  practiceOnly: false,
   randomizePairOrder: true,
   randomizeBigramsWithinPairs: false,
   trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',
