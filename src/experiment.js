@@ -8,16 +8,16 @@ const jsPsych = initJsPsych();
 
 // Global variables and configuration
 let experimentConfig = {
-  requiredCorrectRepetitions: 3,
-  timeLimit: 10,
-  useTimer: false,
-  practiceOnly: false,
-  randomizePairOrder: true,
-  randomizeBigramsWithinPairs: false,
-  trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',
-  mainBigramFile: 'bigram_tables/bigram_2x80pairs_LH.csv',
-  character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./',
-  ncharacters: 6,
+  practiceOnly: true,  // If true, only run the practice set
+  nbigramRepetitions: 3,  // number of repetitions of each bigram
+  ncharacters: 5,  // number of random characters (from character_list) preceding each block of bigrams 
+  character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./', // Default list of characters
+  trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
+  mainBigramFile: 'bigram_tables/bigram_50pairs_21tests_21swap_8easy_LH.csv',  // Default filename for main bigram pairs
+  randomizePairOrder: true,  // If true, randomize the order of bigram pairs
+  randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
+  useTimer: false,  // If true, use a timer (untested)
+  timeLimit: 10,  // Timer default time limit of 10 seconds for the entire experiment (untested)
 };
 
 let experimentStartTime;
@@ -232,9 +232,9 @@ function createTypingTrial(bigram1, bigram2, trialId) {
   const text1 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
   const text2 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
   const text3 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
-  const bigramRepetition1 = (bigram1 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim();
-  const bigramRepetition2 = (bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions).trim();
-  const alternatingBigrams = ((bigram1 + ' ' + bigram2 + ' ').repeat(experimentConfig.requiredCorrectRepetitions)).trim();
+  const bigramRepetition1 = (bigram1 + ' ').repeat(experimentConfig.nbigramRepetitions).trim();
+  const bigramRepetition2 = (bigram2 + ' ').repeat(experimentConfig.nbigramRepetitions).trim();
+  const alternatingBigrams = ((bigram1 + ' ' + bigram2 + ' ').repeat(experimentConfig.nbigramRepetitions)).trim();
   
   const fullText = `${text1} ${bigramRepetition1} ${text2} ${bigramRepetition2} ${text3} ${alternatingBigrams}`.replace(/\s+/g, ' ');
   
@@ -665,7 +665,7 @@ runExperiment({
   practiceOnly: experimentConfig.practiceOnly,
   useTimer: experimentConfig.useTimer,
   timeLimit: experimentConfig.timeLimit,
-  requiredCorrectRepetitions: experimentConfig.requiredCorrectRepetitions,
+  nbigramRepetitions: experimentConfig.nbigramRepetitions,
   randomizePairOrder: experimentConfig.randomizePairOrder,
   randomizeBigramsWithinPairs: experimentConfig.randomizeBigramsWithinPairs,
   trainingBigramFile: experimentConfig.trainingBigramFile,
