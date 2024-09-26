@@ -269,19 +269,24 @@ def analyze_choice_inconsistencies(bigram_data):
     bigram_data['std_bigram_pair'] = bigram_data['bigram_pair'].apply(lambda x: ','.join(sorted(x.split(', '))))
 
     # Count occurrences of each standardized bigram pair
-    pair_counts = bigram_data['std_bigram_pair'].value_counts()
-
-    # Filter for pairs that appear more than once (potential for inconsistency)
-    potential_inconsistent_pairs = pair_counts[pair_counts > 1].index
+    pair_counts = bigram_data.groupby(['user_id', 'std_bigram_pair']).size()
+    
+    # Filter for pairs that appear more than once for each user (potential for inconsistency)
+    potential_inconsistent_pairs = pair_counts[pair_counts > 1].reset_index()[['user_id', 'std_bigram_pair']]
 
     # Filter bigram_data to only include these pairs
-    filtered_data = bigram_data[bigram_data['std_bigram_pair'].isin(potential_inconsistent_pairs)]
+    filtered_data = bigram_data.merge(potential_inconsistent_pairs, on=['user_id', 'std_bigram_pair'])
 
-    # Total users
+    # Proceed only if there are potentially inconsistent pairs
+    if filtered_data.empty:
+        print("No potential inconsistencies found. All users chose consistently for each unique bigram pair.")
+        return {}
+
+    # Total users with potential inconsistencies
     total_users = filtered_data['user_id'].nunique()
 
     # Total unique bigram pairs that could be inconsistent
-    total_pairs = len(potential_inconsistent_pairs)
+    total_pairs = filtered_data['std_bigram_pair'].nunique()
 
     # Total bigram pair choices (each user may have multiple choices for each pair)
     total_choices = len(filtered_data)
@@ -296,30 +301,38 @@ def analyze_choice_inconsistencies(bigram_data):
     total_inconsistent_pairs = inconsistencies['std_bigram_pair'].nunique()
 
     # Inconsistent choices per user
-    inconsistent_choices_per_user = inconsistencies.groupby('user_id')['std_bigram_pair'].count()
+    inconsistent_choices_per_user = inconsistencies.groupby('user_id')['std_bigram_pair'].nunique()
 
     # Most common inconsistent pairs
     inconsistent_pair_counts = inconsistencies['std_bigram_pair'].value_counts()
 
     print("\n____ Bigram Choice Inconsistency Statistics ____\n")
-
-    print(f"Total users: {total_users}")
-    print(f"Total unique bigram pairs that could be inconsistent: {total_pairs}")
-    print(f"Total bigram choices for these pairs: {total_choices}")
-    print(f"Users with at least one inconsistency: {users_with_inconsistencies}")
+    print(f"Unique bigram pairs that could be inconsistent: {total_pairs}")
     print(f"Unique bigram pairs with at least one inconsistency: {total_inconsistent_pairs}")
+    print(f"Users with at least one inconsistency: {users_with_inconsistencies}")
 
     # Consistency frequencies
     consistency_frequencies = filtered_data['is_consistent'].value_counts()
     print(f"\nFrequency of consistent and inconsistent choices:")
+    print(f"Total number of bigram pairs with at least one instance per user: {total_choices}")
     for count, freq in consistency_frequencies.items():
         print(f"{'Consistent' if count else 'Inconsistent'}: {freq} ({freq/total_choices:.2%})")
 
-    # Inconsistency frequencies per pair
-    print(f"\nFrequency of inconsistencies per bigram pair:")
-    for pair, count in inconsistent_pair_counts.items():
-        total_users_for_pair = filtered_data[filtered_data['std_bigram_pair'] == pair]['user_id'].nunique()
-        print(f"'{pair}': {count} out of {total_users_for_pair} users")
+    # Inconsistency frequencies per pair with slider statistics
+    print(f"\nFrequency of inconsistencies per bigram pair (with slider statistics):")
+    inconsistent_pair_user_counts = {}
+    for pair in inconsistent_pair_counts.index:
+        pair_data = filtered_data[filtered_data['std_bigram_pair'] == pair]
+        inconsistent_users = pair_data[pair_data['is_consistent'] == False]['user_id'].nunique()
+        total_users_for_pair = pair_data['user_id'].nunique()
+        inconsistent_pair_user_counts[pair] = inconsistent_users
+        
+        # Calculate median and MAD of slider values
+        slider_values = pair_data['sliderValue']
+        median_slider = slider_values.median()
+        mad_slider = np.median(np.abs(slider_values - median_slider))
+        
+        print(f"'{pair}': {count} out of {total_users_for_pair} users;  slider median (MAD): {median_slider:.2f} ({mad_slider:.2f})")
 
     # Inconsistency frequencies per user
     print(f"\nFrequency of inconsistent choices per user:")
@@ -346,7 +359,8 @@ def analyze_choice_inconsistencies(bigram_data):
         'total_inconsistent_pairs': total_inconsistent_pairs,
         'inconsistent_choices_per_user': inconsistent_choices_per_user,
         'inconsistent_pair_counts': inconsistent_pair_counts,
-        'consistency_frequencies': consistency_frequencies
+        'consistency_frequencies': consistency_frequencies,
+        'inconsistent_pair_user_counts': pd.Series(inconsistent_pair_user_counts)
     }
     return bigram_choice_inconsistency_stats
 
@@ -421,24 +435,39 @@ def analyze_choice_times(bigram_data):
 def plot_bigram_choice_inconsistency_histogram(bigram_choice_inconsistency_stats, output_plots_folder):
     """Plot the histogram of inconsistent pair counts"""
 
-    inconsistent_pair_counts = bigram_choice_inconsistency_stats['inconsistent_pair_counts']
+    inconsistent_pair_user_counts = bigram_choice_inconsistency_stats['inconsistent_pair_user_counts']
 
     # Plot the histogram using seaborn
     sns.set(style="whitegrid")
     plt.figure(figsize=(12, 6))
-    sns.histplot(inconsistent_pair_counts, bins=10, kde=False, color='skyblue', edgecolor='black')
-
-    plt.title('Histogram of inconsistent pair counts', fontsize=16)
-    plt.xlabel('Number of participants', fontsize=14)
-    plt.ylabel('Number of bigram pairs', fontsize=14)
     
+    # Use discrete=True to treat the data as count data
+    sns.histplot(inconsistent_pair_user_counts, bins=range(1, inconsistent_pair_user_counts.max() + 2), 
+                 kde=False, color='skyblue', edgecolor='black', discrete=True)
+
+    plt.title('Histogram of Inconsistent Bigram Pair Counts', fontsize=16)
+    plt.xlabel('Number of Users with Inconsistent Choices', fontsize=14)
+    plt.ylabel('Number of Bigram Pairs', fontsize=14)
+    
+    # Set x-axis to show only integer values
+    plt.xticks(range(1, inconsistent_pair_user_counts.max() + 1))
+    
+    # Add value labels on top of each bar
+    for i, v in enumerate(inconsistent_pair_user_counts.value_counts().sort_index()):
+        plt.text(i+1, v, str(v), ha='center', va='bottom')
+
     # Save the figure
     plt.savefig(os.path.join(output_plots_folder, 'inconsistently_chosen_bigram_pair_counts.png'), dpi=300, bbox_inches='tight')
     
     # Close the plot
     plt.close()
 
-    print(f"bigram_choice_inconsistency_histogram plot saved in {output_plots_folder}")
+    print(f"Bigram choice inconsistency histogram plot saved in {output_plots_folder}")
+
+    # Print additional information
+    print("\nInconsistent Bigram Pair Counts:")
+    for users, count in inconsistent_pair_user_counts.value_counts().sort_index().items():
+        print(f"{users} user{'s' if users > 1 else ''}: {count} bigram pair{'s' if count > 1 else ''}")
 
 
 def plot_median_bigram_times(bigram_data, output_plots_folder):

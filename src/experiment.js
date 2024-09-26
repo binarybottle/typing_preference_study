@@ -13,12 +13,15 @@ let experimentConfig = {
   ncharacters: 5,  // number of random characters (from character_list) preceding each block of bigrams 
   character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./', // Default list of characters
   trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
-  mainBigramFile: 'bigram_tables/bigram_50pairs_21tests_21swap_8easy_LH.csv',  // Default filename for main bigram pairs
+  mainBigramFile: 'bigram_tables/bigram_48pairs_20tests_20swap_8easy_LH.csv',  // Default filename for main bigram pairs
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
   useTimer: false,  // If true, use a timer (untested)
   timeLimit: 10,  // Timer default time limit of 10 seconds for the entire experiment (untested)
 };
+
+// OSF and server configuration
+const osfNodeId = "jf8sc";
 
 let experimentStartTime;
 let timerInterval;
@@ -35,6 +38,10 @@ function getUrlParam(name) {
     return urlParams.get(name);
 }
 prolificID = getUrlParam('PROLIFIC_PID') || 'unknown';
+if (!prolificID || prolificID === 'unknown') {
+  console.error("Error: Prolific ID is not available.");
+  return;
+}
 
 // Function to redirect to Prolific
 function redirectToProlific(code) {
@@ -216,15 +223,6 @@ function generateRandomText(ncharacters, character_list) {
     }
   }
   return text.replace(/\s+/g, ' ').trim(); // Ensure only single spaces and trim any leading/trailing spaces
-}
-
-// Function to update the color of individual letters as they're typed
-function updateLetterColors(index, color, bold = false) {
-  const letterSpans = document.querySelectorAll('.letter');
-  if (letterSpans[index]) {
-    letterSpans[index].style.color = color;
-    letterSpans[index].style.fontWeight = bold ? 'bold' : 'normal';
-  }
 }
 
 // Function to create the typing trial
@@ -428,71 +426,76 @@ function escapeCSVField(field) {
 
 // Function to convert data to CSV format
 function convertToCSV(data) {
-  const rawHeaders = ['user_id', 'trialId', 'expectedKey', 'typedKey', 'isCorrect', 'keydownTime'];
-  const summaryHeaders = ['user_id', 'trialId', 'text', 'sliderValue', 'chosenBigram', 'unchosenBigram', 'chosenBigramTime', 'unchosenBigramTime', 'chosenBigramCorrect', 'unchosenBigramCorrect'];
+  try {
+    const rawHeaders = ['user_id', 'trialId', 'expectedKey', 'typedKey', 'isCorrect', 'keydownTime'];
+    const summaryHeaders = ['user_id', 'trialId', 'text', 'sliderValue', 'chosenBigram', 'unchosenBigram', 'chosenBigramTime', 'unchosenBigramTime', 'chosenBigramCorrect', 'unchosenBigramCorrect'];
 
-  let rawContent = rawHeaders.join(',') + '\n';
-  let summaryContent = summaryHeaders.join(',') + '\n';
+    let rawContent = rawHeaders.join(',') + '\n';
+    let summaryContent = summaryHeaders.join(',') + '\n';
 
-  data.forEach(trial => {
-    if (trial.task === 'typing_and_choice') {
-      // Raw data
-      trial.keyData.forEach(keyEvent => {
-        const rawRow = [
+    data.forEach(trial => {
+      if (trial.task === 'typing_and_choice') {
+        // Raw data
+        trial.keyData.forEach(keyEvent => {
+          const rawRow = [
+            prolificID,
+            trial.trialId,
+            escapeCSVField(keyEvent.expectedKey),
+            escapeCSVField(keyEvent.typedKey),
+            keyEvent.isCorrect,
+            keyEvent.keydownTime
+          ];
+          rawContent += rawRow.join(',') + '\n';
+        });
+
+        // Summary data
+        const summaryRow = [
           prolificID,
           trial.trialId,
-          escapeCSVField(keyEvent.expectedKey),
-          escapeCSVField(keyEvent.typedKey),
-          keyEvent.isCorrect,
-          keyEvent.keydownTime
+          escapeCSVField(trial.text),
+          trial.sliderValue,
+          escapeCSVField(trial.chosenBigram),
+          escapeCSVField(trial.unchosenBigram),
+          trial.chosenBigramTime,
+          trial.unchosenBigramTime,
+          trial.chosenBigramCorrect,
+          trial.unchosenBigramCorrect
         ];
-        rawContent += rawRow.join(',') + '\n';
-      });
+        summaryContent += summaryRow.join(',') + '\n';
+      }
+    });
 
-      // Summary data
-      const summaryRow = [
-        prolificID,
-        trial.trialId,
-        escapeCSVField(trial.text),
-        trial.sliderValue,
-        escapeCSVField(trial.chosenBigram),
-        escapeCSVField(trial.unchosenBigram),
-        trial.chosenBigramTime,
-        trial.unchosenBigramTime,
-        trial.chosenBigramCorrect,
-        trial.unchosenBigramCorrect
-      ];
-      summaryContent += summaryRow.join(',') + '\n';
-    }
-  });
-
-  return { rawContent, summaryContent };
-}
-
-// Functionunction to store data on OSF
-async function storeDataOnOSF(data) {
-  const osfToken = await loadOSFToken();
-  if (!osfToken) {
-    console.error('Error: OSF API token not available. Data will not be stored on OSF.');
-    return;
-  }
-
-  const osfNodeId = "jf8sc";
-  const { rawContent, summaryContent } = convertToCSV(data);
-
-  const rawDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=raw_data_${prolificID}_${Date.now()}.csv`;
-  const summaryDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=summary_data_${prolificID}_${Date.now()}.csv`;
-
-  try {
-    await uploadToOSF(rawDataUrl, rawContent, osfToken);
-    await uploadToOSF(summaryDataUrl, summaryContent, osfToken);
-    console.log('Data successfully stored on OSF');
+    return { rawContent, summaryContent };
   } catch (error) {
-    console.error('Error storing data on OSF:', error);
+    console.error('Error converting data to CSV:', error);
     throw error;
   }
 }
 
+// Function to store data locally on the server, including Prolific ID in the filenames
+const fs = require('fs');  // Node.js File System module
+const path = './data/';
+if (!fs.existsSync(path)){
+    fs.mkdirSync(path);
+}
+function storeDataLocally(rawContent, summaryContent, prolificID) {
+  try {
+    const timestamp = Date.now();
+    const rawFileName = `${path}raw_data_${prolificID}_${timestamp}.csv`;
+    const summaryFileName = `${path}summary_data_${prolificID}_${timestamp}.csv`;
+
+    fs.writeFileSync(rawFileName, rawContent);
+    console.log('Raw data successfully saved locally:', rawFileName);
+
+    fs.writeFileSync(summaryFileName, summaryContent);
+    console.log('Summary data successfully saved locally:', summaryFileName);
+  } catch (error) {
+    console.error('Error saving data locally:', error);
+    throw error;
+  }
+}
+
+// Function to upload data to OSF
 async function uploadToOSF(url, data, token) {
   const response = await fetch(url, {
     method: 'PUT',
@@ -506,6 +509,58 @@ async function uploadToOSF(url, data, token) {
   if (!response.ok) {
     const errorDetails = await response.text();
     throw new Error(`Upload error! Status: ${response.status}, Details: ${errorDetails}`);
+  }
+}
+
+// Function to attempt upload with retries
+async function uploadWithRetry(url, data, token, maxRetries = 3) {
+  let attempt = 0;
+  while (attempt < maxRetries) {
+    try {
+      await uploadToOSF(url, data, token);  // Try to upload the file
+      console.log(`Upload successful after ${attempt + 1} attempt(s):`, url);
+      break;  // Exit the loop if upload succeeds
+    } catch (error) {
+      console.error(`Attempt ${attempt + 1} failed:`, error);
+      attempt++;
+      if (attempt >= maxRetries) {
+        throw new Error(`Failed to upload after ${maxRetries} attempts. Error: ${error.message}`);
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retrying
+    }
+  }
+}
+
+// Function to store data both on OSF and locally on the server, using Prolific ID
+async function storeDataOnOSF(data) {
+  const osfToken = await loadOSFToken();
+  if (!osfToken) {
+    console.error('Error: OSF API token not available. Data will not be stored on OSF.');
+    return;
+  }
+
+  const { rawContent, summaryContent } = convertToCSV(data);
+
+  // Define URLs after prolificID is assigned
+  const rawDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=raw_data_${prolificID}_${Date.now()}.csv`;
+  const summaryDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=summary_data_${prolificID}_${Date.now()}.csv`;
+
+  // Store data on OSF
+  try {
+    console.log("Attempting to upload raw data to OSF...");
+    await uploadWithRetry(rawDataUrl, rawContent, osfToken);
+
+    console.log("Attempting to upload summary data to OSF...");
+    await uploadWithRetry(summaryDataUrl, summaryContent, osfToken);
+
+    // Store data locally on the server, passing the Prolific ID
+    console.log("Storing data locally on the server...");
+    storeDataLocally(rawContent, summaryContent, prolificID);
+
+    console.log('Data successfully stored on OSF and locally on the server');
+  } catch (error) {
+    console.error('Error storing data:', error);
+    throw error;
   }
 }
 
@@ -563,12 +618,17 @@ function endExperiment() {
   const validData = experimentData.filter(trial => trial.task === 'typing_and_choice' && trial.keyData && trial.keyData.length > 0);
   console.log("Valid data for CSV:", validData);
 
+  // Try storing data on OSF, but redirect to Prolific regardless of success or failure
   storeDataOnOSF(validData)
     .then(() => {
-      redirectToProlific(COMPLETION_CODE);
+      console.log('Data stored successfully on OSF.');
     })
-    .catch(error => {
-      console.error("Error in storeDataOnOSF:", error);
+    .catch((error) => {
+      console.error('Error storing data on OSF:', error);
+    })
+    .finally(() => {
+      // Ensure redirection to Prolific regardless of data storage success or failure
+      console.log('Redirecting to Prolific after experiment ends.');
       redirectToProlific(COMPLETION_CODE);
     });
 }
