@@ -8,12 +8,12 @@ const jsPsych = initJsPsych();
 
 // Global variables and configuration
 let experimentConfig = {
-  practiceOnly: false,  // If true, only run the practice set
+  practiceOnly: true,  // If true, only run the practice set
   nbigramRepetitions: 3,  // number of repetitions of each bigram
   ncharacters: 5,  // number of random characters (from character_list) preceding each block of bigrams 
   character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./', // Default list of characters
   trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
-  mainBigramFile: 'bigram_tables/bigram_48pairs_20tests_20swap_8easy_LH.csv',  // Default filename for main bigram pairs
+  mainBigramFile: 'bigram_tables/bigram_27pairs_11tests_11swap_5easy_LH.csv',  // Default filename for main bigram pairs
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
   useTimer: false,  // If true, use a timer (untested)
@@ -39,8 +39,8 @@ function getUrlParam(name) {
 }
 prolificID = getUrlParam('PROLIFIC_PID') || 'unknown';
 if (!prolificID || prolificID === 'unknown') {
-  console.error("Error: Prolific ID is not available.");
-  return;
+  console.warn("Warning: Prolific ID is not available. Proceeding with 'unknown' ID.");
+  // The experiment will continue with an 'unknown' Prolific ID
 }
 
 // Function to redirect to Prolific
@@ -473,21 +473,17 @@ function convertToCSV(data) {
 }
 
 // Function to store data locally on the server, including Prolific ID in the filenames
-const fs = require('fs');  // Node.js File System module
-const path = './data/';
-if (!fs.existsSync(path)){
-    fs.mkdirSync(path);
-}
 function storeDataLocally(rawContent, summaryContent, prolificID) {
   try {
     const timestamp = Date.now();
-    const rawFileName = `${path}raw_data_${prolificID}_${timestamp}.csv`;
-    const summaryFileName = `${path}summary_data_${prolificID}_${timestamp}.csv`;
+    const rawFileName = `raw_data_${prolificID}_${timestamp}.csv`;
+    const summaryFileName = `summary_data_${prolificID}_${timestamp}.csv`;
 
-    fs.writeFileSync(rawFileName, rawContent);
+    // Instead of writing to the file system, we'll use localStorage
+    localStorage.setItem(rawFileName, rawContent);
     console.log('Raw data successfully saved locally:', rawFileName);
 
-    fs.writeFileSync(summaryFileName, summaryContent);
+    localStorage.setItem(summaryFileName, summaryContent);
     console.log('Summary data successfully saved locally:', summaryFileName);
   } catch (error) {
     console.error('Error saving data locally:', error);
