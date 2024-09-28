@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from scipy import stats
 from scipy.stats import median_abs_deviation
-
+from itertools import combinations
+from collections import Counter
 
 def display_information(dframe, title, print_headers, nlines):
     """
@@ -383,6 +384,96 @@ def analyze_typing_times(bigram_data):
     return typing_time_stats
 
 
+def analyze_within_user_bigram_times(bigram_data, output_plots_folder):
+    """
+    Analyze and visualize bigram typing times within users.
+
+    Parameters:
+    - bigram_data: DataFrame containing processed bigram data
+    - output_plots_folder: String path to the folder where plots should be saved
+
+    Returns:
+    - within_user_stats: Dictionary containing within-user analysis results
+    """
+    # Prepare data
+    user_bigram_times = bigram_data.groupby(['user_id', 'chosen_bigram'])['chosen_bigram_time'].median().reset_index()
+    
+    # Perform pairwise Mann-Whitney U tests for each user
+    user_significant_pairs = {}
+    for user_id, user_data in bigram_data.groupby('user_id'):
+        significant_pairs = []
+        bigrams = user_data['chosen_bigram'].unique()
+        for bigram1, bigram2 in combinations(bigrams, 2):
+            times1 = user_data[user_data['chosen_bigram'] == bigram1]['chosen_bigram_time']
+            times2 = user_data[user_data['chosen_bigram'] == bigram2]['chosen_bigram_time']
+            
+            # Check if the data is suitable for comparison
+            if len(times1) > 1 and len(times2) > 1 and not np.array_equal(times1, times2):
+                statistic, p_value = stats.mannwhitneyu(times1, times2, alternative='two-sided')
+                if p_value < 0.05:
+                    significant_pairs.append((bigram1, bigram2, p_value))
+        user_significant_pairs[user_id] = significant_pairs
+
+    # Count users with significant differences and number of significant differences per user
+    users_with_significant_pairs = sum(1 for pairs in user_significant_pairs.values() if len(pairs) > 0)
+    total_users = len(user_significant_pairs)
+    significant_pairs_count = {user_id: len(pairs) for user_id, pairs in user_significant_pairs.items()}
+    total_significant_pairs = sum(significant_pairs_count.values())
+
+    # Visualize individual user patterns
+    plt.figure(figsize=(15, 10))
+    sns.boxplot(x='chosen_bigram', y='chosen_bigram_time', data=user_bigram_times)
+    plt.title('Distribution of Bigram Typing Times Across Users')
+    plt.xlabel('Bigram')
+    plt.ylabel('Median Typing Time (ms)')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'within_user_bigram_times_boxplot.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # Heatmap of median typing times for each user and bigram
+    pivot_data = user_bigram_times.pivot(index='user_id', columns='chosen_bigram', values='chosen_bigram_time')
+    plt.figure(figsize=(20, 15))
+    sns.heatmap(pivot_data, cmap='YlOrRd', cbar_kws={'label': 'Median Typing Time (ms)'})
+    plt.title('Heatmap of Median Typing Times for Each User and Bigram')
+    plt.xlabel('Bigram')
+    plt.ylabel('User ID')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'within_user_bigram_times_heatmap.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # Prepare results
+    within_user_stats = {
+        'total_users': total_users,
+        'users_with_significant_pairs': users_with_significant_pairs,
+        'percent_users_with_significant_pairs': (users_with_significant_pairs / total_users) * 100 if total_users > 0 else 0,
+        'user_significant_pairs': user_significant_pairs,
+        'significant_pairs_count': significant_pairs_count,
+        'total_significant_pairs': total_significant_pairs
+    }
+
+    print("\n____ Within-User Bigram Typing Time Analysis ____\n")
+    print(f"Total users analyzed: {total_users}")
+    print(f"Users with at least one significant difference between bigram pairs: {users_with_significant_pairs} ({within_user_stats['percent_users_with_significant_pairs']:.2f}%)")
+    print(f"Total number of significant differences across all users: {total_significant_pairs}")
+    
+    # Print distribution of significant differences per user
+    diff_counts = Counter(significant_pairs_count.values())
+    print("\nDistribution of significant differences per user:")
+    for count, freq in sorted(diff_counts.items()):
+        print(f"  {count} significant difference(s): {freq} user(s)")
+    
+    # Print details of significant pairs for a few users
+    print("\nExample of significant pairs for some users:")
+    users_with_pairs = [user_id for user_id, pairs in user_significant_pairs.items() if pairs]
+    for user_id in users_with_pairs[:5]:  # Show first 5 users with significant pairs
+        pairs = user_significant_pairs[user_id]
+        print(f"\nUser {user_id} (Total significant pairs: {len(pairs)}):")
+        for bigram1, bigram2, p_value in pairs[:3]:  # Show up to 3 pairs per user
+            print(f"  {bigram1} vs {bigram2}: p-value = {p_value:.4f}")
+
+    return within_user_stats
+
 def analyze_choice_times(bigram_data):
     """
     Perform and print correlation analysis between chosen and unchosen bigram typing times.
@@ -409,6 +500,116 @@ def analyze_choice_times(bigram_data):
         'spearman_corr': spearman_corr
     }
     return choice_time_stats
+
+
+def analyze_improbable_vs_inconsistent(bigram_data, easy_choice_pairs):
+    """
+    Analyze the relationship between improbable pairs and inconsistent choices.
+
+    Parameters:
+    - bigram_data: DataFrame containing processed bigram data
+    - easy_choice_pairs: List of tuples, each containing a pair of bigrams where one is highly improbable
+
+    Returns:
+    - analysis_results: Dictionary containing analysis results
+    """
+    # Identify improbable pairs
+    improbable_pairs = set([tuple(sorted(pair)) for pair in easy_choice_pairs])
+    
+    # Mark bigrams as improbable or not
+    bigram_data['is_improbable_pair'] = bigram_data['bigram_pair'].apply(lambda x: tuple(sorted(x.split(', '))) in improbable_pairs)
+    
+    # Group by user and bigram pair
+    grouped = bigram_data.groupby(['user_id', 'bigram_pair'])
+    
+    # Identify inconsistent choices
+    def is_inconsistent(group):
+        return len(set(group['chosen_bigram'])) > 1
+    
+    inconsistent_choices = grouped.apply(is_inconsistent)
+    
+    # Combine improbable and inconsistent information
+    combined_data = pd.DataFrame({
+        'is_improbable_pair': grouped['is_improbable_pair'].first(),
+        'is_inconsistent': inconsistent_choices
+    }).reset_index()
+    
+    # Calculate statistics
+    total_pairs = len(combined_data)
+    improbable_count = combined_data['is_improbable_pair'].sum()
+    inconsistent_count = combined_data['is_inconsistent'].sum()
+    improbable_and_inconsistent = ((combined_data['is_improbable_pair']) & (combined_data['is_inconsistent'])).sum()
+    
+    # Calculate percentages
+    percent_improbable = (improbable_count / total_pairs) * 100
+    percent_inconsistent = (inconsistent_count / total_pairs) * 100
+    percent_improbable_and_inconsistent = (improbable_and_inconsistent / improbable_count) * 100 if improbable_count > 0 else 0
+    
+    # Prepare contingency table for chi-square test
+    contingency_table = pd.crosstab(combined_data['is_improbable_pair'], combined_data['is_inconsistent'])
+    chi2, p_value, dof, expected = stats.chi2_contingency(contingency_table)
+    
+    analysis_results = {
+        'total_pairs': total_pairs,
+        'improbable_count': improbable_count,
+        'inconsistent_count': inconsistent_count,
+        'improbable_and_inconsistent': improbable_and_inconsistent,
+        'percent_improbable': percent_improbable,
+        'percent_inconsistent': percent_inconsistent,
+        'percent_improbable_and_inconsistent': percent_improbable_and_inconsistent,
+        'chi2_statistic': chi2,
+        'p_value': p_value,
+        'contingency_table': contingency_table
+    }
+    
+    print("\n____ Improbable vs Inconsistent Analysis ____\n")
+    print(f"Total pairs: {analysis_results['total_pairs']}")
+    print(f"Improbable pairs: {analysis_results['improbable_count']} ({analysis_results['percent_improbable']:.1f}%)")
+    print(f"Inconsistent choices: {analysis_results['inconsistent_count']} ({analysis_results['percent_inconsistent']:.1f}%)")
+    print(f"Improbable and Inconsistent: {analysis_results['improbable_and_inconsistent']} ({analysis_results['percent_improbable_and_inconsistent']:.1f}% of improbable pairs)")
+    print(f"Chi-square statistic: {analysis_results['chi2_statistic']:.2f}")
+    print(f"p-value: {analysis_results['p_value']:.4f}")
+
+    return analysis_results
+
+
+def analyze_typing_times_improbable_vs_probable(bigram_data, easy_choice_pairs):
+    """
+    Analyze typing times for improbable vs. probable choices.
+
+    Parameters:
+    - bigram_data: DataFrame containing processed bigram data
+    - easy_choice_pairs: List of tuples, each containing a pair of bigrams where one is highly improbable
+
+    Returns:
+    - typing_time_results: Dictionary containing typing time analysis results
+    """
+    # Create a dictionary for quick lookup of improbable bigrams
+    improbable_bigrams = set([pair[1] for pair in easy_choice_pairs])
+    
+    # Mark choices as improbable or probable
+    bigram_data['is_improbable_choice'] = bigram_data['chosen_bigram'].isin(improbable_bigrams)
+    
+    # Calculate statistics
+    improbable_times = bigram_data[bigram_data['is_improbable_choice']]['chosen_bigram_time']
+    probable_times = bigram_data[~bigram_data['is_improbable_choice']]['chosen_bigram_time']
+    
+    typing_time_results = {
+        'improbable_mean': improbable_times.mean(),
+        'probable_mean': probable_times.mean(),
+        'improbable_median': improbable_times.median(),
+        'probable_median': probable_times.median(),
+        'improbable_std': improbable_times.std(),
+        'probable_std': probable_times.std(),
+        'ttest_result': stats.ttest_ind(improbable_times, probable_times)
+    }
+    
+    print("\n____ Typing Times: Improbable vs Probable Choices ____\n")
+    print(f"Improbable choices - Mean: {typing_time_results['improbable_mean']:.2f} ms, Median: {typing_time_results['improbable_median']:.2f} ms")
+    print(f"Probable choices - Mean: {typing_time_results['probable_mean']:.2f} ms, Median: {typing_time_results['probable_median']:.2f} ms")
+    print(f"T-test results - Statistic: {typing_time_results['ttest_result'].statistic:.2f}, p-value: {typing_time_results['ttest_result'].pvalue:.4f}")
+
+    return typing_time_results
 
 
 def plot_median_bigram_times(bigram_data, output_plots_folder):
@@ -617,6 +818,76 @@ def plot_chosen_vs_unchosen_times_joint(bigram_data, output_plots_folder):
     print(f"Correlation between chosen and unchosen times: {correlation:.2f}")
 
 
+def plot_improbable_vs_inconsistent(analysis_results, output_plots_folder):
+    """
+    Generate and save plots comparing improbable pairs and inconsistent choices.
+
+    Parameters:
+    - analysis_results: Dictionary containing analysis results
+    - output_plots_folder: String path to the folder where plots should be saved
+    """
+    # Bar plot
+    plt.figure(figsize=(10, 6))
+    categories = ['Improbable', 'Inconsistent', 'Both']
+    values = [analysis_results['percent_improbable'], 
+              analysis_results['percent_inconsistent'], 
+              analysis_results['percent_improbable_and_inconsistent']]
+    
+    plt.bar(categories, values)
+    plt.title('Comparison of Improbable Pairs and Inconsistent Choices')
+    plt.ylabel('Percentage')
+    plt.ylim(0, 100)
+    
+    for i, v in enumerate(values):
+        plt.text(i, v + 1, f'{v:.1f}%', ha='center')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'improbable_vs_inconsistent_barplot.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Heatmap of contingency table
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(analysis_results['contingency_table'], annot=True, fmt='d', cmap='YlOrRd')
+    plt.title('Contingency Table: Improbable Pairs vs Inconsistent Choices')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'improbable_vs_inconsistent_heatmap.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"Improbable vs Inconsistent plots saved in {output_plots_folder}")
+
+
+def plot_typing_times_improbable_vs_probable(typing_time_results, bigram_data, output_plots_folder):
+    """
+    Generate and save plots comparing typing times for improbable vs. probable choices.
+
+    Parameters:
+    - typing_time_results: Dictionary containing typing time analysis results
+    - bigram_data: DataFrame containing processed bigram data
+    - output_plots_folder: String path to the folder where plots should be saved
+    """
+    # Boxplot
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(x='is_improbable_choice', y='chosen_bigram_time', data=bigram_data)
+    plt.title('Typing Times: Improbable vs Probable Choices')
+    plt.xlabel('Is Improbable Choice')
+    plt.ylabel('Typing Time (ms)')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'improbable_vs_probable_typing_times_boxplot.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    # Violin plot
+    plt.figure(figsize=(10, 6))
+    sns.violinplot(x='is_improbable_choice', y='chosen_bigram_time', data=bigram_data)
+    plt.title('Distribution of Typing Times: Improbable vs Probable Choices')
+    plt.xlabel('Is Improbable Choice')
+    plt.ylabel('Typing Time (ms)')
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_plots_folder, 'improbable_vs_probable_typing_times_violinplot.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+    print(f"Improbable vs Probable typing time plots saved in {output_plots_folder}")
+
+
 # Main execution
 if __name__ == "__main__":
     try:
@@ -664,8 +935,17 @@ if __name__ == "__main__":
         ###########################################
         typing_time_stats = analyze_typing_times(bigram_data)
 
+        # Analyze within-user bigram typing times
+        within_user_stats = analyze_within_user_bigram_times(bigram_data, output_plots_folder)
+
         # Analyze the bigram typing times vs. choice
         choice_time_stats = analyze_choice_times(bigram_data)
+
+        ###########################################
+        # Analyze improbable vs inconsistent
+        ###########################################
+        #improbable_inconsistent_results = analyze_improbable_vs_inconsistent(bigram_data, easy_choice_pairs)        
+        typing_time_results = analyze_typing_times_improbable_vs_probable(bigram_data, easy_choice_pairs)
 
         ##########################
         # PLOTS
@@ -676,6 +956,8 @@ if __name__ == "__main__":
         plot_chosen_vs_unchosen_times_boxplot(bigram_data, output_plots_folder)
         plot_chosen_vs_unchosen_times_boxplot(bigram_data, output_plots_folder)
         plot_chosen_vs_unchosen_times_joint(bigram_data, output_plots_folder)
+        #plot_improbable_vs_inconsistent(improbable_inconsistent_results, output_plots_folder)
+        plot_typing_times_improbable_vs_probable(typing_time_results, bigram_data, output_plots_folder)
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
