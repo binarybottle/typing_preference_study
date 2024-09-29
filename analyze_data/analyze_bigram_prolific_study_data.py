@@ -996,6 +996,170 @@ def analyze_within_user_bigram_times(bigram_data, inconsistency_data, improbable
         'bigram_occurrences': dict(bigram_occurrences) if 'bigram_occurrences' in locals() else {}
     }
 
+#################################
+# Analyze only consistent choices
+#################################
+
+def filter_consistent_choices(bigram_data):
+    """
+    Filter out inconsistent rows from the bigram data.
+
+    Parameters:
+    - bigram_data: DataFrame containing processed bigram data
+
+    Returns:
+    - consistent_bigram_data: DataFrame containing only consistent choices
+    """
+    return bigram_data[bigram_data['is_consistent']]
+
+def analyze_consistent_typing_times(consistent_bigram_data, output_plots_folder):
+    """
+    Analyze typing times for consistent choices, comparing chosen vs. unchosen bigrams.
+
+    Parameters:
+    - consistent_bigram_data: DataFrame containing only consistent choices
+    - output_plots_folder: String path to the folder where plots should be saved
+
+    Returns:
+    - consistent_typing_time_stats: Dictionary containing typing time statistics for consistent choices
+    """
+    print("\n____ Consistent Choice Typing Time Analysis ____\n")
+
+    chosen_times = consistent_bigram_data['chosen_bigram_time']
+    unchosen_times = consistent_bigram_data['unchosen_bigram_time']
+
+    statistic, p_value = stats.mannwhitneyu(chosen_times, unchosen_times, alternative='two-sided')
+
+    print(f"Mann-Whitney U test statistic: {statistic}")
+    print(f"p-value: {p_value}")
+
+    if p_value < 0.05:
+        print("There is a significant difference in typing times between chosen and unchosen bigrams.")
+        if chosen_times.median() < unchosen_times.median():
+            print("Chosen bigrams tend to have shorter typing times.")
+        else:
+            print("Chosen bigrams tend to have longer typing times.")
+    else:
+        print("There is no significant difference in typing times between chosen and unchosen bigrams.")
+
+    # Create a box plot
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(x=['Chosen']*len(chosen_times) + ['Unchosen']*len(unchosen_times),
+                y=pd.concat([chosen_times, unchosen_times]))
+    plt.title('Typing Times for Chosen vs Unchosen Bigrams (Consistent Choices)')
+    plt.ylabel('Typing Time (ms)')
+    plt.savefig(os.path.join(output_plots_folder, 'consistent_chosen_vs_unchosen_times.png'))
+    plt.close()
+
+    return {
+        'statistic': statistic,
+        'p_value': p_value,
+        'chosen_median': chosen_times.median(),
+        'unchosen_median': unchosen_times.median()
+    }
+
+def analyze_consistent_slider_values(consistent_bigram_data, output_plots_folder):
+    """
+    Analyze slider values for consistent choices.
+
+    Parameters:
+    - consistent_bigram_data: DataFrame containing only consistent choices
+    - output_plots_folder: String path to the folder where plots should be saved
+
+    Returns:
+    - consistent_slider_stats: Dictionary containing slider value statistics for consistent choices
+    """
+    print("\n____ Consistent Choice Slider Value Analysis ____\n")
+
+    slider_values = consistent_bigram_data['sliderValue']
+
+    print(f"Median slider value: {slider_values.median()}")
+    print(f"Mean slider value: {slider_values.mean()}")
+    print(f"Standard deviation: {slider_values.std()}")
+
+    # Create a histogram
+    plt.figure(figsize=(10, 6))
+    sns.histplot(slider_values, kde=True)
+    plt.title('Distribution of Slider Values for Consistent Choices')
+    plt.xlabel('Slider Value')
+    plt.savefig(os.path.join(output_plots_folder, 'consistent_slider_value_distribution.png'))
+    plt.close()
+
+    return {
+        'median': slider_values.median(),
+        'mean': slider_values.mean(),
+        'std': slider_values.std()
+    }
+
+def analyze_consistent_bigram_preferences(consistent_bigram_data):
+    """
+    Analyze which bigrams are most frequently chosen when decisions are consistent.
+
+    Parameters:
+    - consistent_bigram_data: DataFrame containing only consistent choices
+
+    Returns:
+    - bigram_preference_stats: Dictionary containing bigram preference statistics
+    """
+    print("\n____ Consistent Bigram Preference Analysis ____\n")
+
+    bigram_counts = consistent_bigram_data['chosen_bigram'].value_counts()
+    total_choices = len(consistent_bigram_data)
+
+    print("Top 10 most frequently chosen bigrams:")
+    for bigram, count in bigram_counts.head(10).items():
+        percentage = (count / total_choices) * 100
+        print(f"{bigram}: {count} times ({percentage:.2f}%)")
+
+    return {
+        'bigram_counts': bigram_counts,
+        'total_choices': total_choices
+    }
+
+def analyze_typing_time_slider_relationship(consistent_bigram_data, output_plots_folder):
+    """
+    Analyze the relationship between typing times and slider values for consistent choices.
+
+    Parameters:
+    - consistent_bigram_data: DataFrame containing only consistent choices
+    - output_plots_folder: String path to the folder where plots should be saved
+
+    Returns:
+    - time_slider_relationship: Dictionary containing relationship statistics
+    """
+    print("\n____ Typing Time vs Slider Value Relationship Analysis ____\n")
+
+    typing_times = consistent_bigram_data['chosen_bigram_time']
+    slider_values = consistent_bigram_data['sliderValue'].abs()
+
+    correlation, p_value = stats.spearmanr(typing_times, slider_values)
+
+    print(f"Spearman correlation coefficient: {correlation}")
+    print(f"p-value: {p_value}")
+
+    if p_value < 0.05:
+        print("There is a significant relationship between typing time and slider value.")
+        if correlation > 0:
+            print("Longer typing times tend to be associated with higher absolute slider values.")
+        else:
+            print("Longer typing times tend to be associated with lower absolute slider values.")
+    else:
+        print("There is no significant relationship between typing time and slider value.")
+
+    # Create a scatter plot
+    plt.figure(figsize=(10, 6))
+    plt.scatter(typing_times, slider_values, alpha=0.5)
+    plt.title('Typing Time vs Absolute Slider Value (Consistent Choices)')
+    plt.xlabel('Typing Time (ms)')
+    plt.ylabel('Absolute Slider Value')
+    plt.savefig(os.path.join(output_plots_folder, 'consistent_time_vs_slider.png'))
+    plt.close()
+
+    return {
+        'correlation': correlation,
+        'p_value': p_value
+    }
+
 
 """
 def plot_improbable_vs_inconsistent(analysis_results, output_plots_folder):
@@ -1103,6 +1267,25 @@ if __name__ == "__main__":
             improbable_bigram_freq,  # Pass improbable_bigram_freq directly
             output_plots_folder
         )
+
+        #################################
+        # Analyze only consistent choices
+        #################################
+
+        print("\n\n=============== Consistent Choice Analysis ===============\n")
+
+        # Filter consistent choices
+        consistent_bigram_data = filter_consistent_choices(bigram_data)
+        print(f"Total choices: {len(bigram_data)}")
+        print(f"Consistent choices: {len(consistent_bigram_data)} ({len(consistent_bigram_data)/len(bigram_data)*100:.2f}%)")
+
+        # Analyze consistent choices
+        consistent_typing_time_stats = analyze_consistent_typing_times(consistent_bigram_data, output_plots_folder)
+        consistent_slider_stats = analyze_consistent_slider_values(consistent_bigram_data, output_plots_folder)
+        consistent_bigram_preferences = analyze_consistent_bigram_preferences(consistent_bigram_data)
+        time_slider_relationship = analyze_typing_time_slider_relationship(consistent_bigram_data, output_plots_folder)
+
+        print("\n=============== Consistent Choice Analysis Complete ===============\n")
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
