@@ -229,142 +229,144 @@ def display_information(dframe, title, print_headers, nlines):
 
 def analyze_typing_times(bigram_data, output_plots_folder):
     """
-    Analyze and report typing times in bigram data, including statistical tests for relationships
-    between typing time and choice, and typing time and absolute slider value.
-    Empty values in bigram times are ignored in calculations.
+    Analyze and report typing times in bigram data, focusing on three main questions:
+    1. Do chosen bigrams tend to have shorter typing times?
+    2. Do shorter typing times correspond to higher absolute slider values?
+    3. Is there a bias to the left (negative) vs. right (positive) slider values?
+    Also reports on the number of times the faster bigram was chosen.
 
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
+    - output_plots_folder: String path to the folder where plots should be saved
 
     Returns:
     - typing_time_stats: Dictionary containing typing time statistics and test results
     """
     print("\n____ Bigram Typing Time Statistics ____\n")
 
-    # Compare bigram1 and bigram2 times, ignoring empty values
-    valid_time_mask = bigram_data['bigram1_time'].notna() & bigram_data['bigram2_time'].notna()
-    bigram_data.loc[valid_time_mask, 'faster_bigram'] = np.where(
-        bigram_data.loc[valid_time_mask, 'bigram1_time'] < bigram_data.loc[valid_time_mask, 'bigram2_time'],
-        bigram_data.loc[valid_time_mask, 'bigram1'],
-        bigram_data.loc[valid_time_mask, 'bigram2']
-    )
+    # Basic statistics
+    total_rows = len(bigram_data)
+    valid_chosen_times = bigram_data['chosen_bigram_time'].notna().sum()
+    valid_unchosen_times = bigram_data['unchosen_bigram_time'].notna().sum()
 
-    # Statistical test for relationship between typing time and choice
-    chosen_times = bigram_data['chosen_bigram_time'].dropna()
-    unchosen_times = bigram_data['unchosen_bigram_time'].dropna()
+    print(f"Total rows: {total_rows}")
+    print(f"Number of valid chosen times: {valid_chosen_times}")
+    print(f"Number of valid unchosen times: {valid_unchosen_times}")
+
+    # Calculate number of times the faster bigram was chosen
+    valid_comparisons = bigram_data.dropna(subset=['chosen_bigram_time', 'unchosen_bigram_time'])
+    faster_chosen_count = (valid_comparisons['chosen_bigram_time'] < valid_comparisons['unchosen_bigram_time']).sum()
+    total_valid_comparisons = len(valid_comparisons)
     
-    print(f"\nTotal rows: {len(bigram_data)}")
-    print(f"Number of valid chosen times: {len(chosen_times)}")
-    print(f"Number of valid unchosen times: {len(unchosen_times)}")
+    print(f"\nNumber of times the faster bigram was chosen: {faster_chosen_count} out of {total_valid_comparisons} comparisons ({faster_chosen_count / total_valid_comparisons * 100:.2f}%)")
 
-    """
-    # Report on empty values
-    empty_counts = bigram_data[['bigram1_time', 'bigram2_time', 'chosen_bigram_time', 'unchosen_bigram_time', 'sliderValue']].isna().sum()
-    print("Number of empty values:")
-    print(empty_counts)
-    """
+    # 1. Do chosen bigrams tend to have shorter typing times?
+    chosen_times = valid_comparisons['chosen_bigram_time']
+    unchosen_times = valid_comparisons['unchosen_bigram_time']
 
-    # Check if the faster bigram is also the chosen bigram
-    faster_chosen_mask = valid_time_mask & (bigram_data['faster_bigram'] == bigram_data['chosen_bigram'])
-    number_faster_chosen = faster_chosen_mask.sum()
-    percent_faster_chosen = (number_faster_chosen / valid_time_mask.sum()) * 100
-    print(f"Number of times the faster bigram was chosen: {number_faster_chosen} of {valid_time_mask.sum()} comparisons ({percent_faster_chosen:.2f}%)")
-
-    if len(chosen_times) > 0 and len(unchosen_times) > 0:
-        # Mann-Whitney U test
-        try:
-            statistic, p_value = stats.mannwhitneyu(chosen_times, unchosen_times, alternative='two-sided')
-            
-            print("\nRelationship between typing time and choice:")
-            print(f"Mann-Whitney U test statistic: {statistic}")
-            print(f"p-value: {p_value}")
-            
-            if p_value < 0.05:
-                print("There is a significant relationship between typing time and choice.")
-                if chosen_times.median() < unchosen_times.median():
-                    print("Chosen bigrams tend to have shorter typing times.")
-                else:
-                    print("Chosen bigrams tend to have longer typing times.")
+    if len(chosen_times) > 0:
+        statistic, p_value = stats.wilcoxon(chosen_times, unchosen_times)
+        
+        print("\n1. Comparison of chosen vs. unchosen bigram typing times:")
+        print(f"Wilcoxon signed-rank test statistic: {statistic}")
+        print(f"p-value: {p_value}")
+        
+        if p_value < 0.05:
+            if chosen_times.median() < unchosen_times.median():
+                print("Chosen bigrams tend to have significantly shorter typing times.")
             else:
-                print("There is no significant relationship between typing time and choice.")
-        except Exception as e:
-            print(f"Error performing Mann-Whitney U test: {str(e)}")
+                print("Chosen bigrams tend to have significantly longer typing times.")
+        else:
+            print("There is no significant difference in typing times between chosen and unchosen bigrams.")
+
+        # Additional information
+        print(f"Median chosen bigram typing time: {chosen_times.median():.2f} ms")
+        print(f"Median unchosen bigram typing time: {unchosen_times.median():.2f} ms")
     else:
-        print("Insufficient data to perform Mann-Whitney U test.")
+        print("Insufficient data to compare chosen and unchosen bigram typing times.")
 
-    # Statistical tests for relationship between typing time and absolute slider value
-    typing_times = bigram_data['chosen_bigram_time'].dropna()
-    abs_slider_values = bigram_data['sliderValue'].abs().dropna()
-    
-    # Use only rows where both typing time and slider value are valid
-    valid_data = pd.DataFrame({'typing_time': typing_times, 'abs_slider_value': abs_slider_values}).dropna()
+    # Box plot to visualize typing times for chosen vs. unchosen bigrams
+    plt.figure(figsize=(10, 6))
+    sns.boxplot(x=['Chosen']*len(chosen_times) + ['Unchosen']*len(unchosen_times),
+                y=pd.concat([chosen_times, unchosen_times]))
+    plt.title('Typing Times for Chosen vs Unchosen Bigrams (Consistent Choices)')
+    plt.ylabel('Typing Time (ms)')
+    plt.savefig(os.path.join(output_plots_folder, 'consistent_chosen_vs_unchosen_times.png'))
+    plt.close()
 
-    print(f"\nNumber of valid pairs of typing times and slider values: {len(valid_data)}")
+    # 2. Do shorter typing times correspond to higher absolute slider values?
+    valid_data = valid_comparisons.dropna(subset=['chosen_bigram_time', 'sliderValue'])
+    typing_times = valid_data['chosen_bigram_time']
+    abs_slider_values = valid_data['sliderValue'].abs()
 
-    if len(valid_data) > 0:
-        # Spearman correlation
-        try:
-            correlation, p_value = stats.spearmanr(valid_data['typing_time'], valid_data['abs_slider_value'])
-            
-            print("\nRelationship between typing time and absolute slider value (Spearman correlation):")
-            print(f"Spearman correlation coefficient: {correlation}")
-            print(f"p-value: {p_value}")
-            
-            if p_value < 0.05:
-                print("There is a significant monotonic relationship between typing time and absolute slider value.")
-                if correlation > 0:
-                    print("Longer typing times tend to be associated with higher absolute slider values.")
-                else:
-                    print("Longer typing times tend to be associated with lower absolute slider values.")
+    if len(typing_times) > 0:
+        correlation, p_value = stats.spearmanr(typing_times, abs_slider_values)
+        
+        print("\n2. Correlation between typing times and absolute slider values:")
+        print(f"Spearman's rank correlation coefficient: {correlation}")
+        print(f"p-value: {p_value}")
+        
+        if p_value < 0.05:
+            if correlation < 0:
+                print("There is a significant negative correlation: shorter typing times tend to correspond to higher absolute slider values.")
             else:
-                print("There is no significant monotonic relationship between typing time and absolute slider value.")
-        except Exception as e:
-            print(f"Error performing Spearman correlation: {str(e)}")
-
-        # Mann-Whitney U test
-        try:
-            median_slider = valid_data['abs_slider_value'].median()
-            low_slider_times = valid_data[valid_data['abs_slider_value'] <= median_slider]['typing_time']
-            high_slider_times = valid_data[valid_data['abs_slider_value'] > median_slider]['typing_time']
-            
-            statistic, p_value = stats.mannwhitneyu(low_slider_times, high_slider_times, alternative='two-sided')
-            
-            print("\nRelationship between typing time and absolute slider value (Mann-Whitney U test):")
-            print(f"Mann-Whitney U test statistic: {statistic}")
-            print(f"p-value: {p_value}")
-            
-            if p_value < 0.05:
-                print("There is a significant difference in typing times between low and high slider values.")
-                if low_slider_times.median() < high_slider_times.median():
-                    print("Higher slider values tend to have longer typing times.")
-                else:
-                    print("Lower slider values tend to have longer typing times.")
-            else:
-                print("There is no significant difference in typing times between low and high slider values.")
-        except Exception as e:
-            print(f"Error performing Mann-Whitney U test: {str(e)}")
-
-        # Visualization
-        plt.figure(figsize=(10, 6))
-        plt.scatter(valid_data['abs_slider_value'], valid_data['typing_time'], alpha=0.5)
-        plt.xlabel('Absolute Slider Value')
-        plt.ylabel('Typing Time (ms)')
-        plt.title('Typing Time vs. Absolute Slider Value')
-        plt.savefig(os.path.join(output_plots_folder, 'typing_time_vs_slider_value.png'), dpi=300, bbox_inches='tight')
-        plt.close()
-        #print("\nScatter plot of Typing Time vs. Absolute Slider Value saved as 'typing_time_vs_slider_value.png'")
+                print("There is a significant positive correlation: longer typing times tend to correspond to higher absolute slider values.")
+        else:
+            print("There is no significant correlation between typing times and absolute slider values.")
 
     else:
-        print("Insufficient data to perform statistical tests or create visualization.")
+        print("Insufficient data to analyze correlation between typing times and absolute slider values.")
+
+    # Scatter plot to visualize typing time difference vs. slider value
+    plt.figure(figsize=(10, 6))
+    typing_time_diff = valid_comparisons['chosen_bigram_time'] - valid_comparisons['unchosen_bigram_time']
+    plt.scatter(valid_comparisons['sliderValue'], typing_time_diff, alpha=0.5)
+    plt.axhline(y=0, color='r', linestyle='--')
+    plt.axvline(x=0, color='r', linestyle='--')
+    plt.xlabel('Slider Value')
+    plt.ylabel('Typing Time Difference (Chosen - Unchosen) in ms')
+    plt.title('Typing Time Difference vs. Slider Value')
+    plt.savefig(os.path.join(output_plots_folder, 'typing_time_diff_vs_slider_value.png'), dpi=300, bbox_inches='tight')
+    plt.close()
+
+    # 3. Is there a bias to the left (negative) vs. right (positive) slider values?
+    slider_values = bigram_data['sliderValue'].dropna()
+
+    if len(slider_values) > 0:
+        statistic, p_value = stats.wilcoxon(slider_values)
+        
+        print("\n3. Analysis of slider value bias:")
+        print(f"Wilcoxon signed-rank test statistic: {statistic}")
+        print(f"p-value: {p_value}")
+        
+        if p_value < 0.05:
+            if slider_values.median() < 0:
+                print("There is a significant bias towards negative (left) slider values.")
+            else:
+                print("There is a significant bias towards positive (right) slider values.")
+        else:
+            print("There is no significant bias in slider values towards either direction.")
+
+        # Additional information
+        print(f"Median slider value: {slider_values.median():.2f}")
+        print(f"Percentage of negative slider values: {(slider_values < 0).mean()*100:.2f}%")
+        print(f"Percentage of positive slider values: {(slider_values > 0).mean()*100:.2f}%")
+    else:
+        print("Insufficient data to analyze slider value bias.")
 
     # Return the statistics for further use if needed
     typing_time_stats = {
-        'number_faster_chosen': number_faster_chosen,
-        'percent_faster_chosen': percent_faster_chosen,
-        'choice_test': {'statistic': statistic if 'statistic' in locals() else None, 
-                        'p_value': p_value if 'p_value' in locals() else None},
-        'slider_correlation': {'correlation': correlation if 'correlation' in locals() else None, 
-                               'p_value': p_value if 'p_value' in locals() else None}
+        'total_rows': total_rows,
+        'valid_chosen_times': valid_chosen_times,
+        'valid_unchosen_times': valid_unchosen_times,
+        'faster_chosen_count': faster_chosen_count,
+        'total_valid_comparisons': total_valid_comparisons,
+        'chosen_unchosen_test': {'statistic': statistic if 'statistic' in locals() else None, 
+                                 'p_value': p_value if 'p_value' in locals() else None},
+        'typing_time_slider_correlation': {'correlation': correlation if 'correlation' in locals() else None,
+                                           'p_value': p_value if 'p_value' in locals() else None},
+        'slider_bias_test': {'statistic': statistic if 'statistic' in locals() else None, 
+                             'p_value': p_value if 'p_value' in locals() else None}
     }
     return typing_time_stats
 
@@ -913,7 +915,6 @@ def analyze_improbable_vs_inconsistent(bigram_data, easy_choice_pairs):
 
     return analysis_results
 
-
 def analyze_within_user_bigram_times(bigram_data, inconsistency_data, improbable_bigram_freq, output_plots_folder):    
     """
     Analyze bigram typing times within users to find significantly different typing times across bigrams,
@@ -1002,164 +1003,84 @@ def analyze_within_user_bigram_times(bigram_data, inconsistency_data, improbable
 
 def filter_consistent_choices(bigram_data):
     """
-    Filter out inconsistent rows from the bigram data.
+    Filter out inconsistent rows from the bigram data and keep only bigram pairs with duplicates.
+    Calculate summary statistics for consistent choices.
 
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
 
     Returns:
-    - consistent_bigram_data: DataFrame containing only consistent choices
+    - consistent_bigram_data: DataFrame containing only consistent choices for duplicate bigram pairs
+    - duplicate_pair_count: Number of unique duplicate bigram pairs
+    - total_duplicate_choices: Total number of choices for duplicate bigram pairs
+    - summary_stats: Dictionary containing summary statistics for consistent choices
     """
-    return bigram_data[bigram_data['is_consistent']]
+    # Group by user_id and bigram_pair to find duplicates
+    grouped = bigram_data.groupby(['user_id', 'bigram_pair'])
+    
+    # Filter for pairs with duplicates
+    duplicate_pairs = grouped.filter(lambda x: len(x) > 1)
+    
+    # Count unique duplicate pairs
+    duplicate_pair_count = duplicate_pairs['bigram_pair'].nunique()
+    
+    # Count total duplicate choices
+    total_duplicate_choices = len(duplicate_pairs)
+    
+    # Filter for consistent choices among duplicate pairs
+    consistent_choices = grouped.filter(lambda x: len(x) > 1 and x['is_consistent'].all())
+    
+    # Calculate summary statistics for consistent choices
+    summary_stats = {
+        'total_rows': len(consistent_choices),
+        'valid_chosen_times': consistent_choices['chosen_bigram_time'].notna().sum(),
+        'valid_unchosen_times': consistent_choices['unchosen_bigram_time'].notna().sum(),
+        'faster_chosen': (consistent_choices['chosen_bigram_time'] < consistent_choices['unchosen_bigram_time']).sum(),
+        'total_comparisons': consistent_choices['chosen_bigram_time'].notna() & consistent_choices['unchosen_bigram_time'].notna()
+    }
+    
+    return consistent_choices, duplicate_pair_count, total_duplicate_choices, summary_stats
 
-def analyze_consistent_typing_times(consistent_bigram_data, output_plots_folder):
+def analyze_consistent_bigram_pairs(consistent_bigram_data):
     """
-    Analyze typing times for consistent choices, comparing chosen vs. unchosen bigrams.
+    Analyze and list bigram pairs with consistent choices, the number of users for each pair,
+    and the number of users who chose each bigram in the pair.
 
     Parameters:
-    - consistent_bigram_data: DataFrame containing only consistent choices
-    - output_plots_folder: String path to the folder where plots should be saved
+    - consistent_bigram_data: DataFrame containing only consistent choices for duplicate bigram pairs
 
     Returns:
-    - consistent_typing_time_stats: Dictionary containing typing time statistics for consistent choices
+    - bigram_pair_stats: DataFrame containing statistics for each bigram pair
     """
-    print("\n____ Consistent Choice Typing Time Analysis ____\n")
+    print("\n____ Consistent Bigram Pair Analysis ____\n")
 
-    chosen_times = consistent_bigram_data['chosen_bigram_time']
-    unchosen_times = consistent_bigram_data['unchosen_bigram_time']
+    # Group by bigram pair and count unique users
+    user_counts = consistent_bigram_data.groupby('bigram_pair')['user_id'].nunique().reset_index(name='user_count')
 
-    statistic, p_value = stats.mannwhitneyu(chosen_times, unchosen_times, alternative='two-sided')
+    # Count choices for each bigram in the pair
+    choice_counts = consistent_bigram_data.groupby(['bigram_pair', 'chosen_bigram']).size().unstack(fill_value=0)
+    
+    # Rename columns to match bigram names
+    choice_counts.columns = [f'{col}_count' for col in choice_counts.columns]
+    
+    # Merge user counts and choice counts
+    bigram_pair_stats = pd.merge(user_counts, choice_counts, on='bigram_pair')
 
-    print(f"Mann-Whitney U test statistic: {statistic}")
-    print(f"p-value: {p_value}")
+    # Sort by user count in descending order
+    bigram_pair_stats = bigram_pair_stats.sort_values('user_count', ascending=False)
 
-    if p_value < 0.05:
-        print("There is a significant difference in typing times between chosen and unchosen bigrams.")
-        if chosen_times.median() < unchosen_times.median():
-            print("Chosen bigrams tend to have shorter typing times.")
-        else:
-            print("Chosen bigrams tend to have longer typing times.")
-    else:
-        print("There is no significant difference in typing times between chosen and unchosen bigrams.")
+    print(f"{len(bigram_pair_stats)} bigram pairs and choice statistics:")
+    
+    # Print header
+    print(f"{'Bigram Pair':<15}{'Total Users':<15}{'First Bigram':<15}{'Second Bigram':<15}")
+    print("-" * 60)
+    
+    # Print data rows
+    for _, row in bigram_pair_stats.iterrows():
+        bigram1, bigram2 = row['bigram_pair'].split(', ')
+        print(f"{row['bigram_pair']:<15}{row['user_count']:<15}{row[f'{bigram1}_count']:<15}{row[f'{bigram2}_count']:<15}")
 
-    # Create a box plot
-    plt.figure(figsize=(10, 6))
-    sns.boxplot(x=['Chosen']*len(chosen_times) + ['Unchosen']*len(unchosen_times),
-                y=pd.concat([chosen_times, unchosen_times]))
-    plt.title('Typing Times for Chosen vs Unchosen Bigrams (Consistent Choices)')
-    plt.ylabel('Typing Time (ms)')
-    plt.savefig(os.path.join(output_plots_folder, 'consistent_chosen_vs_unchosen_times.png'))
-    plt.close()
-
-    return {
-        'statistic': statistic,
-        'p_value': p_value,
-        'chosen_median': chosen_times.median(),
-        'unchosen_median': unchosen_times.median()
-    }
-
-def analyze_consistent_slider_values(consistent_bigram_data, output_plots_folder):
-    """
-    Analyze slider values for consistent choices.
-
-    Parameters:
-    - consistent_bigram_data: DataFrame containing only consistent choices
-    - output_plots_folder: String path to the folder where plots should be saved
-
-    Returns:
-    - consistent_slider_stats: Dictionary containing slider value statistics for consistent choices
-    """
-    print("\n____ Consistent Choice Slider Value Analysis ____\n")
-
-    slider_values = consistent_bigram_data['sliderValue']
-
-    print(f"Median slider value: {slider_values.median()}")
-    print(f"Mean slider value: {slider_values.mean()}")
-    print(f"Standard deviation: {slider_values.std()}")
-
-    # Create a histogram
-    plt.figure(figsize=(10, 6))
-    sns.histplot(slider_values, kde=True)
-    plt.title('Distribution of Slider Values for Consistent Choices')
-    plt.xlabel('Slider Value')
-    plt.savefig(os.path.join(output_plots_folder, 'consistent_slider_value_distribution.png'))
-    plt.close()
-
-    return {
-        'median': slider_values.median(),
-        'mean': slider_values.mean(),
-        'std': slider_values.std()
-    }
-
-def analyze_consistent_bigram_preferences(consistent_bigram_data):
-    """
-    Analyze which bigrams are most frequently chosen when decisions are consistent.
-
-    Parameters:
-    - consistent_bigram_data: DataFrame containing only consistent choices
-
-    Returns:
-    - bigram_preference_stats: Dictionary containing bigram preference statistics
-    """
-    print("\n____ Consistent Bigram Preference Analysis ____\n")
-
-    bigram_counts = consistent_bigram_data['chosen_bigram'].value_counts()
-    total_choices = len(consistent_bigram_data)
-
-    print("Top 10 most frequently chosen bigrams:")
-    for bigram, count in bigram_counts.head(10).items():
-        percentage = (count / total_choices) * 100
-        print(f"{bigram}: {count} times ({percentage:.2f}%)")
-
-    return {
-        'bigram_counts': bigram_counts,
-        'total_choices': total_choices
-    }
-
-def analyze_typing_time_slider_relationship(consistent_bigram_data, output_plots_folder):
-    """
-    Analyze the relationship between typing times and slider values for consistent choices.
-
-    Parameters:
-    - consistent_bigram_data: DataFrame containing only consistent choices
-    - output_plots_folder: String path to the folder where plots should be saved
-
-    Returns:
-    - time_slider_relationship: Dictionary containing relationship statistics
-    """
-    print("\n____ Typing Time vs Slider Value Relationship Analysis ____\n")
-
-    typing_times = consistent_bigram_data['chosen_bigram_time']
-    slider_values = consistent_bigram_data['sliderValue'].abs()
-
-    correlation, p_value = stats.spearmanr(typing_times, slider_values)
-
-    print(f"Spearman correlation coefficient: {correlation}")
-    print(f"p-value: {p_value}")
-
-    if p_value < 0.05:
-        print("There is a significant relationship between typing time and slider value.")
-        if correlation > 0:
-            print("Longer typing times tend to be associated with higher absolute slider values.")
-        else:
-            print("Longer typing times tend to be associated with lower absolute slider values.")
-    else:
-        print("There is no significant relationship between typing time and slider value.")
-
-    # Create a scatter plot
-    plt.figure(figsize=(10, 6))
-    plt.scatter(typing_times, slider_values, alpha=0.5)
-    plt.title('Typing Time vs Absolute Slider Value (Consistent Choices)')
-    plt.xlabel('Typing Time (ms)')
-    plt.ylabel('Absolute Slider Value')
-    plt.savefig(os.path.join(output_plots_folder, 'consistent_time_vs_slider.png'))
-    plt.close()
-
-    return {
-        'correlation': correlation,
-        'p_value': p_value
-    }
-
+    return bigram_pair_stats
 
 """
 def plot_improbable_vs_inconsistent(analysis_results, output_plots_folder):
@@ -1272,18 +1193,23 @@ if __name__ == "__main__":
         # Analyze only consistent choices
         #################################
 
-        print("\n\n=============== Consistent Choice Analysis ===============\n")
+        print("\n\n=============== Consistent Choice Analysis ===============")
 
-        # Filter consistent choices
-        consistent_bigram_data = filter_consistent_choices(bigram_data)
-        print(f"Total choices: {len(bigram_data)}")
-        print(f"Consistent choices: {len(consistent_bigram_data)} ({len(consistent_bigram_data)/len(bigram_data)*100:.2f}%)")
+        # Filter consistent choices for duplicate bigram pairs
+        consistent_bigram_data, duplicate_pair_count, total_duplicate_choices, summary_stats = filter_consistent_choices(bigram_data)
+        
+        print(f"\nTotal choices: {len(bigram_data)}")
+        print(f"Number of unique duplicate bigram pairs: {duplicate_pair_count}")
+        print(f"Total choices for duplicate bigram pairs: {total_duplicate_choices}")
+        print(f"Consistent choices for duplicate bigram pairs: {summary_stats['total_rows']} ({summary_stats['total_rows']/total_duplicate_choices*100:.2f}% of duplicate choices)")
+        print(f"Number of valid chosen times: {summary_stats['valid_chosen_times']}")
+        print(f"Number of valid unchosen times: {summary_stats['valid_unchosen_times']}")
+        print(f"Number of times the faster bigram was chosen: {summary_stats['faster_chosen']} of {summary_stats['total_comparisons'].sum()} comparisons ({summary_stats['faster_chosen'] / summary_stats['total_comparisons'].sum() * 100:.2f}%)")
+        
+        # Analyze consistent bigram pairs
+        bigram_pair_stats = analyze_consistent_bigram_pairs(consistent_bigram_data)
 
-        # Analyze consistent choices
-        consistent_typing_time_stats = analyze_consistent_typing_times(consistent_bigram_data, output_plots_folder)
-        consistent_slider_stats = analyze_consistent_slider_values(consistent_bigram_data, output_plots_folder)
-        consistent_bigram_preferences = analyze_consistent_bigram_preferences(consistent_bigram_data)
-        time_slider_relationship = analyze_typing_time_slider_relationship(consistent_bigram_data, output_plots_folder)
+        consistent_typing_time_stats = analyze_typing_times(consistent_bigram_data, output_plots_folder)
 
         print("\n=============== Consistent Choice Analysis Complete ===============\n")
 
