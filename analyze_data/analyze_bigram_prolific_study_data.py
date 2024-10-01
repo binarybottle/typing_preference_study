@@ -227,7 +227,7 @@ def display_information(dframe, title, print_headers, nlines):
 # Bigram Typing Time Statistics
 ###############################
 
-def analyze_typing_times(bigram_data, output_plots_folder):
+def analyze_typing_times(bigram_data, output_plots_folder, output_filename1='chosen_vs_unchosen_times.png', output_filename2='typing_time_diff_vs_slider_value.png'):
     """
     Analyze and report typing times in bigram data, focusing on three main questions:
     1. Do chosen bigrams tend to have shorter typing times?
@@ -238,6 +238,8 @@ def analyze_typing_times(bigram_data, output_plots_folder):
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
     - output_plots_folder: String path to the folder where plots should be saved
+    - output_filename1: String filename of the plot of chosen vs. unchosen bigram times
+    - output_filename2: String filename of the plot of typing time difference vs. slider value
 
     Returns:
     - typing_time_stats: Dictionary containing typing time statistics and test results
@@ -289,9 +291,9 @@ def analyze_typing_times(bigram_data, output_plots_folder):
     plt.figure(figsize=(10, 6))
     sns.boxplot(x=['Chosen']*len(chosen_times) + ['Unchosen']*len(unchosen_times),
                 y=pd.concat([chosen_times, unchosen_times]))
-    plt.title('Typing Times for Chosen vs Unchosen Bigrams (Consistent Choices)')
+    plt.title('Typing Times for Chosen vs Unchosen Bigrams')
     plt.ylabel('Typing Time (ms)')
-    plt.savefig(os.path.join(output_plots_folder, 'consistent_chosen_vs_unchosen_times.png'))
+    plt.savefig(os.path.join(output_plots_folder, output_filename1))
     plt.close()
 
     # 2. Do shorter typing times correspond to higher absolute slider values?
@@ -326,7 +328,7 @@ def analyze_typing_times(bigram_data, output_plots_folder):
     plt.xlabel('Slider Value')
     plt.ylabel('Typing Time Difference (Chosen - Unchosen) in ms')
     plt.title('Typing Time Difference vs. Slider Value')
-    plt.savefig(os.path.join(output_plots_folder, 'typing_time_diff_vs_slider_value.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_plots_folder, output_filename2), dpi=300, bbox_inches='tight')
     plt.close()
 
     # 3. Is there a bias to the left (negative) vs. right (positive) slider values?
@@ -370,13 +372,93 @@ def analyze_typing_times(bigram_data, output_plots_folder):
     }
     return typing_time_stats
 
-def plot_median_bigram_times(bigram_data, output_plots_folder):
+def analyze_within_user_bigram_times(bigram_data):    
+    """
+    Analyze bigram typing times within users to find significantly different typing times across bigrams,
+    considering both chosen and unchosen times.
+
+    Parameters:
+    - bigram_data: DataFrame containing processed bigram data
+
+    Returns:
+    - within_user_stats: Dictionary containing within-user analysis results
+    """
+    user_significant_pairs = {}
+    total_possible_comparisons = 0
+    total_significant_differences = 0
+    all_bigrams = set(bigram_data['chosen_bigram'].unique()) | set(bigram_data['unchosen_bigram'].unique())
+    
+    for user_id, user_data in bigram_data.groupby('user_id'):
+        significant_pairs = []
+        user_comparisons = 0
+        
+        # Combine chosen and unchosen times for each bigram
+        bigram_times = {}
+        for bigram in all_bigrams:
+            chosen_times = user_data[user_data['chosen_bigram'] == bigram]['chosen_bigram_time']
+            unchosen_times = user_data[user_data['unchosen_bigram'] == bigram]['unchosen_bigram_time']
+            bigram_times[bigram] = pd.concat([chosen_times, unchosen_times]).dropna()
+        
+        for bigram1, bigram2 in combinations(all_bigrams, 2):
+            times1 = bigram_times[bigram1]
+            times2 = bigram_times[bigram2]
+            
+            if len(times1) > 0 and len(times2) > 0:
+                user_comparisons += 1
+                statistic, p_value = stats.mannwhitneyu(times1, times2, alternative='two-sided')
+                if p_value < 0.05:
+                    faster_bigram = bigram1 if times1.median() < times2.median() else bigram2
+                    slower_bigram = bigram2 if faster_bigram == bigram1 else bigram1
+                    significant_pairs.append((faster_bigram, slower_bigram, p_value))
+                    total_significant_differences += 1
+        
+        user_significant_pairs[user_id] = significant_pairs
+        total_possible_comparisons += user_comparisons
+
+    # Count significant differences for each user
+    significant_pairs_count = {user_id: len(pairs) for user_id, pairs in user_significant_pairs.items()}
+
+    # Calculate statistics
+    users_with_differences = sum(count > 0 for count in significant_pairs_count.values())
+
+    # Print analysis results
+    print("\n____ Within-User Bigram Typing Time Analysis ____\n")
+    print(f"Total number of bigrams compared: {len(all_bigrams)}")
+    print(f"Users with at least one significant difference in bigram typing times: {users_with_differences} out of {len(significant_pairs_count)} total users")
+    print(f"Total possible comparisons across all users: {total_possible_comparisons}")
+    print(f"Total significant differences across all users: {total_significant_differences}")
+    
+    if total_significant_differences > 0:
+
+        # Count occurrences of each bigram in significant pairs
+        bigram_occurrences = Counter()
+        for pairs in user_significant_pairs.values():
+            for faster, slower, _ in pairs:
+                bigram_occurrences[faster] += 1
+                bigram_occurrences[slower] += 1
+        
+        #print("\nBigrams involved in significant differences (sorted by frequency):")
+        #for bigram, count in bigram_occurrences.most_common():
+        #    print(f"{bigram}: {count} times")
+    else:
+        print("\nNo significant differences in typing times were found between bigrams.")
+
+    return {
+        'user_significant_pairs': user_significant_pairs,
+        'significant_pairs_count': significant_pairs_count,
+        'total_significant_differences': total_significant_differences,
+        'users_with_differences': users_with_differences,
+        'bigram_occurrences': dict(bigram_occurrences) if 'bigram_occurrences' in locals() else {}
+    }
+
+def plot_median_bigram_times(bigram_data, output_plots_folder, output_filename='bigram_times_barplot.png'):
     """
     Generate and save bar plot for median bigram typing times with horizontal x-axis labels.
     
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
     - output_plots_folder: String path to the folder where plots should be saved
+    - output_filename: String name of the output plot file
     """
     # Prepare data
     plot_data = bigram_data.melt(id_vars=['user_id', 'trialId', 'bigram_pair', 'chosen_bigram', 'unchosen_bigram'],
@@ -414,7 +496,7 @@ def plot_median_bigram_times(bigram_data, output_plots_folder):
     # Adjust layout to prevent cutting off labels
     plt.tight_layout()
 
-    plt.savefig(os.path.join(output_plots_folder, 'bigram_median_times_barplot_with_mad.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_plots_folder, output_filename), dpi=300, bbox_inches='tight')
     plt.close()
 
     #print(f"bigram_median_times_barplot_with_mad plot saved in {output_plots_folder}")
@@ -424,143 +506,133 @@ def plot_median_bigram_times(bigram_data, output_plots_folder):
 ###################################
 
 def analyze_easy_choices(bigram_data, easy_choice_pairs, threshold=1):
-    """
-    Analyze bigram choices to detect improbable selections, comparing both typing times and slider values.
+    # Create a dictionary for quick lookup of improbable pairs
+    improbable_pair_dict = {frozenset(pair): pair for pair in easy_choice_pairs}
 
-    Parameters:
-    - bigram_data: DataFrame containing processed bigram data
-    - easy_choice_pairs: List of tuples, each containing a pair of bigrams where one is highly improbable
-    - threshold: Float, the threshold for flagging a user (default 1)
+    # Create a copy of the DataFrame to avoid SettingWithCopyWarning
+    bigram_data = bigram_data.copy()
 
-    Returns:
-    - suspicious_users: DataFrame containing users with suspiciously high rates of improbable choices
-    - improbable_bigram_freq: DataFrame with frequency and slider statistics of improbable bigrams
-    - analysis_results: Dictionary containing analysis results for typing times and slider values
-    """
-    def get_improbable_pair(row):
-        for pair in easy_choice_pairs:
-            if set(pair) == set([row['chosen_bigram'], row['unchosen_bigram']]):
-                return pair
-        return None
-
-    def is_improbable_choice(row):
-        if row['improbable_pair']:
-            return row['chosen_bigram'] == row['improbable_pair'][1]
-        return False
-
-    # Add column indicating if the pair includes an improbable bigram
-    bigram_data['improbable_pair'] = bigram_data.apply(get_improbable_pair, axis=1)
+    # Identify improbable pairs and choices
+    bigram_data['bigram_set'] = bigram_data.apply(lambda row: frozenset([row['chosen_bigram'], row['unchosen_bigram']]), axis=1)
+    bigram_data['improbable_pair'] = bigram_data['bigram_set'].map(improbable_pair_dict)
     
-    # Add column indicating if an improbable choice was made
-    bigram_data['improbable_choice'] = bigram_data.apply(is_improbable_choice, axis=1)
+    # Filter out rows where improbable_pair is NaN (not in easy_choice_pairs)
+    bigram_data_filtered = bigram_data[bigram_data['improbable_pair'].notna()].copy()
 
-    # Count the number of improbable choices for each user
-    user_improbable_counts = bigram_data.groupby('user_id')['improbable_choice'].sum()
+    # Identify improbable choices only for the filtered data
+    bigram_data_filtered['improbable_choice'] = bigram_data_filtered.apply(
+        lambda row: row['chosen_bigram'] == row['improbable_pair'][1], axis=1
+    )
 
-    # Identify users with suspiciously high numbers of improbable choices
-    suspicious_users = user_improbable_counts[user_improbable_counts > threshold].reset_index()
-    suspicious_users.columns = ['user_id', 'improbable_choice_count']
+    # Count improbable choices for each user
+    user_improbable_counts = bigram_data_filtered.groupby('user_id')['improbable_choice'].sum()
 
     # Calculate overall statistics
-    total_users = bigram_data['user_id'].nunique()
+    total_users = bigram_data_filtered['user_id'].nunique()
     total_improbable_pairs_possible = len(easy_choice_pairs) * total_users
-    total_improbable_choices = bigram_data['improbable_choice'].sum()
-    total_suspicious = len(suspicious_users)
+    total_improbable_choices = bigram_data_filtered['improbable_choice'].sum()
+    total_suspicious = user_improbable_counts[user_improbable_counts >= threshold].shape[0]
 
-    # Calculate frequency of improbable bigrams chosen and their probable counterparts
-    improbable_bigram_freq = bigram_data[bigram_data['improbable_choice']]['improbable_pair'].value_counts().reset_index()
-    improbable_bigram_freq.columns = ['bigram_pair', 'frequency']
-    improbable_bigram_freq['probable_bigram'] = improbable_bigram_freq['bigram_pair'].apply(lambda x: x[0])
-    improbable_bigram_freq['improbable_bigram'] = improbable_bigram_freq['bigram_pair'].apply(lambda x: x[1])
-    
-    # Calculate median and MAD slider values for each improbable bigram pair
-    def get_slider_stats(pair):
-        mask = (bigram_data['improbable_pair'] == pair) & bigram_data['improbable_choice']
-        slider_values = bigram_data.loc[mask, 'sliderValue']
-        median = slider_values.median()
-        mad = np.median(np.abs(slider_values - median))
-        return pd.Series({'median_slider': median, 'mad_slider': mad})
-
-    slider_stats = improbable_bigram_freq['bigram_pair'].apply(get_slider_stats)
-    improbable_bigram_freq = pd.concat([improbable_bigram_freq, slider_stats], axis=1)
-    
-    improbable_bigram_freq = improbable_bigram_freq.drop('bigram_pair', axis=1)
-
+    # Print improbable choice analysis results
     print("\n____ Improbable Bigram Choice Analysis ____\n")
-    print(f"Number of times an improbable bigram was chosen: {total_improbable_choices} of {total_improbable_pairs_possible} ({(total_improbable_choices / total_improbable_pairs_possible) * 100:.2f}%)")
-    print(f"Users who made >{threshold} improbable choices: {total_suspicious} of {total_users} ({(total_suspicious / total_users) * 100:.2f}%)")
+    print(f"Improbable choices made: {total_improbable_choices} of {total_improbable_pairs_possible} ({(total_improbable_choices / total_improbable_pairs_possible) * 100:.2f}%)")
+    print(f"Users with >={threshold} improbable choices: {total_suspicious} of {total_users} ({(total_suspicious / total_users) * 100:.2f}%)")
 
-    if not suspicious_users.empty:
-        print("\n10 users who made the highest number of improbable choices:")
+    if total_suspicious > 0:
+        suspicious_users = bigram_data_filtered[bigram_data_filtered['improbable_choice']]['user_id'].value_counts().rename_axis('user_id').reset_index(name='improbable_choice_count')
+        print("\nTop 10 users with highest improbable choice counts:")
         print(suspicious_users.sort_values('improbable_choice_count', ascending=False).head(10))
 
     print("\nFrequency of improbable bigrams chosen and their probable counterparts:")
-    print(improbable_bigram_freq.to_string(index=False))
+    print(bigram_data_filtered[bigram_data_filtered['improbable_choice']]['improbable_pair'].value_counts())
 
-    # Create a set of improbable bigrams
-    improbable_bigrams = set([pair[1] for pair in easy_choice_pairs])
-    
-    # Mark choices as improbable or probable
-    bigram_data['is_improbable_choice'] = bigram_data['chosen_bigram'].isin(improbable_bigrams)
-    
-    # Function to perform Mann-Whitney U test and return results
-    def perform_mann_whitney(group1, group2, label1, label2):
-        group1 = group1.dropna()
-        group2 = group2.dropna()
+    # Typing Times: Improbable vs Probable Choices
+    improbable_times = bigram_data_filtered[bigram_data_filtered['improbable_choice']]['chosen_bigram_time']
+    probable_times = bigram_data_filtered[~bigram_data_filtered['improbable_choice']]['chosen_bigram_time']
+    # Remove non-finite values
+    improbable_times = improbable_times[np.isfinite(improbable_times)]
+    probable_times = probable_times[np.isfinite(probable_times)]
+
+    # Print some diagnostic information
+    print(f"\nNumber of improbable choices: {len(improbable_times)}")
+    print(f"Number of probable choices: {len(probable_times)}")
+
+    if len(improbable_times) > 0 and len(probable_times) > 0:
+        improbable_median = improbable_times.median()
+        probable_median = probable_times.median()
+        improbable_mad = np.median(np.abs(improbable_times - improbable_median))
+        probable_mad = np.median(np.abs(probable_times - probable_median))
         
-        if len(group1) > 0 and len(group2) > 0:
-            median1 = group1.median()
-            median2 = group2.median()
-            mad1 = stats.median_abs_deviation(group1, nan_policy='omit')
-            mad2 = stats.median_abs_deviation(group2, nan_policy='omit')
-            
-            statistic, p_value = stats.mannwhitneyu(group1, group2, alternative='two-sided')
-            
-            print(f"\n{label1} median (MAD): {median1:.2f} ({mad1:.2f})")
-            print(f"{label2} median (MAD): {median2:.2f} ({mad2:.2f})")
-            print(f"Mann-Whitney U test results:")
-            print(f"U-statistic: {statistic:.4f}")
-            print(f"p-value: {p_value:.4f}")
-            
-            if p_value < 0.05:
-                print(f"There is a significant difference between {label1} and {label2}: {label1} {'tend to be lower' if median1 < median2 else 'tend to be higher'}.")
-            else:
-                print(f"There is no significant difference between {label1} and {label2}.")
-            
-            return {
-                f'{label1.lower()}_median': median1,
-                f'{label2.lower()}_median': median2,
-                f'{label1.lower()}_mad': mad1,
-                f'{label2.lower()}_mad': mad2,
-                'u_statistic': statistic,
-                'p_value': p_value
-            }
+        print(f"\nImprobable choice median (MAD) typing time: {improbable_median:.2f} ({improbable_mad:.2f}) ms")
+        print(f"Probable choice median (MAD) typing time: {probable_median:.2f} ({probable_mad:.2f}) ms")
+        
+        # Perform Wilcoxon signed-rank test
+        if len(improbable_times) > 1 and len(probable_times) > 1:
+            # We need to ensure the samples are paired and of equal length
+            min_length = min(len(improbable_times), len(probable_times))
+            wilcoxon_result = stats.wilcoxon(improbable_times[:min_length], probable_times[:min_length])
+            print(f"Wilcoxon signed-rank test results - Statistic: {wilcoxon_result.statistic:.4f}, p-value: {wilcoxon_result.pvalue:.4f}")
         else:
-            print(f"\nInsufficient data to perform statistical analysis for {label1} vs {label2}.")
-            return None
+            print("Cannot perform Wilcoxon signed-rank test: Not enough data points")
+            wilcoxon_result = None
+    else:
+        print("Not enough data to calculate statistics for improbable or probable choices")
+        improbable_median = probable_median = improbable_mad = probable_mad = np.nan
+        wilcoxon_result = None
 
-    # Analyze typing times
-    print("\n____ Typing Times: Improbable vs Probable Choices ____")
-    typing_time_results = perform_mann_whitney(
-        bigram_data[bigram_data['is_improbable_choice']]['chosen_bigram_time'],
-        bigram_data[~bigram_data['is_improbable_choice']]['chosen_bigram_time'],
-        'improbable choice typing times', 'probable choice typing times'
-    )
-
-    # Analyze slider values
-    print("\n____ Slider Values: Improbable vs Probable Choices ____")
-    slider_value_results = perform_mann_whitney(
-        bigram_data[bigram_data['is_improbable_choice']]['sliderValue'].abs(),
-        bigram_data[~bigram_data['is_improbable_choice']]['sliderValue'].abs(),
-        'improbable choice slider values', 'probable choice slider values'
-    )
-
-    analysis_results = {
-        'typing_time_results': typing_time_results,
-        'slider_value_results': slider_value_results
+    typing_time_results = {
+        'improbable_median': improbable_median,
+        'probable_median': probable_median,
+        'improbable_mad': improbable_mad,
+        'probable_mad': probable_mad,
+        'wilcoxon_result': wilcoxon_result
     }
 
-    return suspicious_users, improbable_bigram_freq, analysis_results
+    # Analyze inconsistent pairs
+    inconsistent_pairs = bigram_data.groupby(['user_id', 'bigram_pair'])['chosen_bigram'].nunique() > 1
+    inconsistent_counts = inconsistent_pairs[inconsistent_pairs].groupby('user_id').size()
+
+    # Combine inconsistent and improbable data
+    user_analysis = pd.DataFrame({
+        'inconsistent_count': inconsistent_counts,
+        'improbable_count': user_improbable_counts
+    }).fillna(0)
+
+    # Calculate proportions
+    total_pairs_per_user = bigram_data.groupby('user_id')['bigram_pair'].nunique()
+    user_analysis['inconsistent_proportion'] = user_analysis['inconsistent_count'] / total_pairs_per_user
+    user_analysis['improbable_proportion'] = user_analysis['improbable_count'] / total_pairs_per_user
+
+    # Calculate correlation
+    correlation = user_analysis['inconsistent_proportion'].corr(user_analysis['improbable_proportion'])
+
+    print("\n____ Relationship between Inconsistent Pairs and Improbable Choices ____\n")
+    print(f"Correlation between proportion of inconsistent pairs and improbable choices: {correlation:.4f}")
+
+    # Overall statistics
+    total_pairs = total_pairs_per_user.sum()
+    total_inconsistent = user_analysis['inconsistent_count'].sum()
+    total_improbable = user_analysis['improbable_count'].sum()
+
+    print(f"\nTotal bigram pairs: {total_pairs}")
+    print(f"Total inconsistent pairs: {total_inconsistent} ({total_inconsistent/total_pairs:.2%})")
+    print(f"Total improbable choices: {total_improbable} ({total_improbable/total_pairs:.2%})")
+
+    # Users with both inconsistencies and improbable choices
+    users_with_both = ((user_analysis['inconsistent_count'] > 0) & (user_analysis['improbable_count'] > 0)).sum()
+    print(f"\nUsers with both inconsistencies and improbable choices: {users_with_both} "
+          f"({users_with_both/len(user_analysis):.2%} of users)")
+
+    # Top 10 users with highest combination of inconsistencies and improbable choices
+    user_analysis['combined_score'] = user_analysis['inconsistent_proportion'] + user_analysis['improbable_proportion']
+    top_10_users = user_analysis.nlargest(10, 'combined_score')
+
+    print("\nTop 10 users with highest combination of inconsistencies and improbable choices:")
+    #print(top_10_users[['inconsistent_count', 'inconsistent_proportion', 
+    #                    'improbable_count', 'improbable_proportion', 'combined_score']])
+    print(top_10_users[['inconsistent_count', 'improbable_count', 'combined_score']])
+
+    return suspicious_users, user_improbable_counts, typing_time_results, user_analysis
 
 #######################################
 # Analyze bigram choice inconsistencies
@@ -648,13 +720,15 @@ def analyze_choice_inconsistencies(bigram_data):
     }
     return bigram_choice_inconsistency_stats
 
-def analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder):
+def analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder, output_filename1='inconsistency_slider_relationship.png', output_filename2='inconsistency_typing_time_relationship.png'):
     """
     Analyze the relationship between inconsistent choices, slider values, and typing times.
 
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
     - output_plots_folder: String path to the folder where plots should be saved
+    - output_filename1: String filename of the plot of inconsistent choices vs. slider values
+    - output_filename2: String filename of the plot of inconsistent choices vs. typing times
 
     Returns:
     - inconsistency_analysis_results: Dictionary containing analysis results
@@ -736,7 +810,7 @@ def analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder):
     plt.title('Average Absolute Slider Values for Consistent vs Inconsistent Choices')
     plt.xlabel('Is Inconsistent')
     plt.ylabel('Average Absolute Slider Value')
-    plt.savefig(os.path.join(output_plots_folder, 'inconsistency_slider_relationship.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_plots_folder, output_filename1), dpi=300, bbox_inches='tight')
     plt.close()
 
     # Create visualization for typing times
@@ -745,7 +819,7 @@ def analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder):
     plt.title('Average Typing Times for Consistent vs Inconsistent Choices')
     plt.xlabel('Is Inconsistent')
     plt.ylabel('Average Typing Time (ms)')
-    plt.savefig(os.path.join(output_plots_folder, 'inconsistency_typing_time_relationship.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_plots_folder, output_filename2), dpi=300, bbox_inches='tight')
     plt.close()
 
     inconsistency_analysis_results = {
@@ -755,9 +829,25 @@ def analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder):
 
     return inconsistency_analysis_results
 
-def plot_chosen_vs_unchosen_times_barplot(bigram_data, output_plots_folder):
+def plot_chosen_vs_unchosen_times(bigram_data, output_plots_folder, 
+                                  output_filename1='chosen_vs_unchosen_times.png',
+                                  output_filename2='chosen_vs_unchosen_times_scatter_regression.png',
+                                  output_filename3='chosen_vs_unchosen_times_joint.png'):
+    """
+    Plot chosen vs. unchosen typing times.
+    
+    Parameters:
+    - bigram_data: DataFrame containing processed bigram data
+    - output_plots_folder: String path to the folder where plots should be saved
+    - output_filename1: String filename of the plot of chosen vs. unchosen bigram times
+    - output_filename2: String filename of the plot of typing time difference vs. slider value
+    - output_filename3: String filename of the plot of inconsistency analysis
+    """
     plot_data = prepare_plot_data(bigram_data)
     
+    ##########
+    # BAR PLOT
+    ##########
     plt.figure(figsize=(15, len(plot_data['bigram'].unique()) * 0.4))
     sns.barplot(x='time', y='bigram', hue='type', data=plot_data)
     
@@ -767,19 +857,12 @@ def plot_chosen_vs_unchosen_times_barplot(bigram_data, output_plots_folder):
     plt.legend(title='Bigram type')
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, 'chosen_vs_unchosen_times.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_plots_folder, output_filename1), dpi=300, bbox_inches='tight')
     plt.close()
 
-def plot_chosen_vs_unchosen_times_scatter_regression(bigram_data, output_plots_folder):
-    """
-    Generate and save scatter plot with regression line for chosen vs. unchosen typing times.
-    
-    Parameters:
-    - bigram_data: DataFrame containing processed bigram data
-    - output_plots_folder: String path to the folder where plots should be saved
-    """
-    plot_data = prepare_plot_data(bigram_data)
-    
+    ##############
+    # SCATTER PLOT
+    ##############
     # Pivot the data to have chosen and unchosen times as separate columns
     plot_data_wide = plot_data.pivot(index='bigram', columns='type', values='time').reset_index()
     
@@ -800,24 +883,14 @@ def plot_chosen_vs_unchosen_times_scatter_regression(bigram_data, output_plots_f
     
     # Save plot
     plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, 'chosen_vs_unchosen_times_scatter_regression.png'), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_plots_folder, output_filename2), dpi=300, bbox_inches='tight')
     plt.close()
 
-    #print(f"chosen_vs_unchosen_times_scatter_regression plot saved in {output_plots_folder}")
-    #print(f"Correlation between chosen and unchosen times: {correlation:.2f}")
-
-def plot_chosen_vs_unchosen_times_joint(bigram_data, output_plots_folder):
-    """
-    Generate and save joint plot of chosen vs. unchosen typing times.
-    
-    Parameters:
-    - bigram_data: DataFrame containing processed bigram data
-    - output_plots_folder: String path to the folder where plots should be saved
-    """
-    plot_data = prepare_plot_data(bigram_data)
-    
+    ####################
+    # SCATTER JOINT PLOT
+    #################### 
     # Pivot the data to have chosen and unchosen times as separate columns
-    plot_data_wide = plot_data.pivot(index='bigram', columns='type', values='time').reset_index()
+    #plot_data_wide = plot_data.pivot(index='bigram', columns='type', values='time').reset_index()
 
     # Create joint plot
     g = sns.jointplot(x='chosen', y='unchosen', data=plot_data_wide, kind="scatter", 
@@ -838,183 +911,17 @@ def plot_chosen_vs_unchosen_times_joint(bigram_data, output_plots_folder):
     plt.text(0.05, 0.95, f'Correlation: {correlation:.2f}', transform=plt.gca().transAxes, fontsize=12)
 
     # Save plot
-    g.savefig(os.path.join(output_plots_folder, 'chosen_vs_unchosen_times_joint.png'), dpi=300, bbox_inches='tight')
+    g.savefig(os.path.join(output_plots_folder, output_filename3), dpi=300, bbox_inches='tight')
     plt.close()
 
     #print(f"chosen_vs_unchosen_times_joint plot saved in {output_plots_folder}")
     #print(f"Correlation between chosen and unchosen times: {correlation:.2f}")
-
-def analyze_improbable_vs_inconsistent(bigram_data, easy_choice_pairs):
-    """
-    Analyze the relationship between improbable pairs and inconsistent choices.
-
-    Parameters:
-    - bigram_data: DataFrame containing processed bigram data
-    - easy_choice_pairs: List of tuples, each containing a pair of bigrams where one is highly improbable
-
-    Returns:
-    - analysis_results: Dictionary containing analysis results
-    """
-    # Identify improbable pairs
-    improbable_pairs = set([tuple(sorted(pair)) for pair in easy_choice_pairs])
-    
-    # Mark bigrams as improbable or not
-    bigram_data['is_improbable_pair'] = bigram_data['bigram_pair'].apply(lambda x: tuple(sorted(x.split(', '))) in improbable_pairs)
-    
-    # Group by user and bigram pair
-    grouped = bigram_data.groupby(['user_id', 'bigram_pair'])
-    
-    # Identify inconsistent choices
-    def is_inconsistent(group):
-        return len(set(group['chosen_bigram'])) > 1
-    
-    inconsistent_choices = grouped.apply(is_inconsistent)
-    
-    # Combine improbable and inconsistent information
-    combined_data = pd.DataFrame({
-        'is_improbable_pair': grouped['is_improbable_pair'].first(),
-        'is_inconsistent': inconsistent_choices
-    }).reset_index()
-    
-    # Calculate statistics
-    total_pairs = len(combined_data)
-    improbable_count = combined_data['is_improbable_pair'].sum()
-    inconsistent_count = combined_data['is_inconsistent'].sum()
-    improbable_and_inconsistent = ((combined_data['is_improbable_pair']) & (combined_data['is_inconsistent'])).sum()
-    
-    # Calculate percentages
-    percent_improbable = (improbable_count / total_pairs) * 100
-    percent_inconsistent = (inconsistent_count / total_pairs) * 100
-    percent_improbable_and_inconsistent = (improbable_and_inconsistent / improbable_count) * 100 if improbable_count > 0 else 0
-    
-    # Prepare contingency table for chi-square test
-    contingency_table = pd.crosstab(combined_data['is_improbable_pair'], combined_data['is_inconsistent'])
-    chi2, p_value, dof, expected = stats.chi2_contingency(contingency_table)
-    
-    analysis_results = {
-        'total_pairs': total_pairs,
-        'improbable_count': improbable_count,
-        'inconsistent_count': inconsistent_count,
-        'improbable_and_inconsistent': improbable_and_inconsistent,
-        'percent_improbable': percent_improbable,
-        'percent_inconsistent': percent_inconsistent,
-        'percent_improbable_and_inconsistent': percent_improbable_and_inconsistent,
-        'chi2_statistic': chi2,
-        'p_value': p_value,
-        'contingency_table': contingency_table
-    }
-    
-    print("\n____ Improbable vs Inconsistent Analysis ____\n")
-    print(f"Total pairs: {analysis_results['total_pairs']}")
-    print(f"Improbable pairs: {analysis_results['improbable_count']} ({analysis_results['percent_improbable']:.1f}%)")
-    print(f"Inconsistent choices: {analysis_results['inconsistent_count']} ({analysis_results['percent_inconsistent']:.1f}%)")
-    print(f"Improbable and Inconsistent: {analysis_results['improbable_and_inconsistent']} ({analysis_results['percent_improbable_and_inconsistent']:.1f}% of improbable pairs)")
-    if improbable_and_inconsistent > 0:
-        print(f"Chi-square statistic: {analysis_results['chi2_statistic']:.2f}")
-        print(f"p-value: {analysis_results['p_value']:.4f}")
-
-    return analysis_results
-
-def analyze_within_user_bigram_times(bigram_data, inconsistency_data, improbable_bigram_freq, output_plots_folder):    
-    """
-    Analyze bigram typing times within users to find significantly different typing times across bigrams,
-    considering both chosen and unchosen times.
-
-    Parameters:
-    - bigram_data: DataFrame containing processed bigram data
-    - inconsistency_data: Dictionary containing inconsistency data per user
-    - improbable_bigram_freq: DataFrame containing frequency of improbable bigrams
-    - output_plots_folder: String path to the folder where plots should be saved
-
-    Returns:
-    - within_user_stats: Dictionary containing within-user analysis results
-    """
-    user_significant_pairs = {}
-    total_possible_comparisons = 0
-    total_significant_differences = 0
-    all_bigrams = set(bigram_data['chosen_bigram'].unique()) | set(bigram_data['unchosen_bigram'].unique())
-    
-    for user_id, user_data in bigram_data.groupby('user_id'):
-        significant_pairs = []
-        user_comparisons = 0
-        
-        # Combine chosen and unchosen times for each bigram
-        bigram_times = {}
-        for bigram in all_bigrams:
-            chosen_times = user_data[user_data['chosen_bigram'] == bigram]['chosen_bigram_time']
-            unchosen_times = user_data[user_data['unchosen_bigram'] == bigram]['unchosen_bigram_time']
-            bigram_times[bigram] = pd.concat([chosen_times, unchosen_times]).dropna()
-        
-        for bigram1, bigram2 in combinations(all_bigrams, 2):
-            times1 = bigram_times[bigram1]
-            times2 = bigram_times[bigram2]
-            
-            if len(times1) > 0 and len(times2) > 0:
-                user_comparisons += 1
-                statistic, p_value = stats.mannwhitneyu(times1, times2, alternative='two-sided')
-                if p_value < 0.05:
-                    faster_bigram = bigram1 if times1.median() < times2.median() else bigram2
-                    slower_bigram = bigram2 if faster_bigram == bigram1 else bigram1
-                    significant_pairs.append((faster_bigram, slower_bigram, p_value))
-                    total_significant_differences += 1
-        
-        user_significant_pairs[user_id] = significant_pairs
-        total_possible_comparisons += user_comparisons
-
-    # Count significant differences for each user
-    significant_pairs_count = {user_id: len(pairs) for user_id, pairs in user_significant_pairs.items()}
-
-    # Calculate statistics
-    users_with_differences = sum(count > 0 for count in significant_pairs_count.values())
-
-    # Print analysis results
-    print("\n____ Within-User Bigram Typing Time Analysis ____\n")
-    print(f"Total number of bigrams compared: {len(all_bigrams)}")
-    print(f"Users with at least one significant difference in bigram typing times: {users_with_differences} out of {len(significant_pairs_count)} total users")
-    print(f"Total possible comparisons across all users: {total_possible_comparisons}")
-    print(f"Total significant differences across all users: {total_significant_differences}")
-    
-    if total_significant_differences > 0:
-
-        # Count occurrences of each bigram in significant pairs
-        bigram_occurrences = Counter()
-        for pairs in user_significant_pairs.values():
-            for faster, slower, _ in pairs:
-                bigram_occurrences[faster] += 1
-                bigram_occurrences[slower] += 1
-        
-        print("\nBigrams involved in significant differences (sorted by frequency):")
-        for bigram, count in bigram_occurrences.most_common():
-            print(f"{bigram}: {count} times")
-    else:
-        print("\nNo significant differences in typing times were found between bigrams.")
-
-    return {
-        'user_significant_pairs': user_significant_pairs,
-        'significant_pairs_count': significant_pairs_count,
-        'total_significant_differences': total_significant_differences,
-        'users_with_differences': users_with_differences,
-        'bigram_occurrences': dict(bigram_occurrences) if 'bigram_occurrences' in locals() else {}
-    }
 
 #################################
 # Analyze only consistent choices
 #################################
 
 def filter_consistent_choices(bigram_data):
-    """
-    Filter out inconsistent rows from the bigram data and keep only bigram pairs with duplicates.
-    Calculate summary statistics for consistent choices.
-
-    Parameters:
-    - bigram_data: DataFrame containing processed bigram data
-
-    Returns:
-    - consistent_bigram_data: DataFrame containing only consistent choices for duplicate bigram pairs
-    - duplicate_pair_count: Number of unique duplicate bigram pairs
-    - total_duplicate_choices: Total number of choices for duplicate bigram pairs
-    - summary_stats: Dictionary containing summary statistics for consistent choices
-    """
     # Group by user_id and bigram_pair to find duplicates
     grouped = bigram_data.groupby(['user_id', 'bigram_pair'])
     
@@ -1028,7 +935,7 @@ def filter_consistent_choices(bigram_data):
     total_duplicate_choices = len(duplicate_pairs)
     
     # Filter for consistent choices among duplicate pairs
-    consistent_choices = grouped.filter(lambda x: len(x) > 1 and x['is_consistent'].all())
+    consistent_choices = grouped.filter(lambda x: len(x) > 1 and x['chosen_bigram'].nunique() == 1)
     
     # Calculate summary statistics for consistent choices
     summary_stats = {
@@ -1036,90 +943,46 @@ def filter_consistent_choices(bigram_data):
         'valid_chosen_times': consistent_choices['chosen_bigram_time'].notna().sum(),
         'valid_unchosen_times': consistent_choices['unchosen_bigram_time'].notna().sum(),
         'faster_chosen': (consistent_choices['chosen_bigram_time'] < consistent_choices['unchosen_bigram_time']).sum(),
-        'total_comparisons': consistent_choices['chosen_bigram_time'].notna() & consistent_choices['unchosen_bigram_time'].notna()
+        'total_comparisons': (consistent_choices['chosen_bigram_time'].notna() & consistent_choices['unchosen_bigram_time'].notna()).sum()
     }
     
-    return consistent_choices, duplicate_pair_count, total_duplicate_choices, summary_stats
-
-def analyze_consistent_bigram_pairs(consistent_bigram_data):
-    """
-    Analyze and list bigram pairs with consistent choices, the number of users for each pair,
-    and the number of users who chose each bigram in the pair.
-
-    Parameters:
-    - consistent_bigram_data: DataFrame containing only consistent choices for duplicate bigram pairs
-
-    Returns:
-    - bigram_pair_stats: DataFrame containing statistics for each bigram pair
-    """
     print("\n____ Consistent Bigram Pair Analysis ____\n")
 
-    # Group by bigram pair and count unique users
-    user_counts = consistent_bigram_data.groupby('bigram_pair')['user_id'].nunique().reset_index(name='user_count')
-
-    # Count choices for each bigram in the pair
-    choice_counts = consistent_bigram_data.groupby(['bigram_pair', 'chosen_bigram']).size().unstack(fill_value=0)
+    # Calculate statistics for each bigram pair
+    bigram_pair_stats = []
+    for (bigram_pair, group) in consistent_choices.groupby('bigram_pair'):
+        total_users = group['user_id'].nunique()
+        total_choices = len(group)
+        chosen_counts = group['chosen_bigram'].value_counts().to_dict()
+        bigram1, bigram2 = bigram_pair.split(', ')
+        bigram_pair_stats.append({
+            'Bigram Pair': bigram_pair,
+            'Total Users': total_users,
+            'Total Choices': total_choices,
+            'First Bigram': chosen_counts.get(bigram1, 0),
+            'Second Bigram': chosen_counts.get(bigram2, 0)
+        })
     
-    # Rename columns to match bigram names
-    choice_counts.columns = [f'{col}_count' for col in choice_counts.columns]
-    
-    # Merge user counts and choice counts
-    bigram_pair_stats = pd.merge(user_counts, choice_counts, on='bigram_pair')
-
-    # Sort by user count in descending order
-    bigram_pair_stats = bigram_pair_stats.sort_values('user_count', ascending=False)
+    # Convert to DataFrame and sort
+    bigram_pair_stats = pd.DataFrame(bigram_pair_stats)
+    bigram_pair_stats = bigram_pair_stats.sort_values('Total Users', ascending=False)
 
     print(f"{len(bigram_pair_stats)} bigram pairs and choice statistics:")
     
     # Print header
-    print(f"{'Bigram Pair':<15}{'Total Users':<15}{'First Bigram':<15}{'Second Bigram':<15}")
-    print("-" * 60)
+    print(f"{'Bigram Pair':<15}{'Total Users':<15}{'Total Choices':<15}{'First Bigram':<15}{'Second Bigram':<15}")
+    print("-" * 75)
     
     # Print data rows
     for _, row in bigram_pair_stats.iterrows():
-        bigram1, bigram2 = row['bigram_pair'].split(', ')
-        print(f"{row['bigram_pair']:<15}{row['user_count']:<15}{row[f'{bigram1}_count']:<15}{row[f'{bigram2}_count']:<15}")
+        print(f"{row['Bigram Pair']:<15}{row['Total Users']:<15}{row['Total Choices']:<15}{row['First Bigram']:<15}{row['Second Bigram']:<15}")
 
-    return bigram_pair_stats
+    print(f"\nNumber of unique duplicate bigram pairs: {duplicate_pair_count}")
+    print(f"Total choices for duplicate bigram pairs: {total_duplicate_choices}")
+    print(f"Consistent choices for duplicate bigram pairs: {summary_stats['total_rows']} ({summary_stats['total_rows']/total_duplicate_choices*100:.2f}% of duplicate choices)")
 
-"""
-def plot_improbable_vs_inconsistent(analysis_results, output_plots_folder):
-    ""
-    Generate and save plots comparing improbable pairs and inconsistent choices.
+    return consistent_choices, duplicate_pair_count, total_duplicate_choices, summary_stats, bigram_pair_stats
 
-    Parameters:
-    - analysis_results: Dictionary containing analysis results
-    - output_plots_folder: String path to the folder where plots should be saved
-    ""
-    # Bar plot
-    plt.figure(figsize=(10, 6))
-    categories = ['Improbable', 'Inconsistent', 'Both']
-    values = [analysis_results['percent_improbable'], 
-              analysis_results['percent_inconsistent'], 
-              analysis_results['percent_improbable_and_inconsistent']]
-    
-    plt.bar(categories, values)
-    plt.title('Comparison of Improbable Pairs and Inconsistent Choices')
-    plt.ylabel('Percentage')
-    plt.ylim(0, 100)
-    
-    for i, v in enumerate(values):
-        plt.text(i, v + 1, f'{v:.1f}%', ha='center')
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, 'improbable_vs_inconsistent_barplot.png'), dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    # Heatmap of contingency table
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(analysis_results['contingency_table'], annot=True, fmt='d', cmap='YlOrRd')
-    plt.title('Contingency Table: Improbable Pairs vs Inconsistent Choices')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, 'improbable_vs_inconsistent_heatmap.png'), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    #print(f"Improbable vs Inconsistent plots saved in {output_plots_folder}")
-"""
 
 # Main execution
 if __name__ == "__main__":
@@ -1152,20 +1015,40 @@ if __name__ == "__main__":
         ##########################
         bigram_data = process_bigram_data(data, output_tables_folder, verbose=False)
 
+        plot_chosen_vs_unchosen_times(bigram_data, output_plots_folder, 
+                                      output_filename1='chosen_vs_unchosen_times.png',
+                                      output_filename2='chosen_vs_unchosen_times_scatter_regression.png',
+                                      output_filename3='chosen_vs_unchosen_times_joint.png')
+
         #############################
         # Analyze bigram typing times
         #############################
-        typing_time_stats = analyze_typing_times(bigram_data, output_plots_folder)
-        plot_median_bigram_times(bigram_data, output_plots_folder)
+        typing_time_stats = analyze_typing_times(bigram_data, output_plots_folder, 
+                                                 output_filename1='chosen_vs_unchosen_times.png', 
+                                                 output_filename2='typing_time_diff_vs_slider_value.png')
+
+        # Analyze within-user bigram typing times and relationships
+        within_user_stats = analyze_within_user_bigram_times(bigram_data)
+
+        plot_median_bigram_times(bigram_data, output_plots_folder, 
+                                 output_filename='bigram_times_barplot.png')
 
         ############################
         # Analyze improbable choices
         ############################
         if easy_choice_pairs:
-            # Analyze improbable choices
-            suspicious_users, improbable_bigram_freq, typing_time_results = analyze_easy_choices(bigram_data, easy_choice_pairs, threshold=2)
+            suspicious_users, user_improbable_counts, typing_time_results, user_analysis = analyze_easy_choices(bigram_data, easy_choice_pairs, threshold=2)
+            
+            # Scatter plot:
+            plt.figure(figsize=(10, 6))
+            plt.scatter(user_analysis['inconsistent_proportion'], user_analysis['improbable_proportion'])
+            plt.xlabel('Proportion of Inconsistent Pairs')
+            plt.ylabel('Proportion of Improbable Choices')
+            plt.title('Inconsistent Pairs vs Improbable Choices by User')
+            plt.savefig(os.path.join(output_plots_folder, 'inconsistent_vs_improbable_scatter.png'))
+            plt.close()
         else:
-            print("Skipping easy choice bigram analysis due to missing or invalid easy choice pairs data.")
+            print("Skipping easy choice bigram analysis due to missing or invalid easy choice pairs data.")            
 
         #######################################
         # Analyze bigram choice inconsistencies
@@ -1173,45 +1056,39 @@ if __name__ == "__main__":
         bigram_choice_inconsistency_stats = analyze_choice_inconsistencies(bigram_data)
 
         # Analyze the relationship between inconsistent choices and slider values
-        inconsistency_slider_stats = analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder)
-
-        plot_chosen_vs_unchosen_times_barplot(bigram_data, output_plots_folder)
-        plot_chosen_vs_unchosen_times_scatter_regression(bigram_data, output_plots_folder)
-        plot_chosen_vs_unchosen_times_joint(bigram_data, output_plots_folder)
-        #improbable_inconsistent_results = analyze_improbable_vs_inconsistent(bigram_data, easy_choice_pairs)        
-        #plot_improbable_vs_inconsistent(improbable_inconsistent_results, output_plots_folder)
-
-        # Analyze within-user bigram typing times and relationships
-        within_user_stats = analyze_within_user_bigram_times(
-            bigram_data, 
-            bigram_choice_inconsistency_stats, 
-            improbable_bigram_freq,  # Pass improbable_bigram_freq directly
-            output_plots_folder
-        )
+        inconsistency_slider_stats = analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder, 
+                                                                               output_filename1='inconsistency_slider_relationship.png', 
+                                                                               output_filename2='inconsistency_typing_time_relationship.png')
 
         #################################
         # Analyze only consistent choices
         #################################
 
-        print("\n\n=============== Consistent Choice Analysis ===============")
+        print("\n\n=============== Consistent Choice Analysis ===============\n")
 
         # Filter consistent choices for duplicate bigram pairs
-        consistent_bigram_data, duplicate_pair_count, total_duplicate_choices, summary_stats = filter_consistent_choices(bigram_data)
+        consistent_bigram_data, duplicate_pair_count, total_duplicate_choices, summary_stats, bigram_pair_stats = filter_consistent_choices(bigram_data)
         
-        print(f"\nTotal choices: {len(bigram_data)}")
+        plot_chosen_vs_unchosen_times(consistent_bigram_data, output_plots_folder, 
+                                      output_filename1='consistent_chosen_vs_unchosen_times.png',
+                                      output_filename2='consistent_chosen_vs_unchosen_times_scatter_regression.png',
+                                      output_filename3='consistent_chosen_vs_unchosen_times_joint.png')
+
+        print(f"Total choices: {len(bigram_data)}")
         print(f"Number of unique duplicate bigram pairs: {duplicate_pair_count}")
         print(f"Total choices for duplicate bigram pairs: {total_duplicate_choices}")
         print(f"Consistent choices for duplicate bigram pairs: {summary_stats['total_rows']} ({summary_stats['total_rows']/total_duplicate_choices*100:.2f}% of duplicate choices)")
-        print(f"Number of valid chosen times: {summary_stats['valid_chosen_times']}")
-        print(f"Number of valid unchosen times: {summary_stats['valid_unchosen_times']}")
-        print(f"Number of times the faster bigram was chosen: {summary_stats['faster_chosen']} of {summary_stats['total_comparisons'].sum()} comparisons ({summary_stats['faster_chosen'] / summary_stats['total_comparisons'].sum() * 100:.2f}%)")
         
-        # Analyze consistent bigram pairs
-        bigram_pair_stats = analyze_consistent_bigram_pairs(consistent_bigram_data)
-
-        consistent_typing_time_stats = analyze_typing_times(consistent_bigram_data, output_plots_folder)
-
-        print("\n=============== Consistent Choice Analysis Complete ===============\n")
+        # Analyze bigram typing times for consistent choices
+        ####################################################
+        consistent_typing_time_stats = analyze_typing_times(consistent_bigram_data, output_plots_folder, 
+                                                            output_filename1='consistent_chosen_vs_unchosen_times.png', 
+                                                            output_filename2='consistent_typing_time_diff_vs_slider_value.png')
+        consistent_within_user_stats = analyze_within_user_bigram_times(consistent_bigram_data)
+        plot_median_bigram_times(consistent_bigram_data, output_plots_folder, 
+                                 output_filename='consistent_bigram_times_barplot.png')
+            
+        print("\n=============== Consistent Choice Analysis Complete ===============\n\n")
 
     except Exception as e:
         print(f"An error occurred: {str(e)}")
