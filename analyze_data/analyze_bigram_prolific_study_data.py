@@ -12,8 +12,6 @@ from collections import Counter
 #######################
 # Load, preprocess data
 #######################
-
-# Function to perform Mann-Whitney U test and return results
 def perform_mann_whitney(group1, group2, label1, label2):
     group1 = group1.dropna()
     group2 = group2.dropna()
@@ -264,6 +262,14 @@ def process_data(data, easy_choice_pairs, output_tables_folder, verbose=False):
     user_stats['probable_choices'] = probable_choices['user_id'].value_counts()
     user_stats['improbable_choices'] = improbable_choices['user_id'].value_counts()
     
+    # Calculate total choices that could be consistent/inconsistent
+    user_stats['total_consistency_choices'] = bigram_data[bigram_data['group_size'] > 1]['user_id'].value_counts()
+    
+    # Calculate total choices that could be probable/improbable
+    all_easy_pairs = set(pair for pairs in easy_choice_pairs for pair in pairs)
+    easy_choice_mask = bigram_data.apply(lambda row: row['chosen_bigram'] in all_easy_pairs or row['unchosen_bigram'] in all_easy_pairs, axis=1)
+    user_stats['total_probability_choices'] = bigram_data[easy_choice_mask]['user_id'].value_counts()
+    
     # Fill NaN values with 0 for users who might not have any choices in a category
     user_stats = user_stats.fillna(0)
     
@@ -293,7 +299,7 @@ def process_data(data, easy_choice_pairs, output_tables_folder, verbose=False):
     inconsistent_choices.to_csv(f"{output_tables_folder}/processed_inconsistent_choices.csv", index=False)
     probable_choices.to_csv(f"{output_tables_folder}/processed_probable_choices.csv", index=False)
     improbable_choices.to_csv(f"{output_tables_folder}/processed_improbable_choices.csv", index=False)
-    user_stats.to_csv(f"{output_tables_folder}/user_statistics.csv", index=False)
+    user_stats.to_csv(f"{output_tables_folder}/processed_user_statistics.csv", index=False)
     
     print(f"Processed data saved to {output_tables_folder}")
 
@@ -357,7 +363,7 @@ def visualize_user_choices(user_stats, output_plots_folder, plot_label=""):
 
     print(f"Visualization plots saved in {output_plots_folder}")
 
-def filter_users(processed_data, improbable_threshold=np.Inf, inconsistent_threshold=np.Inf):
+def filter_users(processed_data, output_tables_folder, improbable_threshold=np.Inf, inconsistent_threshold=np.Inf):
     """
     Filter users based on their number of inconsistent and improbable choices.
 
@@ -365,6 +371,7 @@ def filter_users(processed_data, improbable_threshold=np.Inf, inconsistent_thres
     - processed_data: Dictionary containing various processed dataframes from process_data
     - improbable_threshold: Maximum number of improbable choices allowed
     - inconsistent_threshold: Maximum number of inconsistent choices allowed
+    - output_tables_folder: String path to the folder where filtered data should be saved
 
     Returns:
     - filtered_data: Dictionary containing the filtered dataframes
@@ -373,13 +380,13 @@ def filter_users(processed_data, improbable_threshold=np.Inf, inconsistent_thres
     bigram_data = processed_data['bigram_data']
     user_stats = processed_data['user_stats']
 
-    # Identify users who exceed both criteria
+    # Identify users who exceed either criteria
     users_to_remove = user_stats[
-        (user_stats['improbable_choices'] > improbable_threshold) & 
+        (user_stats['improbable_choices'] > improbable_threshold) | 
         (user_stats['inconsistent_choices'] > inconsistent_threshold)
     ]['user_id']
 
-    # Identify valid users (those who don't exceed both thresholds)
+    # Identify valid users (those who don't exceed either threshold)
     valid_users = set(user_stats['user_id']) - set(users_to_remove)
 
     # Filter all dataframes to keep only the valid users
@@ -403,17 +410,26 @@ def filter_users(processed_data, improbable_threshold=np.Inf, inconsistent_thres
     # Print summary of filtering
     total_users = len(user_stats)
     filtered_users = len(filtered_user_stats)
+    max_total_consistency_choices = user_stats['total_consistency_choices'].max()
+    max_total_probability_choices = user_stats['total_probability_choices'].max()
     print(f"\nFiltering Summary:")
-    print(f"Maximum number of improbable choices allowed: {improbable_threshold}")
-    print(f"Maximum number of inconsistent choices allowed: {inconsistent_threshold}")
+    print(f"Maximum number of improbable choices allowed: {improbable_threshold} of max {max_total_probability_choices}")
+    print(f"Maximum number of inconsistent choices allowed: {inconsistent_threshold} of max {max_total_consistency_choices}")
     print(f"Total users before filtering: {total_users}")
     print(f"Users remaining after filtering: {filtered_users}")
     print(f"Users removed: {total_users - filtered_users}")
 
+    # Save the DataFrames to CSV files if output_tables_folder is provided
+    if output_tables_folder:
+        filtered_bigram_data.to_csv(f"{output_tables_folder}/filtered_bigram_data.csv", index=False)
+        filtered_consistent_choices.to_csv(f"{output_tables_folder}/filtered_consistent_choices.csv", index=False)
+        filtered_inconsistent_choices.to_csv(f"{output_tables_folder}/filtered_inconsistent_choices.csv", index=False)
+        filtered_probable_choices.to_csv(f"{output_tables_folder}/filtered_probable_choices.csv", index=False)
+        filtered_improbable_choices.to_csv(f"{output_tables_folder}/filtered_improbable_choices.csv", index=False)
+        filtered_user_stats.to_csv(f"{output_tables_folder}/filtered_user_statistics.csv", index=False)
+        print(f"Filtered data saved to {output_tables_folder}")
+
     return filtered_data
-
-
-
 
 ###############################
 # Bigram Typing Time Statistics
@@ -1170,9 +1186,10 @@ if __name__ == "__main__":
     preprocess = True
     if preprocess:
 
-        ##########################
-        # Load and preprocess data
-        ##########################
+        ###################################
+        # Load, preprocess, and filter data
+        ###################################
+
         # Set the paths for input and output
         input_folder = '/Users/arno.klein/Downloads/osf/summary'
         output_folder = os.path.join(os.path.dirname(input_folder), 'output')
@@ -1190,32 +1207,22 @@ if __name__ == "__main__":
         # Load, combine, and save the data
         data = load_and_combine_data(input_folder, output_tables_folder, verbose=False)
         processed_data = process_data(data, easy_choice_pairs, output_tables_folder, verbose=False)
+        user_stats = processed_data['user_stats']
+        #print(user_stats[['user_id', 'total_choices', 'total_consistency_choices', 'total_probability_choices']])
 
         # Generate visualizations
-        visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
+        visualize_user_choices(user_stats, output_plots_folder, plot_label="processed_")
 
         # Filter data by an max threshold of inconsistent or improbable choices
-        total_choices = len(processed_data['user_stats']['total_choices'])
-        filtered_data = filter_users(processed_data, improbable_threshold=2000, 
-                                     inconsistent_threshold=total_choices/2)
+        first_user_data = user_stats.iloc[0]
+        improbable_threshold = round(first_user_data['total_probability_choices'] / 2)
+        inconsistent_threshold = round(first_user_data['total_consistency_choices'] / 2)
+        filtered_data = filter_users(processed_data, output_tables_folder,
+                                     improbable_threshold, inconsistent_threshold)
 
-        # Optionally, you can generate visualizations for the filtered data as well
+        # Generate visualizations for the filtered data as well
         visualize_user_choices(filtered_data['user_stats'], output_plots_folder, plot_label="filtered_")
 
-        # Analyze data for inconsistent or improbable choices
-        #user_stats = analyze_inconsistent_or_improbable_choices(processed_data, output_plots_folder, plot_label="processed_")
-        total_choices = len(processed_data['user_stats']['total_choices'])
-        print(total_choices)
-
-        #inconsistent_choices = user_stats['inconsistent_choices']
-        #improbable_choices = user_stats['improbable_choices']
-
-        # Analyze filtered data again for inconsistent or improbable choices
-        #analyzed_filtered_data = analyze_inconsistent_or_improbable_choices(filtered_data, output_plots_folder, plot_label="filtered_")
-
-
-        #bigram_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_27pairs_11tests_11swap_5easy_LH.csv')
-        #num_bigram_pairs, bigram_pairs_df = load_bigram_pairs(bigram_pairs_file)
 
         #####################
         # Process bigram data
