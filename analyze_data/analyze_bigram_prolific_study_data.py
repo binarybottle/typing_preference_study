@@ -293,19 +293,19 @@ def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folde
     Returns:
     - user_stats: DataFrame containing user statistics
     """
+    import pandas as pd
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from scipy import stats
+    import os
+
     # Extract relevant dataframes from processed_data
     bigram_data = processed_data['bigram_data']
     consistent_choices = processed_data['consistent_choices']
     inconsistent_choices = processed_data['inconsistent_choices']
     probable_choices = processed_data['probable_choices']
     improbable_choices = processed_data['improbable_choices']
-
-    # Print dataframe information for debugging
-    #for name, df in processed_data.items():
-    #    print(f"\n{name} shape: {df.shape}")
-    #    print(f"{name} columns: {df.columns.tolist()}")
-    #    print(f"{name} first few rows:")
-    #    print(df.head().to_string())
 
     # Calculate statistics for each user
     user_stats = pd.DataFrame()
@@ -322,8 +322,13 @@ def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folde
     user_stats = user_stats.astype(int)
 
     # Calculate proportions
-    user_stats['proportion_inconsistent'] = user_stats['inconsistent_choices'] / (user_stats['consistent_choices'] + user_stats['inconsistent_choices'])
+    total_consistency_choices = user_stats['consistent_choices'] + user_stats['inconsistent_choices']
+    user_stats['proportion_inconsistent'] = user_stats['inconsistent_choices'] / total_consistency_choices.replace(0, np.nan)
+    user_stats['proportion_inconsistent'] = user_stats['proportion_inconsistent'].fillna(0)
     user_stats['proportion_improbable'] = user_stats['improbable_choices'] / user_stats['total_choices']
+
+    # Handle division by zero
+    user_stats['proportion_improbable'] = user_stats['proportion_improbable'].fillna(0)
 
     # Perform Spearman's rank correlation test
     correlation, p_value = stats.spearmanr(user_stats['proportion_inconsistent'], user_stats['proportion_improbable'])
@@ -341,6 +346,27 @@ def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folde
     else:
         print("There is no significant relationship between the proportion of inconsistent responses and the proportion of improbable responses.")
 
+    # Create a scatter plot
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(x='proportion_inconsistent', y='proportion_improbable', data=user_stats)
+    plt.title('Relationship between Inconsistent and Improbable Choices')
+    plt.xlabel('Proportion of Inconsistent Choices')
+    plt.ylabel('Proportion of Improbable Choices')
+    
+    # Add correlation line
+    plt.plot(np.unique(user_stats['proportion_inconsistent']), 
+             np.poly1d(np.polyfit(user_stats['proportion_inconsistent'], user_stats['proportion_improbable'], 1))(np.unique(user_stats['proportion_inconsistent'])),
+             color='r', linestyle='--')
+    
+    # Add text with correlation and p-value
+    plt.text(0.05, 0.95, f'Correlation: {correlation:.4f}\np-value: {p_value:.4f}', 
+             transform=plt.gca().transAxes, verticalalignment='top')
+    
+    scatter_filename = os.path.join(output_plots_folder, 'inconsistent_vs_improbable_scatter.png')
+    plt.savefig(scatter_filename, dpi=300, bbox_inches='tight')
+    print(f"\nScatter plot saved to: {scatter_filename}")
+    plt.close()
+    
     # Function to create choice table
     def create_choice_table(data):
         # Split the bigram_pair into two columns
@@ -381,11 +407,44 @@ def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folde
     print("\nRepeated Pairs Table:")
     print(repeated_pairs_table.to_string())
 
-    # Create and print Easy Choice Pairs Table
-    easy_choice_table = all_pairs_table[all_pairs_table['#users probable'] + all_pairs_table['#users improbable'] > 0].copy()
-    easy_choice_table = easy_choice_table[['#users pair 1', '#users pair 2', '#users probable', '#users improbable', 'total_users']]
-    print("\nEasy Choice Pairs Table:")
-    print(easy_choice_table.to_string())
+    # Create and print Improbable Choice Pairs Table
+    improbable_choice_table = all_pairs_table[all_pairs_table['#users improbable'] > 0].copy()
+    improbable_choice_table = improbable_choice_table[['#users pair 1', '#users pair 2', '#users improbable', 'total_users']]
+    print("\nImprobable Choice Pairs Table:")
+    print(improbable_choice_table.to_string())
+
+    # Create separate plots for consistency and probability
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 25))
+
+    # Sort data by consistent choices for both plots
+    plot_data = user_stats.sort_values('consistent_choices', ascending=True)
+
+    # Function to create and save plot
+    def create_and_save_plot(data, title, ax):
+        data.plot(kind='barh', stacked=True, ax=ax)
+        ax.set_title(title)
+        ax.set_xlabel('Number of Choices')
+        ax.set_ylabel('User ID')
+        ax.legend(loc='lower right')
+        
+        # Adjust y-tick labels to show all user IDs
+        ax.set_yticks(range(len(data.index)))
+        ax.set_yticklabels(data.index)
+        ax.tick_params(axis='y', which='major', labelsize=6)  # Adjust label size if needed
+
+    # Consistency plot
+    consistency_data = plot_data[['consistent_choices', 'inconsistent_choices']]
+    create_and_save_plot(consistency_data, 'User Choices: Consistency', ax1)
+
+    # Probability plot (using the same order as consistency plot)
+    probability_data = plot_data[['probable_choices', 'improbable_choices']]
+    create_and_save_plot(probability_data, 'User Choices: Probability', ax2)
+
+    plt.tight_layout()
+    plot_filename = os.path.join(output_plots_folder, 'user_choices_combined.png')
+    plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+    print(f"\nCombined plot saved to: {plot_filename}")
+    plt.close(fig)
 
     return user_stats
 
@@ -1150,7 +1209,7 @@ if __name__ == "__main__":
         # Load improbable pairs from CSV file
         current_dir = os.getcwd()  # Get the current working directory
         parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-        easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_4pairs_easy_choices_LH.csv')
+        easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_2pairs_easy_choices_LH.csv')
         easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
         # Load, combine, and save the data
