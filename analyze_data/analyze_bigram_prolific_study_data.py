@@ -282,13 +282,13 @@ def process_bigram_data(data, easy_choice_pairs, output_tables_folder, verbose=F
 
 def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folder):
     """
-    Analyze user inconsistencies and improbable choices, create a table, generate a stacked bar plot,
+    Analyze user inconsistencies and improbable choices, create tables, generate plots,
     and perform a statistical test on the relationship between inconsistent and improbable choices.
 
     Parameters:
     - processed_data: Dictionary containing various processed dataframes from process_bigram_data
-    - output_tables_folder: String path to the folder where the CSV file should be saved
-    - output_plots_folder: String path to the folder where the plot should be saved
+    - output_tables_folder: String path to the folder where the CSV files should be saved
+    - output_plots_folder: String path to the folder where the plots should be saved
 
     Returns:
     - user_stats: DataFrame containing user statistics
@@ -299,6 +299,13 @@ def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folde
     inconsistent_choices = processed_data['inconsistent_choices']
     probable_choices = processed_data['probable_choices']
     improbable_choices = processed_data['improbable_choices']
+
+    # Print dataframe information for debugging
+    for name, df in processed_data.items():
+        print(f"\n{name} shape: {df.shape}")
+        print(f"{name} columns: {df.columns.tolist()}")
+        print(f"{name} first few rows:")
+        print(df.head().to_string())
 
     # Calculate statistics for each user
     user_stats = pd.DataFrame()
@@ -334,72 +341,42 @@ def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folde
     else:
         print("There is no significant relationship between the proportion of inconsistent responses and the proportion of improbable responses.")
 
-    # Create a scatter plot
-    plt.figure(figsize=(10, 6))
-    sns.scatterplot(x='proportion_inconsistent', y='proportion_improbable', data=user_stats)
-    plt.title('Relationship between Inconsistent and Improbable Choices')
-    plt.xlabel('Proportion of Inconsistent Choices')
-    plt.ylabel('Proportion of Improbable Choices')
-    
-    # Add correlation line
-    plt.plot(np.unique(user_stats['proportion_inconsistent']), 
-             np.poly1d(np.polyfit(user_stats['proportion_inconsistent'], user_stats['proportion_improbable'], 1))(np.unique(user_stats['proportion_inconsistent'])),
-             color='r', linestyle='--')
-    
-    # Add text with correlation and p-value
-    plt.text(0.05, 0.95, f'Correlation: {correlation:.4f}\np-value: {p_value:.4f}', 
-             transform=plt.gca().transAxes, verticalalignment='top')
-    
-    scatter_filename = os.path.join(output_plots_folder, 'inconsistent_vs_improbable_scatter.png')
-    plt.savefig(scatter_filename, dpi=300, bbox_inches='tight')
-    print(f"\nScatter plot saved to: {scatter_filename}")
-    plt.close()
-
-    # Sort by number of inconsistent choices (descending)
-    user_stats = user_stats.sort_values('inconsistent_choices', ascending=False)
-
-    # Save the user statistics to a CSV file
-    csv_filename = os.path.join(output_tables_folder, 'user_inconsistency_statistics.csv')
-    user_stats.to_csv(csv_filename)
-    print(f"\nUser Inconsistency Statistics saved to: {csv_filename}")
-
-    # Print the first few rows of the data
-    #print("\nFirst few rows of User Inconsistency Statistics:")
-    #print(user_stats.head().to_string())
-
-    # Create separate plots for consistency and probability
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 15))
-
-    # Sort data by consistent choices for both plots
-    plot_data = user_stats.sort_values('consistent_choices', ascending=True)
-
-    # Function to create and save plot
-    def create_and_save_plot(data, title, filename):
-        fig, ax = plt.subplots(figsize=(10, len(data) * 0.25))  # Adjust height based on number of users
-        data.plot(kind='barh', stacked=True, ax=ax)
-        ax.set_title(title)
-        ax.set_xlabel('Number of Choices')
-        ax.set_ylabel('User ID')
-        ax.legend(loc='lower right')
+    # Function to create choice table
+    def create_choice_table(data):
+        # Split the bigram_pair into two columns
+        data[['bigram1', 'bigram2']] = data['bigram_pair'].str.split(', ', expand=True)
         
-        # Adjust y-tick labels to show all user IDs
-        ax.set_yticks(range(len(data.index)))
-        ax.set_yticklabels(data.index)
-        ax.tick_params(axis='y', which='major', labelsize=6)  # Adjust label size if needed
+        # Count the number of unique users for each bigram as the chosen_bigram
+        pair_counts = pd.DataFrame({
+            '#users pair 1': data[data['chosen_bigram'] == data['bigram1']].groupby('bigram_pair')['user_id'].nunique(),
+            '#users pair 2': data[data['chosen_bigram'] == data['bigram2']].groupby('bigram_pair')['user_id'].nunique()
+        })
         
-        plt.tight_layout()
-        plot_filename = os.path.join(output_plots_folder, filename)
-        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
-        print(f"\n{title} plot saved to: {plot_filename}")
-        plt.close(fig)
+        return pair_counts.fillna(0).astype(int)
 
-    # Consistency plot
-    consistency_data = plot_data[['consistent_choices', 'inconsistent_choices']]
-    create_and_save_plot(consistency_data, 'User Choices: Consistency', 'user_choices_consistency.png')
+    # Table for repeated pairs
+    repeated_pairs = pd.concat([consistent_choices, inconsistent_choices])
+    repeated_pairs_table = create_choice_table(repeated_pairs)
+    repeated_pairs_table['#users consistent'] = consistent_choices.groupby('bigram_pair')['user_id'].nunique()
+    repeated_pairs_table['#users inconsistent'] = inconsistent_choices.groupby('bigram_pair')['user_id'].nunique()
+    
+    # Sort the table by total number of users (consistent + inconsistent) in descending order
+    repeated_pairs_table['total_users'] = repeated_pairs_table['#users consistent'] + repeated_pairs_table['#users inconsistent']
+    repeated_pairs_table = repeated_pairs_table.sort_values('total_users', ascending=False)
+    
+    print("\nRepeated Pairs Table:")
+    print(repeated_pairs_table.to_string())
 
-    # Probability plot (using the same order as consistency plot)
-    probability_data = plot_data[['probable_choices', 'improbable_choices']]
-    create_and_save_plot(probability_data, 'User Choices: Probability', 'user_choices_probability.png')
+    # Table for easy choice pairs
+    easy_choice_pairs = pd.concat([probable_choices, improbable_choices])
+    easy_choice_table = create_choice_table(easy_choice_pairs)
+    
+    # Sort the table by total number of users in descending order
+    easy_choice_table['total_users'] = easy_choice_table['#users pair 1'] + easy_choice_table['#users pair 2']
+    easy_choice_table = easy_choice_table.sort_values('total_users', ascending=False)
+    
+    print("\nEasy Choice Pairs Table:")
+    print(easy_choice_table.to_string())
 
     return user_stats
 
