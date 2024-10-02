@@ -13,6 +13,63 @@ from collections import Counter
 # Load, preprocess data
 #######################
 
+# Function to perform Mann-Whitney U test and return results
+def perform_mann_whitney(group1, group2, label1, label2):
+    group1 = group1.dropna()
+    group2 = group2.dropna()
+    
+    if len(group1) > 0 and len(group2) > 0:
+        median1 = group1.median()
+        median2 = group2.median()
+        mad1 = stats.median_abs_deviation(group1, nan_policy='omit')
+        mad2 = stats.median_abs_deviation(group2, nan_policy='omit')
+        
+        statistic, p_value = stats.mannwhitneyu(group1, group2, alternative='two-sided')
+        
+        print(f"\n{label1} median (MAD): {median1:.2f} ({mad1:.2f})")
+        print(f"{label2} median (MAD): {median2:.2f} ({mad2:.2f})")
+        print(f"Mann-Whitney U test results:")
+        print(f"U-statistic: {statistic:.4f}")
+        print(f"p-value: {p_value:.4f}")
+        
+        if p_value < 0.05:
+            print(f"There is a significant difference between {label1} and {label2}: {label1} {'tend to be lower' if median1 < median2 else 'tend to be higher'}.")
+        else:
+            print(f"There is no significant difference between {label1} and {label2}.")
+        
+        return {
+            f'{label1.lower()}_median': median1,
+            f'{label2.lower()}_median': median2,
+            f'{label1.lower()}_mad': mad1,
+            f'{label2.lower()}_mad': mad2,
+            'u_statistic': statistic,
+            'p_value': p_value
+        }
+    else:
+        print(f"\nInsufficient data to perform statistical analysis for {label1} vs {label2}.")
+        return None
+
+def display_information(dframe, title, print_headers, nlines):
+    """
+    Display information about a DataFrame.
+
+    Parameters:
+    - dframe: DataFrame to display information about
+    - title: name of the DataFrame
+    - print_headers: list of headers to print
+    - nlines: number of lines to print
+    """
+    print('')
+    print(f"{title}:")
+    #dframe.info()
+    #print('')
+    #print("Sample output:")
+    
+    with pd.option_context('display.max_rows', nlines):
+        print(dframe[print_headers].iloc[:nlines])  # Display 'nlines' rows
+
+    print('')
+
 def load_and_preprocess_data(input_folder, output_tables_folder, verbose=False):
     """
     Load and preprocess (combine) data from multiple CSV files in a folder.
@@ -119,17 +176,23 @@ def load_bigram_pairs(file_path):
         print(f"Error loading pairs: {str(e)}")
         return []
     
-def process_bigram_data(data, output_tables_folder, verbose=False):
+def process_bigram_data(data, easy_choice_pairs, output_tables_folder, verbose=False):
     """
-    Process the bigram data from a DataFrame.
+    Process the bigram data from a DataFrame and create additional dataframes for specific subsets.
 
     Parameters:
     - data: DataFrame with combined bigram data
+    - easy_choice_pairs: List of tuples containing easy choice (probable, improbable) bigram pairs
     - output_tables_folder: str, path to the folder where the processed data will be saved
+    - verbose: bool, if True, print additional information
 
     Returns:
-    - bigram_data: DataFrame with processed bigram data
+    - dict: Dictionary containing various processed dataframes
     """
+    
+    # Create dictionaries for quick lookup of probable and improbable pairs
+    probable_pairs = {(pair[0], pair[1]): True for pair in easy_choice_pairs}
+    improbable_pairs = {(pair[1], pair[0]): True for pair in easy_choice_pairs}
     
     # First, create a standardized bigram pair representation
     data['std_bigram_pair'] = data.apply(lambda row: ', '.join(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
@@ -137,16 +200,25 @@ def process_bigram_data(data, output_tables_folder, verbose=False):
     # Group the data by user_id and standardized bigram pair
     grouped_data = data.groupby(['user_id', 'std_bigram_pair'])
     
+    # Calculate the size of each group
+    group_sizes = grouped_data.size()
+    
     result_list = []
     
     for (user_id, std_bigram_pair), group in grouped_data:
         bigram1, bigram2 = std_bigram_pair.split(', ')
         
-        # Check consistency
-        chosen_bigrams = set(group['chosenBigram'])
-        is_consistent = len(chosen_bigrams) == 1
+        # Check consistency (only for pairs that appear more than once)
+        is_consistent = len(set(group['chosenBigram'])) == 1 if len(group) > 1 else None
         
-        for _, row in group.iterrows():            
+        for _, row in group.iterrows():
+            chosen_bigram = row['chosenBigram']
+            unchosen_bigram = row['unchosenBigram']
+            
+            # Determine if the choice is probable or improbable
+            is_probable = probable_pairs.get((chosen_bigram, unchosen_bigram), False)
+            is_improbable = improbable_pairs.get((chosen_bigram, unchosen_bigram), False)
+            
             result = pd.DataFrame({
                 'user_id': [user_id],
                 'trialId': [row['trialId']],
@@ -155,15 +227,18 @@ def process_bigram_data(data, output_tables_folder, verbose=False):
                 'bigram2': [bigram2],
                 'bigram1_time': [row['chosenBigramTime'] if row['chosenBigram'] == bigram1 else row['unchosenBigramTime']],
                 'bigram2_time': [row['chosenBigramTime'] if row['chosenBigram'] == bigram2 else row['unchosenBigramTime']],
-                'chosen_bigram': row['chosenBigram'],
-                'unchosen_bigram': row['unchosenBigram'],
+                'chosen_bigram': [chosen_bigram],
+                'unchosen_bigram': [unchosen_bigram],
                 'chosen_bigram_time': [row['chosenBigramTime']],
                 'unchosen_bigram_time': [row['unchosenBigramTime']],
                 'chosen_bigram_correct': [row['chosenBigramCorrect']],
                 'unchosen_bigram_correct': [row['unchosenBigramCorrect']],
                 'sliderValue': [row['sliderValue']],
                 'text': [row['text']],
-                'is_consistent': [is_consistent]
+                'is_consistent': [is_consistent],
+                'is_probable': [is_probable],
+                'is_improbable': [is_improbable],
+                'group_size': [group_sizes[(user_id, std_bigram_pair)]]
             })
             result_list.append(result)
     
@@ -173,55 +248,160 @@ def process_bigram_data(data, output_tables_folder, verbose=False):
     # Sort the DataFrame
     bigram_data = bigram_data.sort_values(by=['user_id', 'trialId', 'bigram_pair']).reset_index(drop=True)
     
-    # Display information about the bigram DataFrame
+    # Create dataframes for specific subsets
+    consistent_choices = bigram_data[(bigram_data['is_consistent'] == True) & (bigram_data['group_size'] > 1)].drop(['is_probable', 'is_improbable'], axis=1)
+    inconsistent_choices = bigram_data[(bigram_data['is_consistent'] == False) & (bigram_data['group_size'] > 1)].drop(['is_probable', 'is_improbable'], axis=1)
+    probable_choices = bigram_data[bigram_data['is_probable']].drop(['is_consistent', 'group_size'], axis=1)
+    improbable_choices = bigram_data[bigram_data['is_improbable']].drop(['is_consistent', 'group_size'], axis=1)
+    
+    # Display information about the DataFrames
     if verbose:
-        print_headers = ['trialId', 'bigram_pair', 'chosen_bigram', 'chosen_bigram_time', 'chosen_bigram_correct',  
-                         'sliderValue', 'is_consistent']
-        display_information(bigram_data, "bigram data", print_headers, nlines=30)
+        print_headers = ['trialId', 'bigram_pair', 'chosen_bigram', 'unchosen_bigram', 'chosen_bigram_time', 'chosen_bigram_correct', 'sliderValue']
+        display_information(bigram_data, "original data", print_headers + ['is_consistent', 'is_probable', 'is_improbable', 'group_size'], nlines=30)
+        display_information(consistent_choices, "consistent choices", print_headers + ['is_consistent', 'group_size'], nlines=10)
+        display_information(inconsistent_choices, "inconsistent choices", print_headers + ['is_consistent', 'group_size'], nlines=10)
+        display_information(probable_choices, "probable choices", print_headers + ['is_probable'], nlines=10)
+        display_information(improbable_choices, "improbable choices", print_headers + ['is_improbable'], nlines=10)
     
-    # Save and return the bigram data
+    # Save the DataFrames to CSV files
     bigram_data.to_csv(f"{output_tables_folder}/processed_bigram_data.csv", index=False)
+    consistent_choices.to_csv(f"{output_tables_folder}/consistent_choices.csv", index=False)
+    inconsistent_choices.to_csv(f"{output_tables_folder}/inconsistent_choices.csv", index=False)
+    probable_choices.to_csv(f"{output_tables_folder}/probable_choices.csv", index=False)
+    improbable_choices.to_csv(f"{output_tables_folder}/improbable_choices.csv", index=False)
     
-    return bigram_data
-
-def prepare_plot_data(bigram_data):
-    """
-    Prepare data for plotting chosen vs unchosen times.
-    """
-    # Include both chosen and unchosen bigrams
-    chosen_data = bigram_data.groupby('chosen_bigram').agg({'chosen_bigram_time': 'median'}).reset_index()
-    chosen_data.columns = ['bigram', 'time']
-    chosen_data['type'] = 'chosen'
-
-    unchosen_data = bigram_data.groupby('unchosen_bigram').agg({'unchosen_bigram_time': 'median'}).reset_index()
-    unchosen_data.columns = ['bigram', 'time']
-    unchosen_data['type'] = 'unchosen'
-
-    plot_data = pd.concat([chosen_data, unchosen_data], ignore_index=True)
+    print(f"Processed data saved to {output_tables_folder}")
     
-    #print(f"Number of unique bigrams: {plot_data['bigram'].nunique()}")
-    return plot_data
+    return {
+        'bigram_data': bigram_data,
+        'consistent_choices': consistent_choices,
+        'inconsistent_choices': inconsistent_choices,
+        'probable_choices': probable_choices,
+        'improbable_choices': improbable_choices
+    }
 
-def display_information(dframe, title, print_headers, nlines):
+def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folder):
     """
-    Display information about a DataFrame.
+    Analyze user inconsistencies and improbable choices, create a table, generate a stacked bar plot,
+    and perform a statistical test on the relationship between inconsistent and improbable choices.
 
     Parameters:
-    - dframe: DataFrame to display information about
-    - title: name of the DataFrame
-    - print_headers: list of headers to print
-    - nlines: number of lines to print
-    """
-    print('')
-    print(f"{title}:")
-    #dframe.info()
-    #print('')
-    #print("Sample output:")
-    
-    with pd.option_context('display.max_rows', nlines):
-        print(dframe[print_headers].iloc[:nlines])  # Display 'nlines' rows
+    - processed_data: Dictionary containing various processed dataframes from process_bigram_data
+    - output_tables_folder: String path to the folder where the CSV file should be saved
+    - output_plots_folder: String path to the folder where the plot should be saved
 
-    print('')
+    Returns:
+    - user_stats: DataFrame containing user statistics
+    """
+    # Extract relevant dataframes from processed_data
+    bigram_data = processed_data['bigram_data']
+    consistent_choices = processed_data['consistent_choices']
+    inconsistent_choices = processed_data['inconsistent_choices']
+    probable_choices = processed_data['probable_choices']
+    improbable_choices = processed_data['improbable_choices']
+
+    # Calculate statistics for each user
+    user_stats = pd.DataFrame()
+    user_stats['total_choices'] = bigram_data.groupby('user_id').size()
+    user_stats['consistent_choices'] = consistent_choices.groupby('user_id').size()
+    user_stats['inconsistent_choices'] = inconsistent_choices.groupby('user_id').size()
+    user_stats['probable_choices'] = probable_choices.groupby('user_id').size()
+    user_stats['improbable_choices'] = improbable_choices.groupby('user_id').size()
+
+    # Fill NaN values with 0 for users who might not have any choices in a category
+    user_stats = user_stats.fillna(0)
+
+    # Ensure all columns are integers
+    user_stats = user_stats.astype(int)
+
+    # Calculate proportions
+    user_stats['proportion_inconsistent'] = user_stats['inconsistent_choices'] / (user_stats['consistent_choices'] + user_stats['inconsistent_choices'])
+    user_stats['proportion_improbable'] = user_stats['improbable_choices'] / user_stats['total_choices']
+
+    # Perform Spearman's rank correlation test
+    correlation, p_value = stats.spearmanr(user_stats['proportion_inconsistent'], user_stats['proportion_improbable'])
+
+    print("\nStatistical Test Results:")
+    print(f"Spearman's rank correlation coefficient: {correlation:.4f}")
+    print(f"P-value: {p_value:.4f}")
+
+    if p_value < 0.05:
+        print("There is a significant relationship between the proportion of inconsistent responses and the proportion of improbable responses.")
+        if correlation > 0:
+            print("The relationship is positive, meaning that as the proportion of inconsistent responses increases, the proportion of improbable responses tends to increase as well.")
+        else:
+            print("The relationship is negative, meaning that as the proportion of inconsistent responses increases, the proportion of improbable responses tends to decrease.")
+    else:
+        print("There is no significant relationship between the proportion of inconsistent responses and the proportion of improbable responses.")
+
+    # Create a scatter plot
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(x='proportion_inconsistent', y='proportion_improbable', data=user_stats)
+    plt.title('Relationship between Inconsistent and Improbable Choices')
+    plt.xlabel('Proportion of Inconsistent Choices')
+    plt.ylabel('Proportion of Improbable Choices')
+    
+    # Add correlation line
+    plt.plot(np.unique(user_stats['proportion_inconsistent']), 
+             np.poly1d(np.polyfit(user_stats['proportion_inconsistent'], user_stats['proportion_improbable'], 1))(np.unique(user_stats['proportion_inconsistent'])),
+             color='r', linestyle='--')
+    
+    # Add text with correlation and p-value
+    plt.text(0.05, 0.95, f'Correlation: {correlation:.4f}\np-value: {p_value:.4f}', 
+             transform=plt.gca().transAxes, verticalalignment='top')
+    
+    scatter_filename = os.path.join(output_plots_folder, 'inconsistent_vs_improbable_scatter.png')
+    plt.savefig(scatter_filename, dpi=300, bbox_inches='tight')
+    print(f"\nScatter plot saved to: {scatter_filename}")
+    plt.close()
+
+    # Sort by number of inconsistent choices (descending)
+    user_stats = user_stats.sort_values('inconsistent_choices', ascending=False)
+
+    # Save the user statistics to a CSV file
+    csv_filename = os.path.join(output_tables_folder, 'user_inconsistency_statistics.csv')
+    user_stats.to_csv(csv_filename)
+    print(f"\nUser Inconsistency Statistics saved to: {csv_filename}")
+
+    # Print the first few rows of the data
+    #print("\nFirst few rows of User Inconsistency Statistics:")
+    #print(user_stats.head().to_string())
+
+    # Create separate plots for consistency and probability
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 15))
+
+    # Sort data by consistent choices for both plots
+    plot_data = user_stats.sort_values('consistent_choices', ascending=True)
+
+    # Function to create and save plot
+    def create_and_save_plot(data, title, filename):
+        fig, ax = plt.subplots(figsize=(10, len(data) * 0.25))  # Adjust height based on number of users
+        data.plot(kind='barh', stacked=True, ax=ax)
+        ax.set_title(title)
+        ax.set_xlabel('Number of Choices')
+        ax.set_ylabel('User ID')
+        ax.legend(loc='lower right')
+        
+        # Adjust y-tick labels to show all user IDs
+        ax.set_yticks(range(len(data.index)))
+        ax.set_yticklabels(data.index)
+        ax.tick_params(axis='y', which='major', labelsize=6)  # Adjust label size if needed
+        
+        plt.tight_layout()
+        plot_filename = os.path.join(output_plots_folder, filename)
+        plt.savefig(plot_filename, dpi=300, bbox_inches='tight')
+        print(f"\n{title} plot saved to: {plot_filename}")
+        plt.close(fig)
+
+    # Consistency plot
+    consistency_data = plot_data[['consistent_choices', 'inconsistent_choices']]
+    create_and_save_plot(consistency_data, 'User Choices: Consistency', 'user_choices_consistency.png')
+
+    # Probability plot (using the same order as consistency plot)
+    probability_data = plot_data[['probable_choices', 'improbable_choices']]
+    create_and_save_plot(probability_data, 'User Choices: Probability', 'user_choices_probability.png')
+
+    return user_stats
 
 ###############################
 # Bigram Typing Time Statistics
@@ -405,6 +585,7 @@ def analyze_within_user_bigram_times(bigram_data):
             
             if len(times1) > 0 and len(times2) > 0:
                 user_comparisons += 1
+
                 statistic, p_value = stats.mannwhitneyu(times1, times2, alternative='two-sided')
                 if p_value < 0.05:
                     faster_bigram = bigram1 if times1.median() < times2.median() else bigram2
@@ -638,12 +819,15 @@ def analyze_easy_choices(bigram_data, easy_choice_pairs, threshold=1):
 # Analyze bigram choice inconsistencies
 #######################################
 
-def analyze_choice_inconsistencies(bigram_data):
+def analyze_choice_inconsistencies(bigram_data, output_tables_folder):
     """
-    Analyze and report inconsistencies in bigram data.
+    Analyze and report inconsistencies in bigram data, including median of slider values,
+    and information about which bigram was preferred. Outputs results to a CSV file.
+    Excludes pairs that are only presented once to each user.
 
     Parameters:
     - bigram_data: DataFrame containing processed bigram data
+    - output_tables_folder: String path to the folder where the CSV file should be saved
 
     Returns:
     - inconsistency_stats: Dictionary containing inconsistency statistics
@@ -652,73 +836,85 @@ def analyze_choice_inconsistencies(bigram_data):
         print("The bigram data is empty. No analysis can be performed.")
         return {}
 
-    # Standardize bigram pairs
-    bigram_data['std_bigram_pair'] = bigram_data['bigram_pair'].apply(lambda x: ','.join(sorted(x.split(', '))))
+    # Create a standardized pair representation
+    bigram_data['std_pair'] = bigram_data.apply(lambda row: ','.join(sorted([row['bigram1'], row['bigram2']])), axis=1)
 
-    # Group by user and standardized bigram pair
-    grouped = bigram_data.groupby(['user_id', 'std_bigram_pair'])
+    # Group by user and bigram pair
+    grouped = bigram_data.groupby(['user_id', 'std_pair'])
 
-    # Function to check for inconsistency within a group
-    def check_inconsistency(group):
-        if len(group) > 1:
-            positive = (group['sliderValue'] > 0).any()
-            negative = (group['sliderValue'] < 0).any()
-            return positive and negative
-        return False
+    # Find inconsistent pairs and calculate statistics
+    pair_stats = []
+    for (user_id, std_pair), group in grouped:
+        chosen_bigrams = group['chosen_bigram'].unique()
+        is_inconsistent = len(chosen_bigrams) > 1
+        
+        consistent_slider = group['sliderValue'] if not is_inconsistent else group[group['chosen_bigram'] == chosen_bigrams[0]]['sliderValue']
+        inconsistent_slider = group['sliderValue'] if is_inconsistent else pd.Series([])
+        
+        pair_stats.append({
+            'std_pair': std_pair,
+            'user_id': user_id,
+            'is_inconsistent': is_inconsistent,
+            'consistent_slider_median': consistent_slider.median(),
+            'inconsistent_slider_median': inconsistent_slider.median() if is_inconsistent else None,
+            'most_preferred_bigram': chosen_bigrams[0],
+            'bigram1': group['bigram1'].iloc[0],
+            'bigram2': group['bigram2'].iloc[0]
+        })
 
-    # Find inconsistent pairs
-    inconsistent_pairs = []
-    for name, group in grouped:
-        if check_inconsistency(group):
-            inconsistent_pairs.append(name)
+    pair_consistency = pd.DataFrame(pair_stats)
+    
+    # Aggregate statistics for each bigram pair
+    pair_summary = pair_consistency.groupby('std_pair').agg({
+        'is_inconsistent': 'sum',
+        'user_id': 'count',
+        'consistent_slider_median': 'median',
+        'inconsistent_slider_median': lambda x: x[x.notna()].median(),
+        'most_preferred_bigram': lambda x: x.mode().iloc[0] if len(x) > 0 else None,
+        'bigram1': 'first',
+        'bigram2': 'first'
+    }).reset_index()
 
-    # Create a DataFrame of inconsistent pairs
-    inconsistent_pairs_df = pd.DataFrame(inconsistent_pairs, columns=['user_id', 'std_bigram_pair'])
-
-    # If no inconsistencies found
-    if inconsistent_pairs_df.empty:
-        print("No inconsistencies found. All users chose consistently for each unique bigram pair.")
-        return {}
-
-    # Count inconsistencies
-    inconsistency_counts = inconsistent_pairs_df['std_bigram_pair'].value_counts()
-
-    # Users with inconsistencies
-    users_with_inconsistencies = inconsistent_pairs_df['user_id'].nunique()
-
-    # Inconsistent choices per user
-    inconsistent_choices_per_user = inconsistent_pairs_df.groupby('user_id')['std_bigram_pair'].nunique().sort_values(ascending=False)
-
-    # Calculate inconsistent_pair_user_counts
-    inconsistent_pair_user_counts = inconsistent_pairs_df.groupby('std_bigram_pair')['user_id'].nunique()
+    pair_summary = pair_summary.rename(columns={
+        'is_inconsistent': 'inconsistent_users',
+        'user_id': 'total_users'
+    })
+    pair_summary['consistent_users'] = pair_summary['total_users'] - pair_summary['inconsistent_users']
+    
+    # Order bigrams based on consistent slider median
+    def order_bigrams(row):
+        if row['consistent_slider_median'] < 0:
+            return f"{row['bigram1']},{row['bigram2']}"
+        else:
+            return f"{row['bigram2']},{row['bigram1']}"
+    
+    pair_summary['ordered_pair'] = pair_summary.apply(order_bigrams, axis=1)
+    
+    # Sort by total users
+    pair_summary = pair_summary.sort_values('total_users', ascending=False)
 
     print("\n____ Bigram Choice Inconsistency Statistics ____\n")
-    print(f"Unique bigram pairs with inconsistencies: {len(inconsistency_counts)}")
-    print(f"Users with at least one inconsistency: {users_with_inconsistencies}")
+    print(f"Unique bigram pairs with potential inconsistencies: {len(pair_summary)}")
 
-    print(f"\n10 users with the highest number of inconsistent choices:")
-    print(inconsistent_choices_per_user.head(10).to_string())
+    # Prepare data for the CSV file
+    table_data = pair_summary[['ordered_pair', 'consistent_users', 'inconsistent_users', 'consistent_slider_median', 'inconsistent_slider_median', 'most_preferred_bigram']].copy()
+    table_data['consistent_slider_median'] = table_data['consistent_slider_median'].round(2)
+    table_data['inconsistent_slider_median'] = table_data['inconsistent_slider_median'].round(2)
 
-    print(f"\nFrequency of inconsistencies per bigram pair (with slider statistics):")
-    for pair, count in inconsistency_counts.items():
-        pair_data = bigram_data[bigram_data['std_bigram_pair'] == pair]
-        total_users_for_pair = pair_data['user_id'].nunique()
-        
-        # Calculate median and MAD of slider values
-        slider_values = pair_data['sliderValue']
-        median_slider = slider_values.median()
-        mad_slider = np.median(np.abs(slider_values - median_slider))
-        
-        print(f"'{pair}': {count} of {total_users_for_pair} users;  slider median (MAD): {median_slider:.2f} ({mad_slider:.2f})")
+    # Save the data to a CSV file
+    csv_filename = os.path.join(output_tables_folder, 'bigram_consistency_statistics.csv')
+    table_data.to_csv(csv_filename, index=False)
+    print(f"\nConsistency and Slider Value Statistics saved to: {csv_filename}")
+
+    # Print the first few rows of the data
+    print("\nFirst few rows of Consistency and Slider Value Statistics:")
+    print(table_data.head().to_string())
 
     # Return the statistics for further use if needed
-    bigram_choice_inconsistency_stats = {
-        'users_with_inconsistencies': users_with_inconsistencies,
-        'inconsistent_choices_per_user': inconsistent_choices_per_user,
-        'inconsistency_counts': inconsistency_counts,
-        'inconsistent_pair_user_counts': inconsistent_pair_user_counts
+    inconsistency_stats = {
+        'all_pairs': table_data
     }
-    return bigram_choice_inconsistency_stats
+    return inconsistency_stats
 
 def analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder, output_filename1='inconsistency_slider_relationship.png', output_filename2='inconsistency_typing_time_relationship.png'):
     """
@@ -751,42 +947,6 @@ def analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder, 
         })
 
     inconsistency_df = pd.DataFrame(inconsistency_data)
-
-    # Function to perform Mann-Whitney U test and return results
-    def perform_mann_whitney(group1, group2, label1, label2):
-        group1 = group1.dropna()
-        group2 = group2.dropna()
-        
-        if len(group1) > 0 and len(group2) > 0:
-            median1 = group1.median()
-            median2 = group2.median()
-            mad1 = stats.median_abs_deviation(group1, nan_policy='omit')
-            mad2 = stats.median_abs_deviation(group2, nan_policy='omit')
-            
-            statistic, p_value = stats.mannwhitneyu(group1, group2, alternative='two-sided')
-            
-            print(f"\n{label1} median (MAD): {median1:.2f} ({mad1:.2f})")
-            print(f"{label2} median (MAD): {median2:.2f} ({mad2:.2f})")
-            print(f"Mann-Whitney U test results:")
-            print(f"U-statistic: {statistic:.4f}")
-            print(f"p-value: {p_value:.4f}")
-            
-            if p_value < 0.05:
-                print(f"There is a significant difference between {label1} and {label2}: {label1} {'tend to be lower' if median1 < median2 else 'tend to be higher'}.")
-            else:
-                print(f"There is no significant difference between {label1} and {label2}.")
-            
-            return {
-                f'{label1.lower()}_median': median1,
-                f'{label2.lower()}_median': median2,
-                f'{label1.lower()}_mad': mad1,
-                f'{label2.lower()}_mad': mad2,
-                'u_statistic': statistic,
-                'p_value': p_value
-            }
-        else:
-            print(f"\nInsufficient data to perform statistical analysis for {label1} vs {label2}.")
-            return None
 
     # Analyze slider values
     print("\n____ Slider Values: Consistent vs Inconsistent Choices ____")
@@ -986,9 +1146,12 @@ def filter_consistent_choices(bigram_data):
 
 # Main execution
 if __name__ == "__main__":
-    try:
+
+    preprocess = True
+    if preprocess:
+
         ##########################
-        # LOAD_AND_PREPROCESS_DATA
+        # Load and preprocess data
         ##########################
         # Set the paths for input data and output
         input_folder = '/Users/arno.klein/Downloads/osf/summary'
@@ -1006,15 +1169,26 @@ if __name__ == "__main__":
 
         # Load, combine, and save the data
         data = load_and_preprocess_data(input_folder, output_tables_folder, verbose=False)
+        result = process_bigram_data(data, easy_choice_pairs, output_tables_folder, verbose=False)
+        bigram_data, consistent_choices, inconsistent_choices, probable_choices, improbable_choices = (
+            result['bigram_data'],
+            result['consistent_choices'],
+            result['inconsistent_choices'],
+            result['probable_choices'],
+            result['improbable_choices']
+        )
 
-        bigram_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_27pairs_11tests_11swap_5easy_LH.csv')
-        num_bigram_pairs, bigram_pairs_df = load_bigram_pairs(bigram_pairs_file)
+        analyze_bigram_data(result, output_tables_folder, output_plots_folder)
 
-        ##########################
-        # PROCESS_BIGRAM_DATA
-        ##########################
-        bigram_data = process_bigram_data(data, output_tables_folder, verbose=False)
+        #bigram_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_27pairs_11tests_11swap_5easy_LH.csv')
+        #num_bigram_pairs, bigram_pairs_df = load_bigram_pairs(bigram_pairs_file)
 
+        #####################
+        # Process bigram data
+        #####################
+
+        """
+        
         plot_chosen_vs_unchosen_times(bigram_data, output_plots_folder, 
                                       output_filename1='chosen_vs_unchosen_times.png',
                                       output_filename2='chosen_vs_unchosen_times_scatter_regression.png',
@@ -1038,22 +1212,13 @@ if __name__ == "__main__":
         ############################
         if easy_choice_pairs:
             suspicious_users, user_improbable_counts, typing_time_results, user_analysis = analyze_easy_choices(bigram_data, easy_choice_pairs, threshold=2)
-            
-            # Scatter plot:
-            plt.figure(figsize=(10, 6))
-            plt.scatter(user_analysis['inconsistent_proportion'], user_analysis['improbable_proportion'])
-            plt.xlabel('Proportion of Inconsistent Pairs')
-            plt.ylabel('Proportion of Improbable Choices')
-            plt.title('Inconsistent Pairs vs Improbable Choices by User')
-            plt.savefig(os.path.join(output_plots_folder, 'inconsistent_vs_improbable_scatter.png'))
-            plt.close()
         else:
             print("Skipping easy choice bigram analysis due to missing or invalid easy choice pairs data.")            
 
         #######################################
         # Analyze bigram choice inconsistencies
         #######################################
-        bigram_choice_inconsistency_stats = analyze_choice_inconsistencies(bigram_data)
+        bigram_choice_inconsistency_stats = analyze_choice_inconsistencies(bigram_data, output_plots_folder)
 
         # Analyze the relationship between inconsistent choices and slider values
         inconsistency_slider_stats = analyze_inconsistency_slider_relationship(bigram_data, output_plots_folder, 
@@ -1089,8 +1254,5 @@ if __name__ == "__main__":
                                  output_filename='consistent_bigram_times_barplot.png')
             
         print("\n=============== Consistent Choice Analysis Complete ===============\n\n")
-
-    except Exception as e:
-        print(f"An error occurred: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        
+        """
