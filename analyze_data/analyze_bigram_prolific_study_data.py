@@ -301,11 +301,11 @@ def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folde
     improbable_choices = processed_data['improbable_choices']
 
     # Print dataframe information for debugging
-    for name, df in processed_data.items():
-        print(f"\n{name} shape: {df.shape}")
-        print(f"{name} columns: {df.columns.tolist()}")
-        print(f"{name} first few rows:")
-        print(df.head().to_string())
+    #for name, df in processed_data.items():
+    #    print(f"\n{name} shape: {df.shape}")
+    #    print(f"{name} columns: {df.columns.tolist()}")
+    #    print(f"{name} first few rows:")
+    #    print(df.head().to_string())
 
     # Calculate statistics for each user
     user_stats = pd.DataFrame()
@@ -354,27 +354,36 @@ def analyze_bigram_data(processed_data, output_tables_folder, output_plots_folde
         
         return pair_counts.fillna(0).astype(int)
 
-    # Table for repeated pairs
-    repeated_pairs = pd.concat([consistent_choices, inconsistent_choices])
-    repeated_pairs_table = create_choice_table(repeated_pairs)
-    repeated_pairs_table['#users consistent'] = consistent_choices.groupby('bigram_pair')['user_id'].nunique()
-    repeated_pairs_table['#users inconsistent'] = inconsistent_choices.groupby('bigram_pair')['user_id'].nunique()
-    
-    # Sort the table by total number of users (consistent + inconsistent) in descending order
-    repeated_pairs_table['total_users'] = repeated_pairs_table['#users consistent'] + repeated_pairs_table['#users inconsistent']
-    repeated_pairs_table = repeated_pairs_table.sort_values('total_users', ascending=False)
-    
+    # Combine all relevant data
+    all_pairs = pd.concat([consistent_choices, inconsistent_choices, probable_choices, improbable_choices])
+
+    # Create a single table for all pairs
+    all_pairs_table = create_choice_table(all_pairs)
+
+    # Count unique users for each category
+    all_pairs_table['#users consistent'] = consistent_choices.groupby('bigram_pair')['user_id'].nunique()
+    all_pairs_table['#users inconsistent'] = inconsistent_choices.groupby('bigram_pair')['user_id'].nunique()
+    all_pairs_table['#users probable'] = probable_choices.groupby('bigram_pair')['user_id'].nunique()
+    all_pairs_table['#users improbable'] = improbable_choices.groupby('bigram_pair')['user_id'].nunique()
+
+    # Fill NaN values with 0 and convert to integer
+    all_pairs_table = all_pairs_table.fillna(0).astype(int)
+
+    # Calculate total unique users
+    all_pairs_table['total_users'] = all_pairs.groupby('bigram_pair')['user_id'].nunique()
+
+    # Sort the table by total number of users in descending order
+    all_pairs_table = all_pairs_table.sort_values('total_users', ascending=False)
+
+    # Create and print Repeated Pairs Table
+    repeated_pairs_table = all_pairs_table[all_pairs_table['#users consistent'] + all_pairs_table['#users inconsistent'] > 0].copy()
+    repeated_pairs_table = repeated_pairs_table[['#users pair 1', '#users pair 2', '#users consistent', '#users inconsistent', 'total_users']]
     print("\nRepeated Pairs Table:")
     print(repeated_pairs_table.to_string())
 
-    # Table for easy choice pairs
-    easy_choice_pairs = pd.concat([probable_choices, improbable_choices])
-    easy_choice_table = create_choice_table(easy_choice_pairs)
-    
-    # Sort the table by total number of users in descending order
-    easy_choice_table['total_users'] = easy_choice_table['#users pair 1'] + easy_choice_table['#users pair 2']
-    easy_choice_table = easy_choice_table.sort_values('total_users', ascending=False)
-    
+    # Create and print Easy Choice Pairs Table
+    easy_choice_table = all_pairs_table[all_pairs_table['#users probable'] + all_pairs_table['#users improbable'] > 0].copy()
+    easy_choice_table = easy_choice_table[['#users pair 1', '#users pair 2', '#users probable', '#users improbable', 'total_users']]
     print("\nEasy Choice Pairs Table:")
     print(easy_choice_table.to_string())
 
@@ -1141,7 +1150,7 @@ if __name__ == "__main__":
         # Load improbable pairs from CSV file
         current_dir = os.getcwd()  # Get the current working directory
         parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-        easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_5pairs_easy_choices_LH.csv')
+        easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_4pairs_easy_choices_LH.csv')
         easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
         # Load, combine, and save the data
