@@ -316,63 +316,6 @@ def process_data(data, easy_choice_pairs, output_tables_folder, verbose=False):
 # Analyze bigram choice inconsistencies
 #######################################
 
-def analyze_choice_inconsistencies(processed_data, output_tables_folder):
-    bigram_data = processed_data['bigram_data']
-    
-    if bigram_data.empty:
-        print("The bigram data is empty. No analysis can be performed.")
-        return {}
-
-    # Convert 'is_consistent' to boolean without triggering the warning
-    bigram_data['is_consistent'] = pd.to_numeric(bigram_data['is_consistent'], errors='coerce').astype('boolean')
-
-    # Define aggregation functions
-    agg_functions = {
-        'is_consistent': lambda x: (~x).sum(),  # Count of inconsistent choices
-        'user_id': 'nunique',  # Count of unique users
-        'sliderValue': lambda x: {'consistent_median': x[bigram_data.loc[x.index, 'is_consistent']].median(),
-                                  'inconsistent_median': x[~bigram_data.loc[x.index, 'is_consistent']].median()},
-        'chosen_bigram': lambda x: x.mode().iloc[0] if len(x) > 0 else None
-    }
-
-    # Group by bigram pair and apply aggregation functions
-    pair_summary = bigram_data.groupby('bigram_pair').agg(agg_functions)
-
-    # Rename and restructure columns
-    pair_summary.columns = ['inconsistent_users', 'total_users', 'slider_medians', 'most_preferred_bigram']
-    pair_summary = pair_summary.reset_index()
-    pair_summary[['consistent_slider_median', 'inconsistent_slider_median']] = pd.DataFrame(pair_summary['slider_medians'].tolist(), index=pair_summary.index)
-    pair_summary = pair_summary.drop('slider_medians', axis=1)
-
-    # Calculate consistent users
-    pair_summary['consistent_users'] = pair_summary['total_users'] - pair_summary['inconsistent_users']
-
-    # Sort by total users
-    pair_summary = pair_summary.sort_values('total_users', ascending=False)
-
-    print("\n____ Bigram Choice Inconsistency Statistics ____\n")
-    print(f"Unique bigram pairs with potential inconsistencies: {len(pair_summary)}")
-
-    # Prepare data for the CSV file
-    table_data = pair_summary[['bigram_pair', 'consistent_users', 'inconsistent_users', 'consistent_slider_median', 'inconsistent_slider_median', 'most_preferred_bigram']].copy()
-    table_data['consistent_slider_median'] = table_data['consistent_slider_median'].round(2)
-    table_data['inconsistent_slider_median'] = table_data['inconsistent_slider_median'].round(2)
-
-    # Save the data to a CSV file
-    csv_filename = os.path.join(output_tables_folder, 'bigram_consistency_statistics.csv')
-    table_data.to_csv(csv_filename, index=False)
-    print(f"\nConsistency and Slider Value Statistics saved to: {csv_filename}")
-
-    # Print the first few rows of the data
-    print("\nFirst few rows of Consistency and Slider Value Statistics:")
-    print(table_data.head().to_string())
-
-    # Return the statistics for further use if needed
-    inconsistency_stats = {
-        'all_pairs': table_data
-    }
-    return inconsistency_stats
-
 def analyze_inconsistency_slider_relationship(processed_data, output_plots_folder, 
                                               output_filename1='inconsistency_slider_relationship.png', 
                                               output_filename2='inconsistency_typing_time_relationship.png'):
@@ -443,68 +386,43 @@ def analyze_inconsistency_slider_relationship(processed_data, output_plots_folde
     return inconsistency_analysis_results
 
 def plot_chosen_vs_unchosen_times(processed_data, output_plots_folder, 
-                                  output_filename1='chosen_vs_unchosen_times.png',
-                                  output_filename2='chosen_vs_unchosen_times_scatter.png'):
+                                  output_filename='chosen_vs_unchosen_times_scatter.png'):
     """
-    Plot chosen vs. unchosen typing times.
+    Plot chosen vs. unchosen typing times with MAD error bars using existing processed_data.
     
     Parameters:
     - processed_data: Dictionary containing processed dataframes from process_data
     - output_plots_folder: String path to the folder where plots should be saved
-    - output_filename1: String filename of the bar plot
-    - output_filename2: String filename of the scatter plot
+    - output_filename: String filename of the scatter plot
     """
-    bigram_data = processed_data['bigram_data']
+    bigram_data = processed_data['bigram_data']  # Assuming 'bigram_data' key exists
 
-    # Prepare data for plotting
-    chosen_data = bigram_data.groupby('chosen_bigram')['chosen_bigram_time'].median().reset_index()
-    chosen_data['type'] = 'Chosen'
-    chosen_data.columns = ['bigram', 'time', 'type']
-
-    unchosen_data = bigram_data.groupby('unchosen_bigram')['unchosen_bigram_time'].median().reset_index()
-    unchosen_data['type'] = 'Unchosen'
-    unchosen_data.columns = ['bigram', 'time', 'type']
-
-    plot_data = pd.concat([chosen_data, unchosen_data], ignore_index=True)
-
-    # Bar plot
-    plt.figure(figsize=(15, 10))
-    sns.barplot(x='time', y='bigram', hue='type', data=plot_data, errorbar=None)
-    plt.title('Median Typing Time: Chosen vs Unchosen Bigrams')
-    plt.xlabel('Median Typing Time (ms)')
-    plt.ylabel('Bigram')
-    plt.legend(title='Bigram Type')
-    plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, output_filename1), dpi=300, bbox_inches='tight')
-    plt.close()
-
-    # Scatter plot
+    # Scatter plot for chosen vs unchosen typing times
     plt.figure(figsize=(10, 8))
     
-    # Calculate median times for each bigram
-    median_times = bigram_data.groupby('chosen_bigram').agg({
-        'chosen_bigram_time': 'median',
-        'unchosen_bigram_time': 'median'
-    }).reset_index()
+    # Calculate median times for each bigram pair (chosen and unchosen)
+    scatter_data = bigram_data.groupby('bigram_pair').agg(
+        chosen_median=('chosen_bigram_time', 'median'),
+        unchosen_median=('unchosen_bigram_time', 'median')
+    ).reset_index()
 
-    sns.scatterplot(x='chosen_bigram_time', y='unchosen_bigram_time', data=median_times, alpha=0.7)
+    sns.scatterplot(x='chosen_median', y='unchosen_median', data=scatter_data, alpha=0.7)
     
-    max_val = max(median_times['chosen_bigram_time'].max(), median_times['unchosen_bigram_time'].max())
+    max_val = max(scatter_data['chosen_median'].max(), scatter_data['unchosen_median'].max())
     plt.plot([0, max_val], [0, max_val], 'r--', alpha=0.5)  # Add diagonal line
     
     plt.title('Median Chosen vs Unchosen Bigram Typing Times')
     plt.xlabel('Median Chosen Bigram Time (ms)')
     plt.ylabel('Median Unchosen Bigram Time (ms)')
     
-    correlation = median_times['chosen_bigram_time'].corr(median_times['unchosen_bigram_time'])
+    correlation = scatter_data['chosen_median'].corr(scatter_data['unchosen_median'])
     plt.text(0.05, 0.95, f'Correlation: {correlation:.2f}', transform=plt.gca().transAxes)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_plots_folder, output_filename2), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_plots_folder, output_filename), dpi=300, bbox_inches='tight')
     plt.close()
 
-    print(f"Bar plot saved to: {output_filename1}")
-    print(f"Scatter plot saved to: {output_filename2}")
+    print(f"Scatter plot saved to: {output_filename}")
 
 ##################################################
 # Filter choice inconsistencies or improbabilities
@@ -524,8 +442,17 @@ def visualize_user_choices(user_stats, output_plots_folder, plot_label=""):
     - None (saves figures to the specified folder)
     """
     def create_stacked_bar_plot(data, title, filename):
-        plt.figure(figsize=(15, 40))
-        data.plot(kind='barh', stacked=True)
+        users = data.index
+        consistent = data['consistent_choices']
+        inconsistent = data['inconsistent_choices']
+
+        # Adjust the figsize to make the plot taller
+        plt.figure(figsize=(15, max(10, len(data) * 0.5)))  # Dynamically set the height
+
+        # Create the horizontal bar plot
+        plt.barh(users, consistent, color='green', label='Consistent Choices')
+        plt.barh(users, inconsistent, left=consistent, color='red', label='Inconsistent Choices')
+
         plt.title(title)
         plt.xlabel('Number of Choices')
         plt.ylabel('User ID')
@@ -543,7 +470,29 @@ def visualize_user_choices(user_stats, output_plots_folder, plot_label=""):
 
     # Prepare and plot probable vs. improbable choices
     probable_data = user_stats.set_index('user_id').loc[user_order, ['probable_choices', 'improbable_choices']]
-    create_stacked_bar_plot(probable_data, 'Probable vs. Improbable Choices per User', 'probable_vs_improbable_choices.png')
+
+    # Using matplotlib for stacked bar plot for probable vs improbable choices
+    def create_probable_bar_plot(data, title, filename):
+        users = data.index
+        probable = data['probable_choices']
+        improbable = data['improbable_choices']
+
+        # Adjust the figsize to make the plot taller
+        plt.figure(figsize=(15, max(10, len(data) * 0.5)))  # Dynamically set the height
+
+        # Create the horizontal bar plot
+        plt.barh(users, probable, color='blue', label='Probable Choices')
+        plt.barh(users, improbable, left=probable, color='orange', label='Improbable Choices')
+
+        plt.title(title)
+        plt.xlabel('Number of Choices')
+        plt.ylabel('User ID')
+        plt.legend(title='Choice Type')
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_plots_folder, plot_label + filename))
+        plt.close()
+
+    create_probable_bar_plot(probable_data, 'Probable vs. Improbable Choices per User', 'probable_vs_improbable_choices.png')
 
     print(f"Visualization plots saved in {output_plots_folder}")
 
@@ -802,16 +751,12 @@ if __name__ == "__main__":
         #######################################
         # Analyze bigram choice inconsistencies
         #######################################
-        inconsistency_stats = analyze_choice_inconsistencies(processed_data, output_tables_folder)
-
         # Analyze the relationship between inconsistent choices and slider values
         inconsistency_slider_stats = analyze_inconsistency_slider_relationship(processed_data, output_plots_folder, 
                                                                                output_filename1='inconsistency_slider_relationship.png', 
                                                                                output_filename2='inconsistency_typing_time_relationship.png')
-        
         plot_chosen_vs_unchosen_times(processed_data, output_plots_folder, 
-                                      output_filename1='processed_chosen_vs_unchosen_times.png',
-                                      output_filename2='processed_chosen_vs_unchosen_times_scatter_regression.png')
+                                      output_filename='processed_chosen_vs_unchosen_times_scatter_regression.png')
 
         ##################################################
         # Filter choice inconsistencies or improbabilities
@@ -844,5 +789,4 @@ if __name__ == "__main__":
                                  output_filename='filtered_bigram_times_barplot.png')
 
         plot_chosen_vs_unchosen_times(filtered_data, output_plots_folder, 
-                                      output_filename1='filtered_chosen_vs_unchosen_times.png',
-                                      output_filename2='filtered_chosen_vs_unchosen_times_scatter_regression.png')
+                                      output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
