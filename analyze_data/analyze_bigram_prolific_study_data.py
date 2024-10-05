@@ -711,86 +711,152 @@ def plot_chosen_vs_unchosen_times(processed_data, output_plots_folder,
 
 def score_choices_by_slider_values(filtered_users_data):
     """
-    Score choices by slider values.
+    Score choices by slider values and create a modified copy of bigram_data.
     
-    If two slider values are +50 and -50 for the same pair chosen twice, 
-    the chosen bigram is assigned a score of zero.
+    This function combines all rows with the same bigram_pair per user_id,
+    calculates scores based on slider values, and determines the chosen
+    and unchosen bigrams based on the calculated score.
     """
     print("\n____ Score choices by slider values ____\n")
     bigram_data = filtered_users_data['bigram_data']
     
-    chosen_time_col, unchosen_time_col = 'chosen_bigram_time', 'unchosen_bigram_time'
-    valid_comparisons = bigram_data.dropna(subset=[chosen_time_col, unchosen_time_col, 'sliderValue'])
+    def calculate_score(group):
+        # Get the two unique bigrams in the pair
+        bigram1, bigram2 = group['bigram_pair'].iloc[0]
+        
+        # Calculate sum1 and sum2
+        sum1 = group[group['chosen_bigram'] == bigram1]['sliderValue'].abs().sum()
+        sum2 = group[group['chosen_bigram'] == bigram2]['sliderValue'].abs().sum()
+        
+        # Calculate the score
+        score = abs(sum1 - sum2) / len(group)
+        
+        # Calculate avg_sliderValue
+        avg_sliderValue = score / 100  # 100 is the maximum sliderValue
+
+        # Determine chosen_scored_bigram and unchosen_scored_bigram
+        if sum1 >= sum2:
+            chosen_scored_bigram = bigram1
+            unchosen_scored_bigram = bigram2
+        else:
+            chosen_scored_bigram = bigram2
+            unchosen_scored_bigram = bigram1
+                
+        return pd.Series({
+            'score': score,
+            'chosen_scored_bigram': chosen_scored_bigram,
+            'unchosen_scored_bigram': unchosen_scored_bigram,
+            'avg_sliderValue': avg_sliderValue
+        })
     
-    print(f"Total rows: {len(bigram_data)}")
-    print(f"Valid comparisons: {len(valid_comparisons)}")
-
-    results = {
-        'total_rows': len(bigram_data),
-        'valid_comparisons': len(valid_comparisons)
-    }
-
-
-    return results
+    # Group by user_id and bigram_pair
+    grouped = bigram_data.groupby(['user_id', 'bigram_pair'])
+    
+    # Calculate scores and chosen/unchosen bigrams
+    scores_and_bigrams = grouped.apply(calculate_score).reset_index()
+    
+    # Perform aggregations
+    scored_bigram_data = grouped.agg({
+        'trialId': 'first',
+        'bigram1': 'first',
+        'bigram2': 'first',
+        'chosen_bigram_time': 'mean',
+        'unchosen_bigram_time': 'mean',
+        'chosen_bigram_correct': 'sum',
+        'unchosen_bigram_correct': 'sum',
+        'text': lambda x: tuple(x.unique()),
+        'is_consistent': 'first',
+        'is_probable': 'first',
+        'is_improbable': 'first',
+        'group_size': 'first'
+    }).reset_index()
+    
+    # Merge scores and chosen/unchosen bigrams with aggregated data
+    scored_bigram_data = pd.merge(scored_bigram_data, scores_and_bigrams, on=['user_id', 'bigram_pair'])
+    
+    # Rename columns
+    scored_bigram_data = scored_bigram_data.rename(columns={
+        'chosen_bigram_time': 'avg_chosen_bigram_time',
+        'unchosen_bigram_time': 'avg_unchosen_bigram_time',
+        'chosen_bigram_correct': 'sum_chosen_bigram_correct',
+        'unchosen_bigram_correct': 'sum_unchosen_bigram_correct',
+        'chosen_scored_bigram': 'avg_chosen_bigram',
+        'unchosen_scored_bigram': 'avg_unchosen_bigram'
+    })
+    
+    # Reorder columns to match the specified order
+    column_order = ['user_id', 'trialId', 'bigram_pair', 'bigram1', 'bigram2',
+                    'avg_chosen_bigram', 'avg_unchosen_bigram', 'avg_chosen_bigram_time', 'avg_unchosen_bigram_time',
+                    'sum_chosen_bigram_correct', 'sum_unchosen_bigram_correct', 'avg_sliderValue', 'score',
+                    'text', 'is_consistent', 'is_probable', 'is_improbable', 'group_size']
+    
+    scored_bigram_data = scored_bigram_data[column_order]
+    
+    print(f"Total rows in original bigram_data: {len(bigram_data)}")
+    print(f"Total rows in scored_bigram_data (unique user_id and bigram_pair combinations): {len(scored_bigram_data)}")
+    
+    return scored_bigram_data
 
 # Main execution
 if __name__ == "__main__":
 
-    preprocess = True
-    if preprocess:
+    #######################
+    # Load, preprocess data
+    #######################
+    # Set the paths for input and output
+    input_folder = '/Users/arno.klein/Downloads/osf/summary'
+    output_folder = os.path.join(os.path.dirname(input_folder), 'output')
+    output_tables_folder = os.path.join(output_folder, 'tables')
+    output_plots_folder = os.path.join(output_folder, 'plots')
+    os.makedirs(output_tables_folder, exist_ok=True)
+    os.makedirs(output_plots_folder, exist_ok=True)
 
-        #######################
-        # Load, preprocess data
-        #######################
-        # Set the paths for input and output
-        input_folder = '/Users/arno.klein/Downloads/osf/summary'
-        output_folder = os.path.join(os.path.dirname(input_folder), 'output')
-        output_tables_folder = os.path.join(output_folder, 'tables')
-        output_plots_folder = os.path.join(output_folder, 'plots')
-        os.makedirs(output_tables_folder, exist_ok=True)
-        os.makedirs(output_plots_folder, exist_ok=True)
+    # Load improbable pairs
+    current_dir = os.getcwd()  # Get the current working directory
+    parent_dir = os.path.dirname(current_dir)  # Get the parent directory
+    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_2pairs_easy_choices_LH.csv')
+    easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
-        # Load improbable pairs
-        current_dir = os.getcwd()  # Get the current working directory
-        parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-        easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_2pairs_easy_choices_LH.csv')
-        easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
+    # Load remove pairs
+    remove_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_remove_pairs.csv')
+    remove_pairs = load_bigram_pairs(remove_pairs_file)
 
-        # Load remove pairs
-        remove_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_remove_pairs.csv')
-        remove_pairs = load_bigram_pairs(remove_pairs_file)
+    # Load, combine, and save the data
+    data = load_and_combine_data(input_folder, output_tables_folder, verbose=False)
+    processed_data = process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, verbose=True)
 
-        # Load, combine, and save the data
-        data = load_and_combine_data(input_folder, output_tables_folder, verbose=False)
-        processed_data = process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, verbose=True)
+    ##############################################################
+    # Filter users by inconsistent or improbable choice thresholds
+    ##############################################################
+    visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
 
-        ##############################################################
-        # Filter users by inconsistent or improbable choice thresholds
-        ##############################################################
-        visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
+    # Filter data by an max threshold of inconsistent or improbable choices
+    first_user_data = processed_data['user_stats'].iloc[0]
+    improbable_threshold = 1
+    inconsistent_threshold = round(first_user_data['total_consistency_choices'] / 2)
+    filtered_users_data = filter_users(processed_data, output_tables_folder,
+                                        improbable_threshold, inconsistent_threshold)
 
-        # Filter data by an max threshold of inconsistent or improbable choices
-        first_user_data = processed_data['user_stats'].iloc[0]
-        improbable_threshold = 1
-        inconsistent_threshold = round(first_user_data['total_consistency_choices'] / 2)
-        filtered_users_data = filter_users(processed_data, output_tables_folder,
-                                           improbable_threshold, inconsistent_threshold)
+    # Generate visualizations for the filtered data as well
+    visualize_user_choices(filtered_users_data['user_stats'], output_plots_folder, plot_label="filtered_")
 
-        # Generate visualizations for the filtered data as well
-        visualize_user_choices(filtered_users_data['user_stats'], output_plots_folder, plot_label="filtered_")
+    #############################
+    # Analyze bigram typing times 
+    #############################
+    typing_time_stats = analyze_typing_times_slider_values(filtered_users_data, output_plots_folder, 
+                            output_filename1='filtered_chosen_vs_unchosen_times.png', 
+                            output_filename2='filtered_typing_time_diff_vs_slider_value.png')
 
-        #############################
-        # Analyze bigram typing times 
-        #############################
-        typing_time_stats = analyze_typing_times_slider_values(filtered_users_data, output_plots_folder, 
-                                output_filename1='filtered_chosen_vs_unchosen_times.png', 
-                                output_filename2='filtered_typing_time_diff_vs_slider_value.png')
+    # Analyze within-user bigram typing times and relationships
+    within_user_stats = analyze_user_typing_times(filtered_users_data)
 
-        # Analyze within-user bigram typing times and relationships
-        within_user_stats = analyze_user_typing_times(filtered_users_data)
+    plot_typing_times(filtered_users_data, output_plots_folder, 
+                        output_filename='filtered_bigram_times_barplot.png')
 
-        plot_typing_times(filtered_users_data, output_plots_folder, 
-                          output_filename='filtered_bigram_times_barplot.png')
+    plot_chosen_vs_unchosen_times(filtered_users_data, output_plots_folder, 
+                                    output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
 
-        plot_chosen_vs_unchosen_times(filtered_users_data, output_plots_folder, 
-                                      output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
+    ################################
+    # Score choices by slider values
+    ################################
+    scored_data = score_choices_by_slider_values(filtered_users_data)
