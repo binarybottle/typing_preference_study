@@ -720,50 +720,20 @@ def score_choices_by_slider_values(filtered_users_data):
     print("\n____ Score choices by slider values ____\n")
     bigram_data = filtered_users_data['bigram_data']
     
-    def calculate_score(group):
-        # Get the two unique bigrams in the pair
-        bigram1, bigram2 = group['bigram_pair'].iloc[0]
-        
-        # Calculate sum1 and sum2
-        sum1 = group[group['chosen_bigram'] == bigram1]['sliderValue'].abs().sum()
-        sum2 = group[group['chosen_bigram'] == bigram2]['sliderValue'].abs().sum()
-        
-        # Calculate the score
-        score = abs(sum1 - sum2) / len(group)
-        
-        # Calculate avg_sliderValue
-        avg_sliderValue = score / 100  # 100 is the maximum sliderValue
-
-        # Determine chosen_scored_bigram and unchosen_scored_bigram
-        if sum1 >= sum2:
-            chosen_scored_bigram = bigram1
-            unchosen_scored_bigram = bigram2
-        else:
-            chosen_scored_bigram = bigram2
-            unchosen_scored_bigram = bigram1
-                
-        return pd.Series({
-            'score': score,
-            'chosen_scored_bigram': chosen_scored_bigram,
-            'unchosen_scored_bigram': unchosen_scored_bigram,
-            'avg_sliderValue': avg_sliderValue
-        })
-    
     # Group by user_id and bigram_pair
     grouped = bigram_data.groupby(['user_id', 'bigram_pair'])
-    
-    # Calculate scores and chosen/unchosen bigrams
-    scores_and_bigrams = grouped.apply(calculate_score).reset_index()
     
     # Perform aggregations
     scored_bigram_data = grouped.agg({
         'trialId': 'first',
         'bigram1': 'first',
         'bigram2': 'first',
+        'chosen_bigram': lambda x: tuple(x.unique()),
         'chosen_bigram_time': 'mean',
         'unchosen_bigram_time': 'mean',
         'chosen_bigram_correct': 'sum',
         'unchosen_bigram_correct': 'sum',
+        'sliderValue': lambda x: x.abs().sum(),
         'text': lambda x: tuple(x.unique()),
         'is_consistent': 'first',
         'is_probable': 'first',
@@ -771,17 +741,43 @@ def score_choices_by_slider_values(filtered_users_data):
         'group_size': 'first'
     }).reset_index()
     
-    # Merge scores and chosen/unchosen bigrams with aggregated data
-    scored_bigram_data = pd.merge(scored_bigram_data, scores_and_bigrams, on=['user_id', 'bigram_pair'])
+    # Calculate scores and determine chosen/unchosen bigrams
+    def calculate_score_and_bigrams(row):
+        bigram1, bigram2 = row['bigram1'], row['bigram2']
+        chosen_bigrams = row['chosen_bigram']
+        total_slider_value = row['sliderValue']
+        group_size = row['group_size']
+        
+        sum1 = sum(abs(row['sliderValue']) for bg in chosen_bigrams if bg == bigram1)
+        sum2 = total_slider_value - sum1  # sum2 is the remainder
+        
+        score = abs(sum1 - sum2) / group_size
+        avg_sliderValue = score / 100  # 100 is the maximum sliderValue
+        
+        if sum1 >= sum2:
+            chosen_scored_bigram = bigram1
+            unchosen_scored_bigram = bigram2
+        else:
+            chosen_scored_bigram = bigram2
+            unchosen_scored_bigram = bigram1
+        
+        return pd.Series({
+            'score': score,
+            'avg_sliderValue': avg_sliderValue,
+            'avg_chosen_bigram': chosen_scored_bigram,
+            'avg_unchosen_bigram': unchosen_scored_bigram
+        })
+    
+    # Apply the calculation to each row
+    score_columns = scored_bigram_data.apply(calculate_score_and_bigrams, axis=1)
+    scored_bigram_data = pd.concat([scored_bigram_data, score_columns], axis=1)
     
     # Rename columns
     scored_bigram_data = scored_bigram_data.rename(columns={
         'chosen_bigram_time': 'avg_chosen_bigram_time',
         'unchosen_bigram_time': 'avg_unchosen_bigram_time',
         'chosen_bigram_correct': 'sum_chosen_bigram_correct',
-        'unchosen_bigram_correct': 'sum_unchosen_bigram_correct',
-        'chosen_scored_bigram': 'avg_chosen_bigram',
-        'unchosen_scored_bigram': 'avg_unchosen_bigram'
+        'unchosen_bigram_correct': 'sum_unchosen_bigram_correct'
     })
     
     # Reorder columns to match the specified order
@@ -796,6 +792,7 @@ def score_choices_by_slider_values(filtered_users_data):
     print(f"Total rows in scored_bigram_data (unique user_id and bigram_pair combinations): {len(scored_bigram_data)}")
     
     return scored_bigram_data
+
 
 # Main execution
 if __name__ == "__main__":
