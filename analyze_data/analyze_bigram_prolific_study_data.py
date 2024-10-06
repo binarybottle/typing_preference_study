@@ -935,7 +935,7 @@ if __name__ == "__main__":
     ##############################################################
     # Filter users by inconsistent or improbable choice thresholds
     ##############################################################
-    #visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
+    visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
 
     # Filter data by an max threshold of inconsistent or improbable choices
     first_user_data = processed_data['user_stats'].iloc[0]
@@ -944,7 +944,6 @@ if __name__ == "__main__":
     filtered_users_data = filter_users(processed_data, output_tables_folder,
                                         improbable_threshold, inconsistent_threshold)
 
-    """
     # Generate visualizations for the filtered data as well
     visualize_user_choices(filtered_users_data['user_stats'], output_plots_folder, plot_label="filtered_")
 
@@ -963,7 +962,7 @@ if __name__ == "__main__":
 
     plot_chosen_vs_unchosen_times(filtered_users_data, output_plots_folder, 
                                   output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
-    """
+
     ################################
     # Score choices by slider values
     ################################
