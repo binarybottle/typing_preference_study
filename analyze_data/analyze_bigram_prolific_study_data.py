@@ -103,9 +103,10 @@ def load_and_combine_data(input_folder, output_tables_folder, verbose=False):
     # Display information about the combined DataFrame
     if verbose:
         print(combined_df.info())
+        nlines = 5
         print_headers = ['trialId', 'sliderValue', 'chosenBigram', 'unchosenBigram', 
                          'chosenBigramTime', 'unchosenBigramTime']
-        display_information(combined_df, "original data", print_headers, nlines=30)
+        display_information(combined_df, "original data", print_headers, nlines)
 
     # Save the combined DataFrame to a CSV file
     output_file = os.path.join(output_tables_folder, 'original_combined_data.csv')
@@ -709,92 +710,25 @@ def plot_chosen_vs_unchosen_times(processed_data, output_plots_folder,
 # Score choices by slider values
 ################################
 
-def score_choices_by_slider_values(filtered_users_data, output_tables_folder):
+def score_user_choices_by_slider_values(filtered_users_data, output_tables_folder):
     """
-    Score choices by slider values and create a modified copy of bigram_data.
-    
-    This function combines all rows with the same bigram_pair per user_id,
-    calculates scores based on slider values, and determines the chosen
-    and unchosen bigrams based on the calculated score.
+    Score each user's choices by slider values and create a modified copy of bigram_data.
     """
     print("\n____ Score choices by slider values ____\n")
     bigram_data = filtered_users_data['bigram_data']
     
     # Group by user_id and bigram_pair
-    grouped = bigram_data.groupby(['user_id', 'bigram_pair'])
-    
-    # Perform aggregations
-    scored_bigram_data = grouped.agg({
-        'trialId': 'first',
-        'bigram1': 'first',
-        'bigram2': 'first',
-        'chosen_bigram': lambda x: tuple(x.unique()),
-        'chosen_bigram_time': 'mean',
-        'unchosen_bigram_time': 'mean',
-        'chosen_bigram_correct': 'sum',
-        'unchosen_bigram_correct': 'sum',
-        'sliderValue': lambda x: tuple(x),
-        'text': lambda x: tuple(x.unique()),
-        'is_consistent': 'first',
-        'is_probable': 'first',
-        'is_improbable': 'first',
-        'group_size': 'first'
-    }).reset_index()
-    
-    # Calculate scores and determine chosen/unchosen bigrams
-    def calculate_score_and_bigrams(row):
-        bigram1, bigram2 = row['bigram1'], row['bigram2']
-        chosen_bigrams = row['chosen_bigram']
-        slider_values = row['sliderValue']
-        group_size = row['group_size']
-        
-        if len(chosen_bigrams) == 1:
-            avg_abs_slider_value = sum(abs(x) for x in slider_values) / group_size
-            #print("len(chosen_bigrams) = 1; avg_abs_slider_value = ", avg_abs_slider_value)
-            if chosen_bigrams[0] == bigram1:
-                avg_chosen_bigram = bigram1
-                avg_unchosen_bigram = bigram2
-            elif chosen_bigrams[0] == bigram2:
-                avg_chosen_bigram = bigram2
-                avg_unchosen_bigram = bigram1
-        elif len(chosen_bigrams) > 1:
-            sum1 = sum(abs(x) for i,x in enumerate(slider_values) if chosen_bigrams[i] == bigram1)
-            sum2 = sum(abs(x) for i,x in enumerate(slider_values) if chosen_bigrams[i] == bigram2)
-            avg_abs_slider_value = abs(sum1 - sum2) / group_size
-            #print("len(chosen_bigrams) > 1; avg_abs_slider_value = ", avg_abs_slider_value)
-            if sum1 >= sum2:
-                avg_chosen_bigram = bigram1
-                avg_unchosen_bigram = bigram2
-            else:
-                avg_chosen_bigram = bigram2
-                avg_unchosen_bigram = bigram1
+    grouped = bigram_data.groupby(['user_id', 'bigram_pair'], group_keys=False)
 
-        score = avg_abs_slider_value / 100  # 100 is the maximum sliderValue
-        
-        return pd.Series({
-            'score': score,
-            'avg_abs_slider_value': avg_abs_slider_value,
-            'avg_chosen_bigram': avg_chosen_bigram,
-            'avg_unchosen_bigram': avg_unchosen_bigram
-        })
-    
-    # Apply the calculation to each row
-    score_columns = scored_bigram_data.apply(calculate_score_and_bigrams, axis=1)
-    scored_bigram_data = pd.concat([scored_bigram_data, score_columns], axis=1)
-    
-    # Rename columns
-    scored_bigram_data = scored_bigram_data.rename(columns={
-        'chosen_bigram_time': 'avg_chosen_bigram_time',
-        'unchosen_bigram_time': 'avg_unchosen_bigram_time',
-        'chosen_bigram_correct': 'sum_chosen_bigram_correct',
-        'unchosen_bigram_correct': 'sum_unchosen_bigram_correct'
-    })
-    
+    # Apply the scoring to each group
+    scored_bigram_data = grouped.apply(determine_score, include_groups=False).reset_index()
+
     # Reorder columns to match the specified order
-    column_order = ['user_id', 'trialId', 'bigram_pair', 'bigram1', 'bigram2',
-                    'avg_chosen_bigram', 'avg_unchosen_bigram', 'avg_chosen_bigram_time', 'avg_unchosen_bigram_time',
-                    'sum_chosen_bigram_correct', 'sum_unchosen_bigram_correct', 'avg_abs_slider_value', 'score',
-                    'text', 'is_consistent', 'is_probable', 'is_improbable', 'group_size']
+    column_order = ['user_id', 'bigram_pair', 'bigram1', 'bigram2',
+                    'chosen_bigram_winner', 'unchosen_bigram_winner', 
+                    'chosen_bigram_time_median', 'unchosen_bigram_time_median',
+                    'chosen_bigram_correct_total', 'unchosen_bigram_correct_total', 
+                    'score', 'text', 'is_consistent', 'is_probable', 'is_improbable', 'group_size']
     
     scored_bigram_data = scored_bigram_data[column_order]
     
@@ -807,11 +741,168 @@ def score_choices_by_slider_values(filtered_users_data, output_tables_folder):
     print(f"Scored bigram data saved to {output_file}")
     
     # Display information about scored_bigram_data
-    print_headers = ['user_id', 'bigram_pair', 'avg_chosen_bigram', 'avg_unchosen_bigram', 'avg_abs_slider_value']
-    display_information(scored_bigram_data, "scored bigram data", print_headers, nlines=5)
+    nlines = 5
+    print_headers = ['user_id', 'bigram_pair', 'chosen_bigram_winner', 'unchosen_bigram_winner', 'score']
+    display_information(scored_bigram_data, "scored bigram data", print_headers, nlines)
     
     return scored_bigram_data
 
+def determine_score(group):
+    """
+    Determine the score and chosen/unchosen bigrams for a group of trials.
+    """
+    bigram1, bigram2 = group['bigram1'].iloc[0], group['bigram2'].iloc[0]
+    chosen_bigrams = group['chosen_bigram']
+    slider_values = group['sliderValue']
+    group_size = len(group)
+
+    if len(set(chosen_bigrams)) == 1:
+        median_abs_slider_value = np.median([abs(x) for x in slider_values])
+        chosen_bigram_winner = chosen_bigrams.iloc[0]
+        unchosen_bigram_winner = bigram2 if chosen_bigram_winner == bigram1 else bigram1
+    else:
+        sum1 = sum(abs(x) for i, x in enumerate(slider_values) if chosen_bigrams.iloc[i] == bigram1)
+        sum2 = sum(abs(x) for i, x in enumerate(slider_values) if chosen_bigrams.iloc[i] == bigram2)
+        median_abs_slider_value = abs(sum1 - sum2) / group_size
+        chosen_bigram_winner = bigram1 if sum1 >= sum2 else bigram2
+        unchosen_bigram_winner = bigram2 if chosen_bigram_winner == bigram1 else bigram1
+
+    score = median_abs_slider_value / 100  # 100 is the maximum sliderValue
+
+    return pd.Series({
+        'bigram1': bigram1,
+        'bigram2': bigram2,
+        'chosen_bigram_winner': chosen_bigram_winner,
+        'unchosen_bigram_winner': unchosen_bigram_winner,
+        'chosen_bigram_time_median': group['chosen_bigram_time'].median(),
+        'unchosen_bigram_time_median': group['unchosen_bigram_time'].median(),
+        'chosen_bigram_correct_total': group['chosen_bigram_correct'].sum(),
+        'unchosen_bigram_correct_total': group['unchosen_bigram_correct'].sum(),
+        'score': score,
+        'text': tuple(group['text'].unique()),
+        'is_consistent': (len(set(chosen_bigrams)) == 1),
+        'is_probable': group['is_probable'].iloc[0],
+        'is_improbable': group['is_improbable'].iloc[0],
+        'group_size': group_size
+    })
+
+def choose_bigram_winners(scored_bigram_data, output_tables_folder):
+    """
+    Create a modified copy of scored_bigram_data, called bigram_winner_data,
+    that creates a single line per bigram_pair by calculating median scores
+    across all users for each bigram in the pair, then chooses a
+    winning bigram for each bigram_pair based on the higher median score.
+    """
+    print("\n____ Choose bigram winners ____\n")
+    
+    # Group by bigram_pair
+    grouped = scored_bigram_data.groupby(['bigram_pair'], group_keys=False)
+
+    # Apply the winner determination to each bigram_pair group
+    bigram_winner_data = grouped.apply(determine_winner, include_groups=False).reset_index()
+
+    # Reorder and rename columns
+    column_order = [
+        'bigram_pair', 'winner_bigram', 'loser_bigram', 'median_score', 'mad_score', 
+        'chosen_bigram_time_median', 'unchosen_bigram_time_median',
+        'chosen_bigram_correct_total', 'unchosen_bigram_correct_total',
+        'is_consistent', 'is_probable', 'is_improbable', 'text'
+    ]    
+    bigram_winner_data = bigram_winner_data[column_order]
+    
+    print(f"Total rows in scored_bigram_data: {len(scored_bigram_data)}")
+    print(f"Total rows in bigram_winner_data (unique bigram_pairs): {len(bigram_winner_data)}")
+    
+    # Save bigram_winner_data as CSV
+    output_file = os.path.join(output_tables_folder, 'bigram_winner_data.csv')
+    bigram_winner_data.to_csv(output_file, index=False)
+    print(f"Bigram winner data saved to {output_file}")
+    
+    # Display information about bigram_winner_data
+    nlines = 50
+    print_headers = ['bigram_pair', 'winner_bigram', 'loser_bigram', 'median_score', 'mad_score']
+    display_information(bigram_winner_data, "bigram winner data", print_headers, nlines)
+    
+    return bigram_winner_data
+
+def determine_winner(group):
+    bigram1, bigram2 = group['bigram1'].iloc[0], group['bigram2'].iloc[0]
+    scores = group['score']
+    chosen_bigrams = group['chosen_bigram_winner']
+    chosen_bigram_time_medians = group['chosen_bigram_time_median']
+    unchosen_bigram_time_medians = group['unchosen_bigram_time_median']
+    chosen_bigram_correct_totals = group['chosen_bigram_correct_total']
+    unchosen_bigram_correct_totals = group['unchosen_bigram_correct_total']
+
+    chosen_bigram_time_median1 = np.median([x for i,x in enumerate(chosen_bigram_time_medians) if chosen_bigrams.iloc[i] == bigram1])
+    chosen_bigram_time_median2 = np.median([x for i,x in enumerate(chosen_bigram_time_medians) if chosen_bigrams.iloc[i] == bigram2])
+    unchosen_bigram_time_median1 = np.median([x for i,x in enumerate(unchosen_bigram_time_medians) if chosen_bigrams.iloc[i] == bigram1])
+    unchosen_bigram_time_median2 = np.median([x for i,x in enumerate(unchosen_bigram_time_medians) if chosen_bigrams.iloc[i] == bigram2])
+    chosen_bigram_correct_total1 = np.sum([x for i,x in enumerate(chosen_bigram_correct_totals) if chosen_bigrams.iloc[i] == bigram1])
+    chosen_bigram_correct_total2 = np.sum([x for i,x in enumerate(chosen_bigram_correct_totals) if chosen_bigrams.iloc[i] == bigram2])
+    unchosen_bigram_correct_total1 = np.sum([x for i,x in enumerate(unchosen_bigram_correct_totals) if chosen_bigrams.iloc[i] == bigram1])
+    unchosen_bigram_correct_total2 = np.sum([x for i,x in enumerate(unchosen_bigram_correct_totals) if chosen_bigrams.iloc[i] == bigram2])
+
+    unique_chosen_bigrams = chosen_bigrams.unique()
+    if len(unique_chosen_bigrams) == 1:
+        median_score = np.median([abs(x) for x in scores])
+        mad_score = median_abs_deviation([abs(x) for x in scores])
+        if unique_chosen_bigrams[0] == bigram1:
+            bigram1_wins = True
+            winner_bigram = bigram1
+            loser_bigram = bigram2
+        elif unique_chosen_bigrams[0] == bigram2:
+            bigram1_wins = False
+            winner_bigram = bigram2
+            loser_bigram = bigram1
+    else:
+        sum1 = sum(abs(x) for i,x in enumerate(scores) if chosen_bigrams.iloc[i] == bigram1)
+        sum2 = sum(abs(x) for i,x in enumerate(scores) if chosen_bigrams.iloc[i] == bigram2)
+        median_score = abs(sum1 - sum2) / len(group)
+        mad_list = []
+        for i, x in enumerate(scores):
+            if chosen_bigrams.iloc[i] == bigram1:
+                mad_list.append(abs(x))
+            elif chosen_bigrams.iloc[i] == bigram2:
+                mad_list.append(-abs(x))
+        mad_score = median_abs_deviation(mad_list)
+        if sum1 >= sum2:
+            bigram1_wins = True
+            winner_bigram = bigram1
+            loser_bigram = bigram2
+            #mad_score = median_abs_deviation([abs(x) for i,x in enumerate(scores) if chosen_bigrams.iloc[i] == bigram1])
+        else:
+            bigram1_wins = False
+            winner_bigram = bigram2
+            loser_bigram = bigram1
+            #mad_score = median_abs_deviation([abs(x) for i,x in enumerate(scores) if chosen_bigrams.iloc[i] == bigram2])
+
+    if bigram1_wins:
+        chosen_bigram_time_median = chosen_bigram_time_median1
+        unchosen_bigram_time_median = unchosen_bigram_time_median1
+        chosen_bigram_correct_total = chosen_bigram_correct_total1
+        unchosen_bigram_correct_total = unchosen_bigram_correct_total1
+    else:
+        chosen_bigram_time_median = chosen_bigram_time_median2
+        unchosen_bigram_time_median = unchosen_bigram_time_median2
+        chosen_bigram_correct_total = chosen_bigram_correct_total2
+        unchosen_bigram_correct_total = unchosen_bigram_correct_total2
+    
+    return pd.Series({
+        'winner_bigram': winner_bigram,
+        'loser_bigram': loser_bigram,
+        'median_score': median_score,
+        'mad_score': mad_score,
+        'chosen_bigram_time_median': chosen_bigram_time_median,
+        'unchosen_bigram_time_median': unchosen_bigram_time_median,
+        'chosen_bigram_correct_total': chosen_bigram_correct_total,
+        'unchosen_bigram_correct_total': unchosen_bigram_correct_total,
+        'is_consistent': group['is_consistent'].all(),
+        'is_probable': group['is_probable'].iloc[0],
+        'is_improbable': group['is_improbable'].iloc[0],
+        'group_size': group['group_size'].sum(),
+        'text': tuple(group['text'].unique())
+    })    
 
 # Main execution
 if __name__ == "__main__":
@@ -876,4 +967,8 @@ if __name__ == "__main__":
     ################################
     # Score choices by slider values
     ################################
-    scored_data = score_choices_by_slider_values(filtered_users_data, output_tables_folder)
+    scored_data = score_user_choices_by_slider_values(filtered_users_data, output_tables_folder)
+
+    bigram_winner_data = choose_bigram_winners(scored_data, output_tables_folder)
+
+
