@@ -276,7 +276,8 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
     # Calculate total choices that could be consistent/inconsistent
     user_stats['total_consistency_choices'] = bigram_data[bigram_data['group_size'] > 1]['user_id'].value_counts()
 
-    user_stats['max_possible_probability_choices'] = len(easy_choice_pairs)
+    print(easy_choice_pairs, easy_choice_pairs[0])
+    user_stats['num_easy_choice_pairs'] = len(easy_choice_pairs)
 
     # Fill NaN values with 0 for users who might not have any choices in a category
     user_stats = user_stats.fillna(0)
@@ -428,7 +429,7 @@ def filter_users(processed_data, output_tables_folder, improbable_threshold=np.i
     total_users = len(user_stats)
     filtered_users = len(filtered_users_data['user_stats'])
     print("\n____ Filter users ____\n")
-    print(f"Maximum improbable choices allowed: {improbable_threshold} of {user_stats['max_possible_probability_choices'].max()}")
+    print(f"Maximum improbable choices allowed: {improbable_threshold} choices (for {user_stats['num_easy_choice_pairs'].max()} pairs)")
     print(f"Maximum inconsistent choices allowed: {inconsistent_threshold} of {user_stats['total_consistency_choices'].max()}")
     print(f"Users before filtering: {total_users}")
     print(f"Users after filtering: {filtered_users}")
@@ -939,8 +940,8 @@ if __name__ == "__main__":
 
     # Filter data by an max threshold of inconsistent or improbable choices
     first_user_data = processed_data['user_stats'].iloc[0]
-    improbable_threshold = 1
-    inconsistent_threshold = round(first_user_data['total_consistency_choices'] / 2)
+    improbable_threshold = np.Inf  #1
+    inconsistent_threshold = np.Inf  #round(first_user_data['total_consistency_choices'] / 2)
     filtered_users_data = filter_users(processed_data, output_tables_folder,
                                         improbable_threshold, inconsistent_threshold)
 
