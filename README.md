@@ -1,6 +1,8 @@
-Bigram Typing Study
+# Bigram Typing Study
 Author: Arno Klein (binarybottle.com)
+
 GitHub repository: binarybottle/bigram-typing-comfort-experiment
+
 License: Apache v2.0 
 
 The purpose of the scripts in this repository is to determine how comfortable 
