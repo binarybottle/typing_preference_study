@@ -922,7 +922,7 @@ if __name__ == "__main__":
     # Load improbable pairs
     current_dir = os.getcwd()  # Get the current working directory
     parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_2pairs_easy_choices_LH.csv')
+    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_1pair_easy_choice_LH.csv')
     easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
     # Load remove pairs
@@ -940,7 +940,7 @@ if __name__ == "__main__":
 
     # Filter data by an max threshold of inconsistent or improbable choices
     first_user_data = processed_data['user_stats'].iloc[0]
-    improbable_threshold = np.Inf  #1
+    improbable_threshold = 1
     inconsistent_threshold = np.Inf  #round(first_user_data['total_consistency_choices'] / 2)
     filtered_users_data = filter_users(processed_data, output_tables_folder,
                                         improbable_threshold, inconsistent_threshold)
