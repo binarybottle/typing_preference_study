@@ -295,12 +295,12 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
         #       'unchosen_bigram_correct', 'sliderValue', 'text', 'is_consistent',
         #       'is_probable', 'is_improbable', 'group_size'], dtype='object')
         print(bigram_data.columns)
-        print_headers = ['chosen_bigram', 'unchosen_bigram', 'chosen_bigram_time', 'sliderValue']
+        print_headers = ['user_id', 'chosen_bigram', 'unchosen_bigram', 'chosen_bigram_time', 'sliderValue']
         print_user_headers = ['total_choices', 'consistent_choices', 'inconsistent_choices', 'probable_choices', 'improbable_choices']
         nlines = 5
         #display_information(bigram_data, "bigram data", print_headers + ['is_consistent', 'is_probable', 'is_improbable'], nlines)
         display_information(consistent_choices, "consistent choices", print_headers + ['is_consistent'], nlines)
-        #display_information(inconsistent_choices, "inconsistent choices", print_headers + ['is_consistent'], nlines)
+        display_information(inconsistent_choices, "inconsistent choices", print_headers + ['is_consistent'], nlines)
         display_information(probable_choices, "probable choices", print_headers + ['is_probable'], nlines)
         #display_information(improbable_choices, "improbable choices", print_headers + ['is_improbable'], nlines)
         display_information(user_stats, "user statistics", print_user_headers, nlines) 
@@ -709,7 +709,7 @@ def plot_chosen_vs_unchosen_times(processed_data, output_plots_folder,
 # Score choices by slider values
 ################################
 
-def score_choices_by_slider_values(filtered_users_data):
+def score_choices_by_slider_values(filtered_users_data, output_tables_folder):
     """
     Score choices by slider values and create a modified copy of bigram_data.
     
@@ -733,7 +733,7 @@ def score_choices_by_slider_values(filtered_users_data):
         'unchosen_bigram_time': 'mean',
         'chosen_bigram_correct': 'sum',
         'unchosen_bigram_correct': 'sum',
-        'sliderValue': lambda x: x.abs().sum(),
+        'sliderValue': lambda x: tuple(x),
         'text': lambda x: tuple(x.unique()),
         'is_consistent': 'first',
         'is_probable': 'first',
@@ -745,27 +745,37 @@ def score_choices_by_slider_values(filtered_users_data):
     def calculate_score_and_bigrams(row):
         bigram1, bigram2 = row['bigram1'], row['bigram2']
         chosen_bigrams = row['chosen_bigram']
-        total_slider_value = row['sliderValue']
+        slider_values = row['sliderValue']
         group_size = row['group_size']
         
-        sum1 = sum(abs(row['sliderValue']) for bg in chosen_bigrams if bg == bigram1)
-        sum2 = total_slider_value - sum1  # sum2 is the remainder
-        
-        score = abs(sum1 - sum2) / group_size
-        avg_sliderValue = score / 100  # 100 is the maximum sliderValue
-        
-        if sum1 >= sum2:
-            chosen_scored_bigram = bigram1
-            unchosen_scored_bigram = bigram2
-        else:
-            chosen_scored_bigram = bigram2
-            unchosen_scored_bigram = bigram1
+        if len(chosen_bigrams) == 1:
+            avg_abs_slider_value = sum(abs(x) for x in slider_values) / group_size
+            #print("len(chosen_bigrams) = 1; avg_abs_slider_value = ", avg_abs_slider_value)
+            if chosen_bigrams[0] == bigram1:
+                avg_chosen_bigram = bigram1
+                avg_unchosen_bigram = bigram2
+            elif chosen_bigrams[0] == bigram2:
+                avg_chosen_bigram = bigram2
+                avg_unchosen_bigram = bigram1
+        elif len(chosen_bigrams) > 1:
+            sum1 = sum(abs(x) for i,x in enumerate(slider_values) if chosen_bigrams[i] == bigram1)
+            sum2 = sum(abs(x) for i,x in enumerate(slider_values) if chosen_bigrams[i] == bigram2)
+            avg_abs_slider_value = abs(sum1 - sum2) / group_size
+            #print("len(chosen_bigrams) > 1; avg_abs_slider_value = ", avg_abs_slider_value)
+            if sum1 >= sum2:
+                avg_chosen_bigram = bigram1
+                avg_unchosen_bigram = bigram2
+            else:
+                avg_chosen_bigram = bigram2
+                avg_unchosen_bigram = bigram1
+
+        score = avg_abs_slider_value / 100  # 100 is the maximum sliderValue
         
         return pd.Series({
             'score': score,
-            'avg_sliderValue': avg_sliderValue,
-            'avg_chosen_bigram': chosen_scored_bigram,
-            'avg_unchosen_bigram': unchosen_scored_bigram
+            'avg_abs_slider_value': avg_abs_slider_value,
+            'avg_chosen_bigram': avg_chosen_bigram,
+            'avg_unchosen_bigram': avg_unchosen_bigram
         })
     
     # Apply the calculation to each row
@@ -783,13 +793,22 @@ def score_choices_by_slider_values(filtered_users_data):
     # Reorder columns to match the specified order
     column_order = ['user_id', 'trialId', 'bigram_pair', 'bigram1', 'bigram2',
                     'avg_chosen_bigram', 'avg_unchosen_bigram', 'avg_chosen_bigram_time', 'avg_unchosen_bigram_time',
-                    'sum_chosen_bigram_correct', 'sum_unchosen_bigram_correct', 'avg_sliderValue', 'score',
+                    'sum_chosen_bigram_correct', 'sum_unchosen_bigram_correct', 'avg_abs_slider_value', 'score',
                     'text', 'is_consistent', 'is_probable', 'is_improbable', 'group_size']
     
     scored_bigram_data = scored_bigram_data[column_order]
     
     print(f"Total rows in original bigram_data: {len(bigram_data)}")
     print(f"Total rows in scored_bigram_data (unique user_id and bigram_pair combinations): {len(scored_bigram_data)}")
+    
+    # Save scored_bigram_data as CSV
+    output_file = os.path.join(output_tables_folder, 'scored_bigram_data.csv')
+    scored_bigram_data.to_csv(output_file, index=False)
+    print(f"Scored bigram data saved to {output_file}")
+    
+    # Display information about scored_bigram_data
+    print_headers = ['user_id', 'bigram_pair', 'avg_chosen_bigram', 'avg_unchosen_bigram', 'avg_abs_slider_value']
+    display_information(scored_bigram_data, "scored bigram data", print_headers, nlines=5)
     
     return scored_bigram_data
 
@@ -825,7 +844,7 @@ if __name__ == "__main__":
     ##############################################################
     # Filter users by inconsistent or improbable choice thresholds
     ##############################################################
-    visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
+    #visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
 
     # Filter data by an max threshold of inconsistent or improbable choices
     first_user_data = processed_data['user_stats'].iloc[0]
@@ -834,6 +853,7 @@ if __name__ == "__main__":
     filtered_users_data = filter_users(processed_data, output_tables_folder,
                                         improbable_threshold, inconsistent_threshold)
 
+    """
     # Generate visualizations for the filtered data as well
     visualize_user_choices(filtered_users_data['user_stats'], output_plots_folder, plot_label="filtered_")
 
@@ -848,12 +868,12 @@ if __name__ == "__main__":
     within_user_stats = analyze_user_typing_times(filtered_users_data)
 
     plot_typing_times(filtered_users_data, output_plots_folder, 
-                        output_filename='filtered_bigram_times_barplot.png')
+                      output_filename='filtered_bigram_times_barplot.png')
 
     plot_chosen_vs_unchosen_times(filtered_users_data, output_plots_folder, 
-                                    output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
-
+                                  output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
+    """
     ################################
     # Score choices by slider values
     ################################
-    scored_data = score_choices_by_slider_values(filtered_users_data)
+    scored_data = score_choices_by_slider_values(filtered_users_data, output_tables_folder)
