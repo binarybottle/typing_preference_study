@@ -1,3 +1,4 @@
+/* Typing experiment -- See README.md and INSTALL.md */
 import { initJsPsych } from 'jspsych';
 import htmlButtonResponse from '@jspsych/plugin-html-button-response';
 import htmlKeyboardResponse from '@jspsych/plugin-html-keyboard-response';

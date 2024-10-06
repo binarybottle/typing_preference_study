@@ -1,4 +1,6 @@
 
+""" Typing experiment analysis -- See README.md """
+
 import os
 import pandas as pd
 import numpy as np
@@ -787,6 +789,10 @@ def determine_score(group):
         'group_size': group_size
     })
 
+########################
+# Choose winning bigrams
+########################
+
 def choose_bigram_winners(scored_bigram_data, output_tables_folder):
     """
     Create a modified copy of scored_bigram_data, called bigram_winner_data,
@@ -969,6 +975,9 @@ if __name__ == "__main__":
     ################################
     scored_data = score_user_choices_by_slider_values(filtered_users_data, output_tables_folder)
 
+    ########################
+    # Choose winning bigrams
+    ########################
     bigram_winner_data = choose_bigram_winners(scored_data, output_tables_folder)
 
 
