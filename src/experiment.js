@@ -9,7 +9,7 @@ const jsPsych = initJsPsych();
 
 // Global variables and configuration
 let experimentConfig = {
-  practiceOnly: true,  // If true, only run the practice set
+  practiceOnly: false,  // If true, only run the practice set
   //study1: nbigramRepetitions: 3,  // number of repetitions of each bigram
   nbigramRepetitions: 2,  // number of repetitions of each bigram
   //study1: ncharacters: 5,  // number of random characters (from character_list) preceding each block of bigrams 
