@@ -9,12 +9,17 @@ const jsPsych = initJsPsych();
 
 // Global variables and configuration
 let experimentConfig = {
-  practiceOnly: false,  // If true, only run the practice set
-  nbigramRepetitions: 3,  // number of repetitions of each bigram
-  ncharacters: 5,  // number of random characters (from character_list) preceding each block of bigrams 
+  practiceOnly: true,  // If true, only run the practice set
+  //study1: nbigramRepetitions: 3,  // number of repetitions of each bigram
+  nbigramRepetitions: 2,  // number of repetitions of each bigram
+  //study1: ncharacters: 5,  // number of random characters (from character_list) preceding each block of bigrams 
+  ncharacters: 3,  // number of random characters (from character_list) preceding each block of bigrams 
   character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./', // Default list of characters
-  trainingBigramFile: 'bigram_tables/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
-  mainBigramFile: 'bigram_tables/bigram_27pairs_11tests_11swap_5easy_LH.csv',  // Default filename for main bigram pairs
+  //study1: trainingBigramFile: 'bigram_tables/study1/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
+  trainingBigramFile: 'bigram_tables/study2/bigram_1pair_easy_choice_LH_noheader.csv',  // Default filename for training bigram pairs
+  //study1: mainBigramFile: 'bigram_tables/study1/bigram_2x11tests_5easy_LH.csv',  // Default filename for main bigram pairs
+  mainBigramFile: 'bigram_tables/study2/bigram_2x35pairs_set1_LH.csv',  // Default filename for main bigram pairs
+  //mainBigramFile: 'bigram_tables/study2/bigram_2x35pairs_set2_LH.csv',  // Default filename for main bigram pairs
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
   useTimer: false,  // If true, use a timer (untested)
@@ -131,8 +136,8 @@ const consentTrial = {
       <h2 style='text-align: center;'>Welcome</h2>
       <dl>
           <dt>Purpose</dt>
-          <dd>The purpose of this study is to determine how comfortable different pairs of keys 
-          are to type on computer keyboards to inform the design of future keyboard layouts.</dd>
+          <dd>The purpose of this study is to determine how comfortable different letter pairs 
+          are to type on a computer keyboard to inform the design of future keyboard layouts.</dd>
 
           <dt>Expectations</dt>
           <dd>It is expected that you will be <b>touch typing</b> on a <b>QWERTY desktop computer keyboard</b>.</dd>
@@ -194,7 +199,7 @@ const typingInstructionsInfo = {
   type: htmlButtonResponse,
   stimulus: `
     <div class='instruction'> 
-      <p>You will be asked to <strong>touch type</strong> text containing pairs of letters.
+      <p>You wil be asked to <strong>touch type</strong> text containing pairs of letters.
          Touch type as you normally would, with left fingers above the home row letters 
          <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
          and right fingers above the home row letters 
@@ -203,8 +208,7 @@ const typingInstructionsInfo = {
       <div style="display: flex; justify-content: center; margin: 20px 0;">
         <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
       </div>
-      <p>After typing the text, you will be asked which pair of letters was easier to type,
-         and how much easier it was.</p>
+      <p>After typing the text, you will slide a slider bar <b>closer to the letter pair that felt easier for you to type</b>.</p>
     </div>
   `,
   choices: ["Next >"],
@@ -698,7 +702,10 @@ async function runExperiment(options = {}) {
       {
         type: htmlButtonResponse,
         stimulus: `<p>Great job! You've completed the practice session.<br>
-                    Now we'll move on to the main part of the experiment.</p>`,
+                    Now we'll move on to the main part of the experiment,<br>
+                    with a series of 70 such trials.<br><br>
+                    Please give your best estimate about how much easier<br>
+                    one letter pair is to type than the other.</p>`,
         choices: ['Continue'],
       },
       ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
