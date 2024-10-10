@@ -46,7 +46,7 @@ def perform_mann_whitney(group1, group2, label1, label2):
             'p_value': p_value
         }
     else:
-        print(f"\nInsufficient data to perform statistical analysis for {label1} vs {label2}.")
+        print(f"\nInsufficient data to perform statistical analysis for {label1} vs {label2}. Both groups may be empty or contain only NaN values.")        
         return None
 
 def display_information(dframe, title, print_headers, nlines):
@@ -72,10 +72,10 @@ def display_information(dframe, title, print_headers, nlines):
 
 def load_and_combine_data(input_folder, output_tables_folder, verbose=False):
     """
-    Load and combine data from multiple CSV files in a folder.
+    Load and combine data from multiple CSV files in a folder of subfolders.
 
     Parameters:
-    - input_folder: path to the folder containing the CSV files
+    - input_folder: path to the folder containing folders of CSV files
     - output_tables_folder: path to the folder where the combined data will be saved
 
     Returns:
@@ -83,20 +83,27 @@ def load_and_combine_data(input_folder, output_tables_folder, verbose=False):
     """
     #print(f"Loading data from {input_folder}...")
     dataframes = []
-    for filename in os.listdir(input_folder):
-        if filename.endswith('.csv'):
-            #print(f"Processing file: {filename}")
-            df = pd.read_csv(os.path.join(input_folder, filename))
-            
-            # Extract user ID from filename (assuming format: experiment_data_USERID_*.csv)
-            user_id = filename.split('_')[2]
-            df['user_id'] = user_id
-            df['filename'] = filename
-            
-            # Remove rows where 'trialId' contains 'intro-trial'
-            df_filtered = df[~df['trialId'].str.contains("intro-trial", na=False)]
-            if len(df_filtered) > 0:
-                dataframes.append(df)
+    for root, dirs, files in os.walk(input_folder):
+        for filename in files:
+            if filename.endswith('.csv'):
+                file_path = os.path.join(root, filename)
+                if verbose:
+                    print(f"Processing file: {file_path}")
+                df = pd.read_csv(file_path)
+                
+                # Extract user ID from filename (assuming format: experiment_data_USERID_*.csv)
+                user_id = filename.split('_')[2]
+                df['user_id'] = user_id
+                df['filename'] = filename
+                
+                # Add the subfolder name
+                subfolder = os.path.relpath(root, input_folder)
+                df['group_id'] = subfolder if subfolder != '.' else ''
+                
+                # Remove rows where 'trialId' contains 'intro-trial'
+                df_filtered = df[~df['trialId'].str.contains("intro-trial", na=False)]
+                if len(df_filtered) > 0:
+                    dataframes.append(df_filtered)
     
     # Combine the dataframes
     combined_df = pd.concat(dataframes, ignore_index=True)
@@ -106,7 +113,7 @@ def load_and_combine_data(input_folder, output_tables_folder, verbose=False):
     if verbose:
         print(combined_df.info())
         nlines = 5
-        print_headers = ['trialId', 'sliderValue', 'chosenBigram', 'unchosenBigram', 
+        print_headers = ['group_id', 'trialId', 'sliderValue', 'chosenBigram', 'unchosenBigram', 
                          'chosenBigramTime', 'unchosenBigramTime']
         display_information(combined_df, "original data", print_headers, nlines)
 
@@ -189,6 +196,7 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
     Returns:
     - dict: Dictionary containing various processed dataframes and user statistics
     """    
+    print("\n____ Process data ____\n")
 
     # Create dictionaries for quick lookup of probable and improbable pairs
     probable_pairs = {(pair[0], pair[1]): True for pair in easy_choice_pairs}
@@ -198,13 +206,23 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
     data['std_bigram_pair'] = data.apply(lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
 
     # Normalize the remove_pairs as well
-    std_remove_pairs = {tuple(sorted(pair)) for pair in remove_pairs}
+    do_remove_pairs = False
+    if do_remove_pairs and remove_pairs:
+        std_remove_pairs = {tuple(sorted(pair)) for pair in remove_pairs}
 
     # Filter out rows where 'trialId' contains 'intro-trial'
-    data_filter_intro = data[~data['trialId'].str.contains("intro-trial", na=False)]
-
-    # Filter out rows where the normalized bigram pair is in std_remove_pairs
-    data_filtered = data_filter_intro[~data_filter_intro['std_bigram_pair'].isin(std_remove_pairs)]
+    filter_intro = True
+    if filter_intro:
+        data_filter_intro = data[~data['trialId'].str.contains("intro-trial", na=False)]
+        if do_remove_pairs and remove_pairs:
+            # Filter out rows where the normalized bigram pair is in std_remove_pairs
+            data_filtered = data_filter_intro[~data_filter_intro['std_bigram_pair'].isin(std_remove_pairs)]
+        else:
+            data_filtered = data_filter_intro
+    elif do_remove_pairs and remove_pairs:
+        data_filtered = data[~data['std_bigram_pair'].isin(std_remove_pairs)]
+    else:
+        data_filtered = data
 
     # Group the data by user_id and standardized bigram pair
     grouped_data = data_filtered.groupby(['user_id', 'std_bigram_pair'])
@@ -230,6 +248,7 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
             is_improbable = improbable_pairs.get((chosen_bigram, unchosen_bigram), False)
             
             result = pd.DataFrame({
+                'group_id': [row['group_id']],
                 'user_id': [user_id],
                 'trialId': [row['trialId']],
                 'bigram_pair': [std_bigram_pair],  # This is a tuple now
@@ -244,6 +263,7 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
                 'chosen_bigram_correct': [row['chosenBigramCorrect']],
                 'unchosen_bigram_correct': [row['unchosenBigramCorrect']],
                 'sliderValue': [row['sliderValue']],
+                'abs_sliderValue': [abs(row['sliderValue'])],
                 'text': [row['text']],
                 'is_consistent': [is_consistent],
                 'is_probable': [is_probable],
@@ -277,8 +297,6 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
     
     # Calculate total choices that could be consistent/inconsistent
     user_stats['total_consistency_choices'] = bigram_data[bigram_data['group_size'] > 1]['user_id'].value_counts()
-
-    print(easy_choice_pairs, easy_choice_pairs[0])
     user_stats['num_easy_choice_pairs'] = len(easy_choice_pairs)
 
     # Fill NaN values with 0 for users who might not have any choices in a category
@@ -298,16 +316,22 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
         #       'chosen_bigram_time', 'unchosen_bigram_time', 'chosen_bigram_correct',
         #       'unchosen_bigram_correct', 'sliderValue', 'text', 'is_consistent',
         #       'is_probable', 'is_improbable', 'group_size'], dtype='object')
+        print(bigram_data.describe())
         print(bigram_data.columns)
         print_headers = ['user_id', 'chosen_bigram', 'unchosen_bigram', 'chosen_bigram_time', 'sliderValue']
-        print_user_headers = ['total_choices', 'consistent_choices', 'inconsistent_choices', 'probable_choices', 'improbable_choices']
+        print_user_headers = ['user_id', 'total_choices', 'consistent_choices', 'inconsistent_choices', 'probable_choices', 'improbable_choices']
         nlines = 5
         #display_information(bigram_data, "bigram data", print_headers + ['is_consistent', 'is_probable', 'is_improbable'], nlines)
         display_information(consistent_choices, "consistent choices", print_headers + ['is_consistent'], nlines)
+        print(consistent_choices.describe())
         display_information(inconsistent_choices, "inconsistent choices", print_headers + ['is_consistent'], nlines)
+        print(inconsistent_choices.describe())
         display_information(probable_choices, "probable choices", print_headers + ['is_probable'], nlines)
-        #display_information(improbable_choices, "improbable choices", print_headers + ['is_improbable'], nlines)
+        print(probable_choices.describe())
+        display_information(improbable_choices, "improbable choices", print_headers + ['is_improbable'], nlines)
+        print(improbable_choices.describe())
         display_information(user_stats, "user statistics", print_user_headers, nlines) 
+        print(user_stats.describe())
     
     # Save the DataFrames to CSV files
     bigram_data.to_csv(f"{output_tables_folder}/processed_bigram_data.csv", index=False)
@@ -760,12 +784,12 @@ def determine_score(group):
     group_size = len(group)
 
     if len(set(chosen_bigrams)) == 1:
-        median_abs_slider_value = np.median([abs(x) for x in slider_values])
+        median_abs_slider_value = np.median([abs(x) for x in slider_values if not np.isnan(x)])
         chosen_bigram_winner = chosen_bigrams.iloc[0]
         unchosen_bigram_winner = bigram2 if chosen_bigram_winner == bigram1 else bigram1
     else:
-        sum1 = sum(abs(x) for i, x in enumerate(slider_values) if chosen_bigrams.iloc[i] == bigram1)
-        sum2 = sum(abs(x) for i, x in enumerate(slider_values) if chosen_bigrams.iloc[i] == bigram2)
+        sum1 = sum(abs(x) for i, x in enumerate(slider_values) if chosen_bigrams.iloc[i] == bigram1 and not np.isnan(x))
+        sum2 = sum(abs(x) for i, x in enumerate(slider_values) if chosen_bigrams.iloc[i] == bigram2 and not np.isnan(x))
         median_abs_slider_value = abs(sum1 - sum2) / group_size
         chosen_bigram_winner = bigram1 if sum1 >= sum2 else bigram2
         unchosen_bigram_winner = bigram2 if chosen_bigram_winner == bigram1 else bigram1
@@ -777,10 +801,10 @@ def determine_score(group):
         'bigram2': bigram2,
         'chosen_bigram_winner': chosen_bigram_winner,
         'unchosen_bigram_winner': unchosen_bigram_winner,
-        'chosen_bigram_time_median': group['chosen_bigram_time'].median(),
-        'unchosen_bigram_time_median': group['unchosen_bigram_time'].median(),
-        'chosen_bigram_correct_total': group['chosen_bigram_correct'].sum(),
-        'unchosen_bigram_correct_total': group['unchosen_bigram_correct'].sum(),
+        'chosen_bigram_time_median': group['chosen_bigram_time'].median(skipna=True),
+        'unchosen_bigram_time_median': group['unchosen_bigram_time'].median(skipna=True),
+        'chosen_bigram_correct_total': group['chosen_bigram_correct'].sum(skipna=True),
+        'unchosen_bigram_correct_total': group['unchosen_bigram_correct'].sum(skipna=True),
         'score': score,
         'text': tuple(group['text'].unique()),
         'is_consistent': (len(set(chosen_bigrams)) == 1),
@@ -928,56 +952,64 @@ if __name__ == "__main__":
     # Load improbable pairs
     current_dir = os.getcwd()  # Get the current working directory
     parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_1pair_easy_choice_LH.csv')
+    easy_choice_pairs_file = os.path.join(parent_dir, 
+        'bigram_tables', 'bigram_1_easy_choice_pair_per_participant_LH.csv')
     easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
     # Load remove pairs
-    remove_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_remove_pairs.csv')
-    remove_pairs = load_bigram_pairs(remove_pairs_file)
+    remove_pairs_file = None #os.path.join(parent_dir, 'bigram_tables', 'bigram_remove_pairs.csv')
+    remove_pairs = None #load_bigram_pairs(remove_pairs_file)
 
     # Load, combine, and save the data
     data = load_and_combine_data(input_folder, output_tables_folder, verbose=False)
     processed_data = process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, verbose=True)
 
-    ##############################################################
-    # Filter users by inconsistent or improbable choice thresholds
-    ##############################################################
-    visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
+    #===========================================================================================#
+    # Only run the remaining functions if all users are presented the same set of bigram pairs. #
+    # For example, run the below on data from either Study1, Study2A, or Study2B.
+    #===========================================================================================#
+    all_users_same_bigrams = False
+    if all_users_same_bigrams:
 
-    # Filter data by an max threshold of inconsistent or improbable choices
-    first_user_data = processed_data['user_stats'].iloc[0]
-    improbable_threshold = 1
-    inconsistent_threshold = np.Inf  #round(first_user_data['total_consistency_choices'] / 2)
-    filtered_users_data = filter_users(processed_data, output_tables_folder,
+        ##############################################################
+        # Filter users by inconsistent or improbable choice thresholds
+        ##############################################################
+        visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
+
+        # Filter data by an max threshold of inconsistent or improbable choices
+        first_user_data = processed_data['user_stats'].iloc[0]
+        improbable_threshold = np.Inf  #1
+        inconsistent_threshold = np.Inf  #round(first_user_data['total_consistency_choices'] / 2)
+        filtered_users_data = filter_users(processed_data, output_tables_folder,
                                         improbable_threshold, inconsistent_threshold)
 
-    # Generate visualizations for the filtered data as well
-    visualize_user_choices(filtered_users_data['user_stats'], output_plots_folder, plot_label="filtered_")
+        # Generate visualizations for the filtered data as well
+        visualize_user_choices(filtered_users_data['user_stats'], output_plots_folder, plot_label="filtered_")
 
-    #############################
-    # Analyze bigram typing times 
-    #############################
-    typing_time_stats = analyze_typing_times_slider_values(filtered_users_data, output_plots_folder, 
-                            output_filename1='filtered_chosen_vs_unchosen_times.png', 
-                            output_filename2='filtered_typing_time_diff_vs_slider_value.png')
+        #############################
+        # Analyze bigram typing times 
+        #############################
+        typing_time_stats = analyze_typing_times_slider_values(filtered_users_data, output_plots_folder, 
+                                output_filename1='filtered_chosen_vs_unchosen_times.png', 
+                                output_filename2='filtered_typing_time_diff_vs_slider_value.png')
 
-    # Analyze within-user bigram typing times and relationships
-    within_user_stats = analyze_user_typing_times(filtered_users_data)
+        # Analyze within-user bigram typing times and relationships
+        within_user_stats = analyze_user_typing_times(filtered_users_data)
 
-    plot_typing_times(filtered_users_data, output_plots_folder, 
-                      output_filename='filtered_bigram_times_barplot.png')
+        plot_typing_times(filtered_users_data, output_plots_folder, 
+                        output_filename='filtered_bigram_times_barplot.png')
 
-    plot_chosen_vs_unchosen_times(filtered_users_data, output_plots_folder, 
-                                  output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
+        plot_chosen_vs_unchosen_times(filtered_users_data, output_plots_folder, 
+                                    output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
 
-    ################################
-    # Score choices by slider values
-    ################################
-    scored_data = score_user_choices_by_slider_values(filtered_users_data, output_tables_folder)
+        ################################
+        # Score choices by slider values
+        ################################
+        scored_data = score_user_choices_by_slider_values(filtered_users_data, output_tables_folder)
 
-    ########################
-    # Choose winning bigrams
-    ########################
-    bigram_winner_data = choose_bigram_winners(scored_data, output_tables_folder)
+        ########################
+        # Choose winning bigrams
+        ########################
+        bigram_winner_data = choose_bigram_winners(scored_data, output_tables_folder)
 
 
