@@ -971,8 +971,8 @@ if __name__ == "__main__":
 
     # Filter data by an max threshold of inconsistent or improbable choices
     first_user_data = processed_data['user_stats'].iloc[0]
-    improbable_threshold = np.Inf #0
-    inconsistent_threshold = np.Inf  #round(first_user_data['total_consistency_choices'] / 2)
+    improbable_threshold = 0  #np.Inf
+    inconsistent_threshold = np.Inf
     filtered_users_data = filter_users(processed_data, output_tables_folder,
                                        improbable_threshold, inconsistent_threshold)
 
