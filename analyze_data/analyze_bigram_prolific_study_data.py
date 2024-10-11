@@ -964,52 +964,45 @@ if __name__ == "__main__":
     data = load_and_combine_data(input_folder, output_tables_folder, verbose=False)
     processed_data = process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, verbose=True)
 
-    #===========================================================================================#
-    # Only run the remaining functions if all users are presented the same set of bigram pairs. #
-    # For example, run the below on data from either Study1, Study2A, or Study2B.
-    #===========================================================================================#
-    all_users_same_bigrams = False
-    if all_users_same_bigrams:
+    ##############################################################
+    # Filter users by inconsistent or improbable choice thresholds
+    ##############################################################
+    visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
 
-        ##############################################################
-        # Filter users by inconsistent or improbable choice thresholds
-        ##############################################################
-        visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
+    # Filter data by an max threshold of inconsistent or improbable choices
+    first_user_data = processed_data['user_stats'].iloc[0]
+    improbable_threshold = np.Inf #0
+    inconsistent_threshold = np.Inf  #round(first_user_data['total_consistency_choices'] / 2)
+    filtered_users_data = filter_users(processed_data, output_tables_folder,
+                                       improbable_threshold, inconsistent_threshold)
 
-        # Filter data by an max threshold of inconsistent or improbable choices
-        first_user_data = processed_data['user_stats'].iloc[0]
-        improbable_threshold = np.Inf  #1
-        inconsistent_threshold = np.Inf  #round(first_user_data['total_consistency_choices'] / 2)
-        filtered_users_data = filter_users(processed_data, output_tables_folder,
-                                        improbable_threshold, inconsistent_threshold)
+    # Generate visualizations for the filtered data as well
+    visualize_user_choices(filtered_users_data['user_stats'], output_plots_folder, plot_label="filtered_")
 
-        # Generate visualizations for the filtered data as well
-        visualize_user_choices(filtered_users_data['user_stats'], output_plots_folder, plot_label="filtered_")
+    #############################
+    # Analyze bigram typing times 
+    #############################
+    typing_time_stats = analyze_typing_times_slider_values(filtered_users_data, output_plots_folder, 
+                            output_filename1='filtered_chosen_vs_unchosen_times.png', 
+                            output_filename2='filtered_typing_time_diff_vs_slider_value.png')
 
-        #############################
-        # Analyze bigram typing times 
-        #############################
-        typing_time_stats = analyze_typing_times_slider_values(filtered_users_data, output_plots_folder, 
-                                output_filename1='filtered_chosen_vs_unchosen_times.png', 
-                                output_filename2='filtered_typing_time_diff_vs_slider_value.png')
+    # Analyze within-user bigram typing times and relationships
+    within_user_stats = analyze_user_typing_times(filtered_users_data)
 
-        # Analyze within-user bigram typing times and relationships
-        within_user_stats = analyze_user_typing_times(filtered_users_data)
+    plot_typing_times(filtered_users_data, output_plots_folder, 
+                    output_filename='filtered_bigram_times_barplot.png')
 
-        plot_typing_times(filtered_users_data, output_plots_folder, 
-                        output_filename='filtered_bigram_times_barplot.png')
+    plot_chosen_vs_unchosen_times(filtered_users_data, output_plots_folder, 
+                                output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
 
-        plot_chosen_vs_unchosen_times(filtered_users_data, output_plots_folder, 
-                                    output_filename='filtered_chosen_vs_unchosen_times_scatter_regression.png')
+    ################################
+    # Score choices by slider values
+    ################################
+    scored_data = score_user_choices_by_slider_values(filtered_users_data, output_tables_folder)
 
-        ################################
-        # Score choices by slider values
-        ################################
-        scored_data = score_user_choices_by_slider_values(filtered_users_data, output_tables_folder)
-
-        ########################
-        # Choose winning bigrams
-        ########################
-        bigram_winner_data = choose_bigram_winners(scored_data, output_tables_folder)
+    ########################
+    # Choose winning bigrams
+    ########################
+    bigram_winner_data = choose_bigram_winners(scored_data, output_tables_folder)
 
 
