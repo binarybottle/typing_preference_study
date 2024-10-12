@@ -211,7 +211,7 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
         std_remove_pairs = {tuple(sorted(pair)) for pair in remove_pairs}
 
     # Filter out rows where 'trialId' contains 'intro-trial'
-    filter_intro = True
+    filter_intro = False
     if filter_intro:
         data_filter_intro = data[~data['trialId'].str.contains("intro-trial", na=False)]
         if do_remove_pairs and remove_pairs:
@@ -850,7 +850,7 @@ def choose_bigram_winners(scored_bigram_data, output_tables_folder):
     print(f"Bigram winner data saved to {output_file}")
     
     # Display information about bigram_winner_data
-    nlines = 50
+    nlines = 1000
     print_headers = ['bigram_pair', 'winner_bigram', 'loser_bigram', 'median_score', 'mad_score']
     display_information(bigram_winner_data, "bigram winner data", print_headers, nlines)
     
@@ -952,8 +952,7 @@ if __name__ == "__main__":
     # Load improbable pairs
     current_dir = os.getcwd()  # Get the current working directory
     parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-    easy_choice_pairs_file = os.path.join(parent_dir, 
-        'bigram_tables', 'bigram_1_easy_choice_pair_per_participant_LH.csv')
+    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_1_easy_choice_pair_LH.csv')
     easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
     # Load remove pairs
@@ -971,7 +970,7 @@ if __name__ == "__main__":
 
     # Filter data by an max threshold of inconsistent or improbable choices
     first_user_data = processed_data['user_stats'].iloc[0]
-    improbable_threshold = 0  #np.Inf
+    improbable_threshold = 0 #np.Inf
     inconsistent_threshold = np.Inf
     filtered_users_data = filter_users(processed_data, output_tables_folder,
                                        improbable_threshold, inconsistent_threshold)
