@@ -20,7 +20,8 @@ let experimentConfig = {
   //study1: mainBigramFile: 'bigram_tables/study1/bigram_2x11tests_5easy_LH.csv',  // Default filename for main bigram pairs
   //study2A: mainBigramFile: 'bigram_tables/study2/bigram_2x35pairs_set1_LH.csv',  // Default filename for main bigram pairs
   //study2B: mainBigramFile: 'bigram_tables/study2/bigram_2x35pairs_set2_LH.csv',  // Default filename for main bigram pairs
-  mainBigramFile: 'bigram_tables/study3/bigram_2x35pairs_LH.csv',  // Default filename for main bigram pairs
+  //study3: mainBigramFile: 'bigram_tables/study3/bigram_2x35pairs_LH.csv',  // Default filename for main bigram pairs
+  mainBigramFile: 'bigram_tables/study4/bigram_2x35pairs_LH.csv',  // Default filename for main bigram pairs
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
   useTimer: false,  // If true, use a timer (untested)
