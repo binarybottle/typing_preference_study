@@ -740,6 +740,13 @@ def plot_chosen_vs_unchosen_times(processed_data, output_plots_folder,
 def score_user_choices_by_slider_values(filtered_users_data, output_tables_folder):
     """
     Score each user's choices by slider values and create a modified copy of bigram_data.
+    
+    For this study, each user makes a choice between two bigrams, two times, 
+    by using a slider each time -- but this function generalizes to many pairwise choices.
+    If a user chooses the same bigram every time, we take their median slider value.
+    If a user chooses different bigrams, we subtract the sums of the absolute values for each choice,
+    and divide by the number of choices the made for that bigram pair.
+    In both cases, the score is the absolute value of the result divided by 100 (the maximum slider value).
     """
     print("\n____ Score choices by slider values ____\n")
     bigram_data = filtered_users_data['bigram_data']
@@ -777,6 +784,8 @@ def score_user_choices_by_slider_values(filtered_users_data, output_tables_folde
 def determine_score(group):
     """
     Determine the score and chosen/unchosen bigrams for a group of trials.
+
+    (See score_user_choices_by_slider_values function docstring for a description.)
     """
     bigram1, bigram2 = group['bigram1'].iloc[0], group['bigram2'].iloc[0]
     chosen_bigrams = group['chosen_bigram']
@@ -819,10 +828,14 @@ def determine_score(group):
 
 def choose_bigram_winners(scored_bigram_data, output_tables_folder):
     """
-    Create a modified copy of scored_bigram_data, called bigram_winner_data,
-    that creates a single line per bigram_pair by calculating median scores
-    across all users for each bigram in the pair, then chooses a
-    winning bigram for each bigram_pair based on the higher median score.
+    Here we determine a winning bigram for each bigram pair across all users and all trials.
+    If the winning bigram for every user is the same, the winning score is the median score.
+    If the winning bigram differs across users, the winning score is calculated as follows:
+    we subtract the sum of the absolute values of the scores for one bigram from the other,
+    and divide by the number of choices the made for that bigram pair across the dataset.
+
+    The function returns a modified copy of scored_bigram_data, called bigram_winner_data,
+    that creates a single line per bigram_pair.
     """
     print("\n____ Choose bigram winners ____\n")
     
@@ -857,6 +870,11 @@ def choose_bigram_winners(scored_bigram_data, output_tables_folder):
     return bigram_winner_data
 
 def determine_winner(group):
+    """
+    Determine the winning bigrams across all trials.
+
+    (See choose_bigram_winners function docstring for a description.)
+    """
     bigram1, bigram2 = group['bigram1'].iloc[0], group['bigram2'].iloc[0]
     scores = group['score']
     chosen_bigrams = group['chosen_bigram_winner']
@@ -966,6 +984,10 @@ if __name__ == "__main__":
     ##############################################################
     # Filter users by inconsistent or improbable choice thresholds
     ##############################################################
+    """
+    The "improbable" choice is choosing the bigram "vr" as easier to type than "fr",
+    and can be used as an option to filter users that may have chosen slider values randomly.
+    """
     visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
 
     # Filter data by an max threshold of inconsistent or improbable choices
@@ -981,6 +1003,12 @@ if __name__ == "__main__":
     #############################
     # Analyze bigram typing times 
     #############################
+    """
+    This analysis of bigram typing times was intended to determine whether there is a correlation 
+    between typing speed and typing comfort, in case we could use speed as a proxy for comfort
+    in future work. Unfortunately, while there is a significant correlation, 
+    it appears from this data that the relationship is not consistent enough to warrant application.
+    """
     typing_time_stats = analyze_typing_times_slider_values(filtered_users_data, output_plots_folder, 
                             output_filename1='filtered_chosen_vs_unchosen_times.png', 
                             output_filename2='filtered_typing_time_diff_vs_slider_value.png')
@@ -997,11 +1025,25 @@ if __name__ == "__main__":
     ################################
     # Score choices by slider values
     ################################
+    """
+    For this study, each user makes a choice between two bigrams, two times, by using a slider each time -- 
+    but the score_user_choices_by_slider_values function generalizes to many pairwise choices.
+    If a user chooses the same bigram every time, we take their median slider value.
+    If a user chooses different bigrams, we subtract the sums of the absolute values for each choice.
+    In both cases, the score is the absolute value of the result.
+    """
     scored_data = score_user_choices_by_slider_values(filtered_users_data, output_tables_folder)
 
     ########################
     # Choose winning bigrams
     ########################
+    """
+    Here we determine a winning bigram for each bigram pair across all users and all trials.
+    If the winning bigram for every user is the same, the winning score is the median score.
+    If the winning bigram differs across users, the winning score is calculated as follows:
+    we subtract the sum of the absolute values of the scores for one bigram from the other,
+    and divide by the number of choices the made for that bigram pair across the dataset.
+    """
     bigram_winner_data = choose_bigram_winners(scored_data, output_tables_folder)
 
 
