@@ -651,10 +651,10 @@ if __name__ == "__main__":
     # Load and preprocess data
     ##########################
     # Set the paths for input and output
-    input_folder = '/Users/arno.klein/Documents/osf/summary'
+    input_folder = '/Users/arno.klein/Documents/osf/summary_data'
     output_folder = os.path.join(os.path.dirname(input_folder), 'output')
-    output_tables_folder = os.path.join(output_folder, 'tables')
-    output_plots_folder = os.path.join(output_folder, 'plots')
+    output_tables_folder = os.path.join(output_folder, 'tables', 'processed_data')
+    output_plots_folder = os.path.join(output_folder, 'plots', 'processed_data')
     os.makedirs(output_tables_folder, exist_ok=True)
     os.makedirs(output_plots_folder, exist_ok=True)
 
@@ -683,7 +683,7 @@ if __name__ == "__main__":
 
     # Filter data by an max threshold of inconsistent or improbable choices
     first_user_data = processed_data['user_stats'].iloc[0]
-    improbable_threshold = np.Inf
+    improbable_threshold = 0 #np.Inf
     inconsistent_threshold = np.Inf
     filtered_users_data = filter_users(processed_data, output_tables_folder,
                                        improbable_threshold, inconsistent_threshold)
