@@ -1,5 +1,100 @@
 
-""" Analyze experiment data -- See README.md """
+""" 
+# Bigram Typing Analysis Pipeline Documentation
+
+## Overview
+The pipeline analyzes relationships between bigram typing times, frequencies, 
+and user choices in a typing experiment. It processes data where participants 
+were shown pairs of bigrams and chose which they preferred to type.
+
+## Data Structure
+- Input: CSV file containing filtered experiment data with columns including:
+  - user_id: Participant identifier
+  - chosen_bigram/unchosen_bigram: The selected/unselected bigram in each trial
+  - chosen_bigram_time/unchosen_bigram_time: Typing times in milliseconds
+  - sliderValue: User preference rating (-100 to +100)
+  - Additional metadata columns (group_id, trialId, etc.)
+
+## Analysis Components
+
+### 1. Typing Time and Slider Analysis
+```analyze_typing_times_slider_values()```
+- Compares chosen vs. unchosen bigram typing times using Wilcoxon signed-rank test
+- Analyzes correlation between typing time differences and slider values
+- Uses absolute time differences: |chosen_time - unchosen_time|
+- No normalization applied to preserve raw timing differences
+- Generates distribution plots and histograms grouped by slider value ranges
+
+### 2. Within-User Timing Analysis
+```analyze_user_typing_times()```
+- Analyzes significant timing differences between bigram pairs within each user
+- Uses Mann-Whitney U tests for pairwise comparisons
+- Raw timing values used (no normalization)
+- Aggregates results across users to identify consistent patterns
+
+### 3. Frequency-Timing Relationship Analysis
+```plot_frequency_timing_relationship()```
+- Examines correlation between bigram frequencies and typing times
+- Uses log-transformed frequencies to handle skewed distribution
+- Produces three analyses:
+  1. Distribution plot with median times and error bars
+  2. Minimum (fastest) typing times vs. frequency
+  3. Median typing times vs. frequency
+- Includes both raw and normalized analyses:
+  - Raw: Uses absolute typing times
+  - Normalized: Times divided by participant's median typing time
+
+### 4. Time-Frequency Differences Analysis
+```analyze_time_frequency_differences()```
+- Investigates how frequency differences relate to typing time differences
+- Normalizes by user median times to account for typing speed variations
+- Uses both raw and normalized differences:
+  - Raw diff = chosen_time - unchosen_time
+  - Normalized diff = (chosen_time - unchosen_time) / user_median_time
+- Frequency differences calculated as log differences:
+  - freq_diff = log10(chosen_freq) - log10(unchosen_freq)
+
+### 5. Enhanced Analysis Components
+- Choice Analysis:
+  - Examines relationship between typing speed, frequency, and user choices
+  - Uses both raw times and user-normalized times
+- Timing Patterns:
+  - Analyzes practice effects and typing variability
+  - Uses coefficient of variation (CV) for timing variability
+- Statistical Assumption Checks:
+  - Tests normality of timing differences
+  - Checks temporal independence of trials
+
+## Output Structure
+- Generates plots in specified output folders:
+  - bigram_typing_time_and_frequency_analysis/
+  - bigram_choice_analysis/
+- Saves detailed analysis results in text files
+- Returns dictionaries with comprehensive statistics and test results
+
+## Statistical Methods
+- Non-parametric tests used where possible (Wilcoxon, Mann-Whitney U)
+- Spearman correlations for frequency-timing relationships
+- Linear regression for trend analysis
+- ANOVA for group comparisons with post-hoc Tukey HSD tests
+
+Calculate prediction accuracy:
+- For each bigram pair, see if the faster-typed bigram was chosen
+- Get overall accuracy rate and confidence intervals
+    - Break this down by:
+        - Size of speed difference (does bigger difference = more reliable prediction?)
+        - Individual bigrams or bigram types
+        - Individual participants
+Analyze false predictions:
+- When does speed fail to predict choice?
+- Are there patterns in these cases?
+- Are certain bigrams or bigram combinations particularly problematic?
+Consider practical application:
+- What accuracy threshold would make speed a useful proxy?
+- Would it work better for certain subsets of bigrams?
+- Could we identify conditions where speed is/isn't a reliable predictor?
+
+"""
 
 import os
 import pandas as pd
@@ -1640,15 +1735,178 @@ def check_statistical_assumptions(bigram_data):
     except Exception as e:
         print(f"Error in check_statistical_assumptions: {str(e)}")
         return None
+
+# Speed as choice proxy analysis
+
+def analyze_speed_as_choice_proxy(bigram_data: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Analyze how well typing speed predicts bigram choice under different conditions.
+    """
+    # Calculate speed difference and choice alignment
+    analysis_data = []
+    for _, row in bigram_data.iterrows():
+        speed_diff = row['chosen_bigram_time'] - row['unchosen_bigram_time']
+        avg_time = (row['chosen_bigram_time'] + row['unchosen_bigram_time']) / 2
+        norm_speed_diff = speed_diff / avg_time if avg_time > 0 else np.nan
+        
+        analysis_data.append({
+            'user_id': row['user_id'],
+            'chosen_bigram': row['chosen_bigram'],
+            'unchosen_bigram': row['unchosen_bigram'],
+            'speed_diff': speed_diff,
+            'norm_speed_diff': norm_speed_diff,
+            'speed_predicts_choice': speed_diff < 0,
+            'confidence': abs(row['sliderValue']),
+            'bigram_pair': tuple(sorted([row['chosen_bigram'], row['unchosen_bigram']]))
+        })
     
+    df = pd.DataFrame(analysis_data)
+    
+    # Overall prediction accuracy
+    overall_accuracy = df['speed_predicts_choice'].mean()
+    
+    # Accuracy by speed difference magnitude
+    df['speed_diff_quintile'] = pd.qcut(df['norm_speed_diff'].abs(), 5, labels=False)
+    accuracy_by_diff = df.groupby('speed_diff_quintile', observed=True)['speed_predicts_choice'].agg(['mean', 'count', 'std'])
+    accuracy_by_diff.columns = ['accuracy', 'count', 'std']
+    
+    # Confidence analysis
+    try:
+        df['confidence_level'] = pd.qcut(df['confidence'], 4, 
+                                       labels=['Low', 'Medium-Low', 'Medium-High', 'High'],
+                                       duplicates='drop')
+    except ValueError:
+        confidence_bounds = [
+            df['confidence'].min(),
+            df['confidence'].quantile(0.33),
+            df['confidence'].quantile(0.67),
+            df['confidence'].max()
+        ]
+        df['confidence_level'] = pd.cut(df['confidence'], 
+                                      bins=confidence_bounds,
+                                      labels=['Low', 'Medium', 'High'],
+                                      include_lowest=True)
+    
+    accuracy_by_confidence = df.groupby('confidence_level', observed=True)['speed_predicts_choice'].agg(['mean', 'count', 'std'])
+    accuracy_by_confidence.columns = ['accuracy', 'count', 'std']
+
+    # Analysis by bigram pair
+    pair_stats = df.groupby('bigram_pair', observed=True).agg({
+        'speed_predicts_choice': ['mean', 'count', 'std'],
+        'norm_speed_diff': ['mean', 'std']
+    }).round(3)
+    
+    min_occurrences_mask = pair_stats[('speed_predicts_choice', 'count')] >= 10
+    best_pairs = pair_stats[min_occurrences_mask].nlargest(5, ('speed_predicts_choice', 'mean'))
+    worst_pairs = pair_stats[min_occurrences_mask].nsmallest(5, ('speed_predicts_choice', 'mean'))
+
+    # Per-user analysis
+    user_means = df.groupby('user_id')['speed_predicts_choice'].mean()
+    user_counts = df.groupby('user_id')['speed_predicts_choice'].count()
+
+    results = {
+        'overall_accuracy': overall_accuracy,
+        'accuracy_by_speed_diff': accuracy_by_diff,
+        'best_predictable_pairs': best_pairs,
+        'worst_predictable_pairs': worst_pairs,
+        'user_stats': {
+            'mean_accuracy': user_means.mean(),
+            'std_accuracy': user_means.std(),
+            'accuracies': user_means.tolist(),
+            'trial_counts': user_counts.tolist()
+        },
+        'accuracy_by_confidence': accuracy_by_confidence,
+        'n_total_trials': len(df),
+        'n_users': len(df['user_id'].unique()),
+        'n_bigram_pairs': len(df['bigram_pair'].unique())
+    }
+    
+    return results
+
+def visualize_speed_choice_relationship(results: Dict[str, Any], output_dir: str) -> None:
+    """Create visualizations of speed-choice relationship analysis."""
+    
+    # 1. Accuracy by speed difference magnitude
+    plt.figure(figsize=(10, 6))
+    acc_by_diff = results['accuracy_by_speed_diff']
+    plt.errorbar(range(len(acc_by_diff)), 
+                acc_by_diff['accuracy'],
+                yerr=acc_by_diff['std'],
+                fmt='o-')
+    plt.xlabel('Speed Difference Quintile')
+    plt.ylabel('Prediction Accuracy')
+    plt.title('Speed Prediction Accuracy by Magnitude of Speed Difference')
+    plt.savefig(os.path.join(output_dir, 'speed_accuracy_by_magnitude.png'))
+    plt.close()
+    
+    # 2. Accuracy by confidence
+    plt.figure(figsize=(10, 6))
+    acc_by_conf = results['accuracy_by_confidence']
+    plt.errorbar(range(len(acc_by_conf)),
+                acc_by_conf['accuracy'],
+                yerr=acc_by_conf['std'],
+                fmt='o-')
+    plt.xlabel('Confidence Level')
+    plt.ylabel('Prediction Accuracy')
+    plt.title('Speed Prediction Accuracy by Confidence Level')
+    plt.savefig(os.path.join(output_dir, 'speed_accuracy_by_confidence.png'))
+    plt.close()
+    
+    # 3. Distribution of user accuracies
+    plt.figure(figsize=(10, 6))
+    plt.hist(results['user_stats']['accuracies'], bins=20)
+    plt.xlabel('Prediction Accuracy')
+    plt.ylabel('Number of Users')
+    plt.title('Distribution of Per-User Prediction Accuracies')
+    plt.savefig(os.path.join(output_dir, 'user_accuracy_distribution.png'))
+    plt.close()
+
+def report_proxy_analysis(results: Dict[str, Any]) -> str:
+    """Generate readable report of analysis results."""
+    report = [
+        "Speed as Choice Proxy Analysis",
+        "===========================\n",
+        f"Number of participants: {results['n_users']}",
+        f"Total trials analyzed: {results['n_total_trials']}",
+        f"Unique bigram pairs: {results['n_bigram_pairs']}\n",
+        f"Overall accuracy: {results['overall_accuracy']*100:.1f}%\n",
+        "Accuracy by Speed Difference Magnitude:",
+        "------------------------------------"
+    ]
+    
+    acc_by_diff = results['accuracy_by_speed_diff']
+    for quintile, row in acc_by_diff.iterrows():
+        report.append(f"Quintile {quintile+1}: {row['accuracy']*100:.1f}% "
+                     f"(n={row['count']}, ±{row['std']*100:.1f}%)")
+    
+    report.extend([
+        "\nAccuracy by Confidence Level:",
+        "--------------------------"
+    ])
+    acc_by_conf = results['accuracy_by_confidence']
+    for level, row in acc_by_conf.iterrows():
+        report.append(f"{level}: {row['accuracy']*100:.1f}% "
+                     f"(n={row['count']}, ±{row['std']*100:.1f}%)")
+    
+    report.extend([
+        "\nUser-Level Statistics:",
+        "-------------------",
+        f"Mean user accuracy: {results['user_stats']['mean_accuracy']*100:.1f}%",
+        f"Standard deviation: {results['user_stats']['std_accuracy']*100:.1f}%"
+    ])
+    
+    return "\n".join(report)
+
+
 ########################################################################################
 # Main execution
 ########################################################################################
 if __name__ == "__main__":
 
-    do_analyze_times_frequencies = True
-    do_analyze_deltas = True
-    do_enhanced_analysis = True
+    do_analyze_times_frequencies = False
+    do_analyze_deltas = False
+    do_enhanced_analysis = False
+    do_speed_proxy_analysis = True
 
     ###########
     # Load data
@@ -1663,10 +1921,13 @@ if __name__ == "__main__":
     output_plots_folder = os.path.join(output_folder, 'plots')
     output_time_freq_plots_folder = os.path.join(output_plots_folder, 'bigram_typing_time_and_frequency_analysis')
     output_choice_plots_folder = os.path.join(output_plots_folder, 'bigram_choice_analysis')
+    output_speed_choice_folder = os.path.join(output_plots_folder, 'speed_choice_analysis') 
+    
     #os.makedirs(output_tables_folder, exist_ok=True)
     os.makedirs(output_plots_folder, exist_ok=True)
     os.makedirs(output_time_freq_plots_folder, exist_ok=True)
     os.makedirs(output_choice_plots_folder, exist_ok=True)
+    os.makedirs(output_speed_choice_folder, exist_ok=True)
 
     # Load filtered user data (generated by process_data.py)
     bigram_data = load_filtered_data(filtered_users_data_file)
@@ -1842,4 +2103,48 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error in enhanced analysis section: {str(e)}")
 
+
+    ################################
+    # Speed as choice proxy analysis
+    ################################
+    if do_speed_proxy_analysis:   
+
+        print("\n____ Speed as Choice Proxy Analysis ____\n")
+        
+        # Run main analysis
+        proxy_results = analyze_speed_as_choice_proxy(bigram_data)
+        
+        # Generate visualizations
+        visualize_speed_choice_relationship(
+            proxy_results, 
+            output_speed_choice_folder
+        )
+        
+        # Generate and save report
+        report = report_proxy_analysis(proxy_results)
+        report_path = os.path.join(output_speed_choice_folder, 'speed_choice_analysis_report.txt')
+        
+        print(report)  # Print to console
+        
+        # Save report to file
+        with open(report_path, 'w') as f:
+            f.write(report)
+            
+        print(f"\nDetailed analysis saved to: {report_path}")
+        print("Visualizations saved to:", output_speed_choice_folder)
+        
+        # Print key findings
+        print("\nKey findings:")
+        print(f"- Overall prediction accuracy: {proxy_results['overall_accuracy']*100:.1f}%")
+        print(f"- Mean user accuracy: {proxy_results['user_stats']['mean_accuracy']*100:.1f}% "
+              f"(±{proxy_results['user_stats']['std_accuracy']*100:.1f}%)")
+        
+        if proxy_results['overall_accuracy'] > 0.7:
+            print("\nSpeed appears to be a reasonably good proxy for choice overall")
+            if proxy_results['user_stats']['std_accuracy'] > 0.1:
+                print("However, there is substantial variation between users")
+        else:
+            print("\nSpeed alone may not be a reliable proxy for choice")
+            print("Consider using speed in combination with other factors")
+    
 
