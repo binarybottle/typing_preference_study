@@ -1830,9 +1830,9 @@ def visualize_speed_choice_relationship(results: Dict[str, Any], output_dir: str
     plt.figure(figsize=(10, 6))
     acc_by_diff = results['accuracy_by_speed_diff']
     plt.errorbar(range(len(acc_by_diff)), 
-                acc_by_diff['accuracy'],
-                yerr=acc_by_diff['std'],
-                fmt='o-')
+                 acc_by_diff['accuracy'],
+                 yerr=acc_by_diff['std'],
+                 fmt='o-')
     plt.xlabel('Speed Difference Quintile')
     plt.ylabel('Prediction Accuracy')
     plt.title('Speed Prediction Accuracy by Magnitude of Speed Difference')
@@ -1843,9 +1843,9 @@ def visualize_speed_choice_relationship(results: Dict[str, Any], output_dir: str
     plt.figure(figsize=(10, 6))
     acc_by_conf = results['accuracy_by_confidence']
     plt.errorbar(range(len(acc_by_conf)),
-                acc_by_conf['accuracy'],
-                yerr=acc_by_conf['std'],
-                fmt='o-')
+                 acc_by_conf['accuracy'],
+                 yerr=acc_by_conf['std'],
+                 fmt='o-')
     plt.xlabel('Confidence Level')
     plt.ylabel('Prediction Accuracy')
     plt.title('Speed Prediction Accuracy by Confidence Level')
