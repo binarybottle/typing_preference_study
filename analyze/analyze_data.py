@@ -1,25 +1,23 @@
 """
-Bigram Typing Analysis Pipeline
+Bigram Typing Analysis Script
 
-Core analysis of typing speed, frequency, and choice relationships in bigram typing experiments.
-Focuses on per-participant analysis with robust statistical approaches.
+Analyzes relationships between bigram typing times, frequencies and user choices,
+combining both legacy and enhanced analysis approaches.
 
-Key features:
-- Per-participant normalization and analysis
-- Robust statistics (median, MAD, bootstrapped CIs)
-- Parallel raw and normalized analyses
-- Comprehensive uncertainty quantification
+Features:
+- Per-participant normalization and robust statistics
+- Recreation of original plots with enhanced statistical methods
+- Comprehensive logging
+- Configurable analysis parameters
 
-Analysis components:
-1. Speed-choice relationships within participants
-2. Frequency effects after controlling for speed
-3. Combined effects and interaction analysis
-4. Distribution analysis of differences
+Usage:
+    python analyze_data.py [--config config.yaml]
 """
 
 import os
 import yaml
 import logging
+import argparse
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Any, Union
 
@@ -28,15 +26,10 @@ import pandas as pd
 from scipy import stats
 from scipy.stats import median_abs_deviation
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 import seaborn as sns
-import yaml
-import logging
 
 from bigram_frequencies import bigrams, bigram_frequencies_array
-
-epsilon = 1e-10  # Small value to avoid divide-by-zero
 
 # Configure logging
 logging.basicConfig(
@@ -45,855 +38,712 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def load_config(config_path: str = "config.yaml") -> dict:
-    """
-    Load analysis configuration from YAML file.
+class RobustStatistics:
+    """Core statistical methods for analysis."""
     
-    Parameters
-    ----------
-    config_path : str
-        Path to configuration file
+    @staticmethod
+    def normalize_within_participant(
+        data: pd.DataFrame,
+        value_column: str,
+        user_column: str = 'user_id'
+    ) -> pd.Series:
+        """Normalize values within each participant using robust statistics."""
+        return data.groupby(user_column, observed=True)[value_column].transform(
+            lambda x: (x - x.median()) / (median_abs_deviation(x, nan_policy='omit') + 1e-10)
+        )
+    
+    @staticmethod
+    def compute_confidence_intervals(
+        values: np.ndarray,
+        confidence: float = 0.95
+    ) -> Tuple[float, float]:
+        """Compute confidence intervals using bootstrap."""
+        if len(values) < 2:
+            return np.nan, np.nan
         
-    Returns
-    -------
-    dict
-        Configuration parameters
+        try:
+            bootstrap_samples = np.random.choice(
+                values, 
+                size=(1000, len(values)), 
+                replace=True
+            )
+            bootstrap_medians = np.median(bootstrap_samples, axis=1)
+            ci_lower = np.percentile(bootstrap_medians, (1 - confidence) / 2 * 100)
+            ci_upper = np.percentile(bootstrap_medians, (1 + confidence) / 2 * 100)
+            return ci_lower, ci_upper
+        except:
+            return np.nan, np.nan
+
+class BigramAnalysis:
+    """Main analysis class combining legacy and enhanced approaches."""
     
-    Raises
-    ------
-    FileNotFoundError
-        If config file not found
-    yaml.YAMLError
-        If config file is invalid
-    """
+    def __init__(self, config: Dict[str, Any]):
+        self.config = config
+        self.stats = RobustStatistics()
+        self.setup_plotting()
+        
+    def setup_plotting(self):
+        """Configure matplotlib plotting style."""
+        plt.style.use(self.config['visualization']['style'])
+        plt.rcParams['figure.figsize'] = self.config['visualization']['figsize']
+        plt.rcParams['figure.dpi'] = self.config['visualization']['dpi']
+    
+    def load_and_validate_data(self, data_path: str) -> pd.DataFrame:
+        """Load and validate experiment data."""
+        required_columns = [
+            'user_id', 'chosen_bigram', 'unchosen_bigram',
+            'chosen_bigram_time', 'unchosen_bigram_time', 'sliderValue'
+        ]
+        
+        try:
+            df = pd.read_csv(data_path)
+            
+            # Validate columns
+            missing_cols = set(required_columns) - set(df.columns)
+            if missing_cols:
+                raise ValueError(f"Missing required columns: {missing_cols}")
+                
+            # Basic data validation
+            if df['user_id'].isna().any():
+                raise ValueError("Found missing user IDs")
+                
+            # Convert numeric columns
+            numeric_cols = ['chosen_bigram_time', 'unchosen_bigram_time', 'sliderValue']
+            for col in numeric_cols:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                n_dropped = df[col].isna().sum()
+                if n_dropped > 0:
+                    logger.warning(f"Dropped {n_dropped} non-numeric values from {col}")
+            
+            # Remove rows with NaN values
+            n_before = len(df)
+            df = df.dropna(subset=numeric_cols)
+            n_dropped = n_before - len(df)
+            if n_dropped > 0:
+                logger.warning(f"Dropped {n_dropped} rows with missing values")
+                
+            # Validate ranges
+            if not (-100 <= df['sliderValue'].max() <= 100 and -100 <= df['sliderValue'].min() <= 100):
+                raise ValueError("sliderValue outside valid range [-100, 100]")
+                
+            if (df['chosen_bigram_time'] < 0).any() or (df['unchosen_bigram_time'] < 0).any():
+                raise ValueError("Negative typing times found")
+                
+            logger.info(f"Loaded {len(df)} rows from {len(df['user_id'].unique())} participants")
+            return df
+            
+        except Exception as e:
+            logger.error(f"Error loading data from {data_path}: {str(e)}")
+            raise
+
+    def analyze_typing_times_slider_values(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+    ) -> Dict[str, Any]:
+        """
+        Analyze typing times in relation to slider values.
+        Enhanced version of original analysis with robust statistics.
+        """
+        results = {}
+        
+        # Calculate speed differences
+        data = data.copy()
+        data['time_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
+        data['time_diff_norm'] = self.stats.normalize_within_participant(data, 'time_diff')
+        
+        # Per-participant statistics
+        participant_stats = []
+        for user_id, user_data in data.groupby('user_id', observed=True):
+            faster_chosen = (user_data['time_diff'] < 0)
+            participant_stats.append({
+                'user_id': user_id,
+                'n_trials': len(user_data),
+                'prop_faster_chosen': faster_chosen.mean(),
+                'median_diff': user_data['time_diff'].median(),
+                'mad_diff': median_abs_deviation(user_data['time_diff'], nan_policy='omit')
+            })
+        
+        results['participant_stats'] = pd.DataFrame(participant_stats)
+        
+        # Generate original plots with enhanced statistics
+        self._plot_chosen_vs_unchosen(data, output_folder)
+        self._plot_time_diff_slider(data, output_folder)
+        self._plot_time_diff_histograms(data, output_folder)
+        
+        return results
+
+    def _plot_chosen_vs_unchosen(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'chosen_vs_unchosen_times.png'
+    ):
+        """Create boxplot comparing chosen vs unchosen typing times."""
+        plt.figure(figsize=(10, 6))
+        
+        # Calculate per-participant statistics
+        chosen_stats = []
+        unchosen_stats = []
+        
+        for _, user_data in data.groupby('user_id', observed=True):
+            chosen_stats.append({
+                'median': user_data['chosen_bigram_time'].median(),
+                'mad': median_abs_deviation(user_data['chosen_bigram_time'], nan_policy='omit')
+            })
+            unchosen_stats.append({
+                'median': user_data['unchosen_bigram_time'].median(),
+                'mad': median_abs_deviation(user_data['unchosen_bigram_time'], nan_policy='omit')
+            })
+        
+        chosen_df = pd.DataFrame(chosen_stats)
+        unchosen_df = pd.DataFrame(unchosen_stats)
+        
+        plt.boxplot(
+            [chosen_df['median'], unchosen_df['median']],
+            labels=['Chosen', 'Unchosen'],
+            medianprops=dict(color="red"),
+            showfliers=False
+        )
+        
+        plt.ylabel('Typing Time (ms)')
+        plt.title('Typing Times for Chosen vs Unchosen Bigrams')
+        
+        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved plot to {filename}")
+
+    def _plot_time_diff_slider(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'typing_time_diff_vs_slider_value.png'
+    ):
+        """Create scatter plot of time differences vs slider values."""
+        plt.figure(figsize=(10, 6))
+        
+        plt.scatter(
+            data['sliderValue'],
+            data['time_diff_norm'],
+            alpha=0.5,
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        plt.xlabel('Slider Value')
+        plt.ylabel('Normalized Time Difference (Chosen - Unchosen)')
+        plt.title('Typing Time Difference vs. Slider Value')
+        
+        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved plot to {filename}")
+
+    def _plot_time_diff_histograms(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'typing_time_diff_vs_slider_value_histograms.png'
+    ):
+        """Create histograms of typing time differences by slider value range."""
+        plt.figure(figsize=(15, 10))
+        
+        # Create slider value bins
+        slider_ranges = [(-100, -60), (-60, -20), (-20, 20), (20, 60), (60, 100)]
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        axes = axes.flatten()
+        
+        for i, (low, high) in enumerate(slider_ranges):
+            mask = (data['sliderValue'] >= low) & (data['sliderValue'] < high)
+            subset = data[mask]
+            
+            if len(subset) > 0:
+                # Plot normalized differences
+                axes[i].hist(
+                    subset['time_diff_norm'],
+                    bins=30,
+                    alpha=0.5,
+                    label='Normalized Differences',
+                    color='blue'
+                )
+                
+                axes[i].set_title(f'Slider Values [{low}, {high})')
+                axes[i].set_xlabel('Normalized Time Difference')
+                axes[i].set_ylabel('Frequency')
+                axes[i].legend()
+                axes[i].grid(True, alpha=0.3)
+        
+        # Remove extra subplot
+        axes[-1].remove()
+        
+        plt.suptitle('Distribution of Time Differences by Slider Value Range', y=1.02)
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+        logger.info(f"Saved plot to {filename}")
+
+    def analyze_frequency_typing_relationship(
+        self,
+        data: pd.DataFrame,
+        output_folder: str
+    ) -> Dict[str, Any]:
+        """
+        Analyze relationship between bigram frequency and typing times.
+        Enhanced version with per-participant normalization.
+        """
+        # Create frequency dictionary
+        bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
+        
+        # Calculate normalized typing times per participant
+        data = data.copy()
+        for col in ['chosen_bigram_time', 'unchosen_bigram_time']:
+            data[f'{col}_norm'] = self.stats.normalize_within_participant(data, col)
+        
+        # Combine chosen and unchosen data
+        typing_data = pd.concat([
+            pd.DataFrame({
+                'bigram': data['chosen_bigram'],
+                'time': data['chosen_bigram_time'],
+                'time_norm': data['chosen_bigram_time_norm']
+            }),
+            pd.DataFrame({
+                'bigram': data['unchosen_bigram'],
+                'time': data['unchosen_bigram_time'],
+                'time_norm': data['unchosen_bigram_time_norm']
+            })
+        ])
+        
+        # Add frequencies and calculate statistics
+        typing_data['frequency'] = typing_data['bigram'].map(bigram_freqs)
+        typing_data = typing_data.dropna(subset=['frequency'])
+        
+        # Generate plots
+        self._plot_frequency_timing_relationship(
+            typing_data,
+            output_folder
+        )
+        
+        return self._calculate_frequency_timing_statistics(typing_data)
+
+    def _plot_frequency_timing_relationship(
+        self,
+        data: pd.DataFrame,
+        output_folder: str
+    ):
+        """Create plots showing relationship between frequency and typing time."""
+        # 1. Raw timing plot
+        plt.figure(figsize=(10, 6))
+        plt.semilogx()
+        
+        plt.scatter(
+            data['frequency'],
+            data['time'],
+            alpha=0.5,
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        plt.xlabel('Bigram Frequency (log scale)')
+        plt.ylabel('Typing Time (ms)')
+        plt.title('Raw Typing Times vs. Frequency')
+        
+        plt.savefig(os.path.join(output_folder, 'freq_vs_time_raw.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # 2. Normalized timing plot
+        plt.figure(figsize=(10, 6))
+        plt.semilogx()
+        
+        plt.scatter(
+            data['frequency'],
+            data['time_norm'],
+            alpha=0.5,
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        plt.xlabel('Bigram Frequency (log scale)')
+        plt.ylabel('Normalized Typing Time')
+        plt.title('Normalized Typing Times vs. Frequency')
+        
+        plt.savefig(os.path.join(output_folder, 'freq_vs_time_normalized.png'), dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _calculate_frequency_timing_statistics(
+        self,
+        data: pd.DataFrame
+    ) -> Dict[str, Any]:
+        """Calculate statistics for frequency-timing relationship."""
+        # Calculate correlations
+        raw_corr = stats.spearmanr(
+            np.log10(data['frequency']),
+            data['time'],
+            nan_policy='omit'
+        )
+        
+        norm_corr = stats.spearmanr(
+            np.log10(data['frequency']),
+            data['time_norm'],
+            nan_policy='omit'
+        )
+        
+        return {
+            'raw_correlation': {
+                'coefficient': raw_corr.correlation,
+                'p_value': raw_corr.pvalue
+            },
+            'normalized_correlation': {
+                'coefficient': norm_corr.correlation,
+                'p_value': norm_corr.pvalue
+            },
+            'n_bigrams': len(data['bigram'].unique()),
+            'n_observations': len(data)
+        }
+
+    def analyze_speed_choice_prediction(
+            self,
+            data: pd.DataFrame,
+            output_folder: str
+        ) -> Dict[str, Any]:
+            """
+            Analyze how well typing speed and frequency predict bigram choices.
+            
+            Generates:
+            - speed_accuracy_by_magnitude.png
+            - speed_accuracy_by_confidence.png 
+            - user_accuracy_distribution.png
+            - speed_choice_analysis_report.txt
+            """
+            # Calculate speed differences and prediction accuracy
+            data = data.copy()
+            data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
+            data['speed_predicts_choice'] = data['speed_diff'] < 0
+            data['confidence'] = data['sliderValue'].abs()
+            
+            # Calculate normalized speed differences per participant
+            data['speed_diff_norm'] = self.stats.normalize_within_participant(data, 'speed_diff')
+            
+            # Add frequency differences if available
+            bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
+            try:
+                data['freq_diff'] = data.apply(
+                    lambda row: np.log10(bigram_freqs[row['chosen_bigram']]) - 
+                            np.log10(bigram_freqs[row['unchosen_bigram']]),
+                    axis=1
+                )
+            except:
+                logger.warning("Could not calculate frequency differences")
+                data['freq_diff'] = np.nan
+            
+            # Analyze by magnitude quintiles
+            data['speed_diff_mag'] = data['speed_diff'].abs()
+            data['magnitude_quintile'] = pd.qcut(
+                data['speed_diff_mag'],
+                5,
+                labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
+                duplicates='drop'
+            )
+            
+            # Per-participant analysis
+            participant_results = []
+            for user_id, user_data in data.groupby('user_id', observed=True):
+                if len(user_data) >= self.config['analysis'].get('min_trials_per_participant', 5):
+                    speed_accuracy = user_data['speed_predicts_choice'].mean()
+                    ci_lower, ci_upper = self.stats.compute_confidence_intervals(
+                        user_data['speed_predicts_choice'].values
+                    )
+                    
+                    # Calculate accuracy by magnitude for this participant
+                    mag_accuracies = user_data.groupby('magnitude_quintile', observed=True)[
+                        'speed_predicts_choice'
+                    ].mean()
+                    
+                    participant_results.append({
+                        'user_id': user_id,
+                        'n_trials': len(user_data),
+                        'speed_accuracy': speed_accuracy,
+                        'ci_lower': ci_lower,
+                        'ci_upper': ci_upper,
+                        'magnitude_accuracies': mag_accuracies.to_dict()
+                    })
+            
+            results = {
+                'participant_results': participant_results,
+                'overall_accuracy': data['speed_predicts_choice'].mean(),
+                'n_participants': len(participant_results),
+                'n_trials': len(data)
+            }
+            
+            # Generate plots
+            self._plot_accuracy_by_magnitude(data, output_folder)
+            self._plot_accuracy_by_confidence(data, output_folder)
+            self._plot_user_accuracy_distribution(participant_results, output_folder)
+            
+            # Generate report
+            self._generate_prediction_report(results, output_folder)
+            
+            return results
+
+    def _plot_accuracy_by_magnitude(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'speed_accuracy_by_magnitude.png'
+    ):
+        """Plot prediction accuracy by speed difference magnitude."""
+        plt.figure(figsize=(10, 6))
+        
+        # Calculate accuracy by magnitude quintile
+        accuracy_by_mag = data.groupby('magnitude_quintile', observed=True)[
+            'speed_predicts_choice'
+        ].agg(['mean', 'std', 'count'])
+        
+        plt.errorbar(
+            range(len(accuracy_by_mag)),
+            accuracy_by_mag['mean'],
+            yerr=accuracy_by_mag['std'],
+            fmt='o-',
+            capsize=5,
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        plt.xlabel('Speed Difference Magnitude Quintile')
+        plt.ylabel('Prediction Accuracy')
+        plt.title('Speed Prediction Accuracy by Magnitude of Speed Difference')
+        plt.grid(True, alpha=0.3)
+        
+        # Add quintile sizes
+        for i, (_, row) in enumerate(accuracy_by_mag.iterrows()):
+            plt.text(i, row['mean'], f'n={int(row["count"])}', 
+                    ha='center', va='bottom')
+        
+        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _plot_accuracy_by_confidence(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'speed_accuracy_by_confidence.png'
+    ):
+        """Plot prediction accuracy by confidence level."""
+        plt.figure(figsize=(10, 6))
+        
+        # Create confidence bins, handling potential duplicate values
+        try:
+            # First try 4 bins
+            data['confidence_level'] = pd.qcut(
+                data['confidence'],
+                4,
+                labels=['Low', 'Medium-Low', 'Medium-High', 'High'],
+                duplicates='drop'
+            )
+        except ValueError:
+            try:
+                # If that fails, try 3 bins
+                data['confidence_level'] = pd.qcut(
+                    data['confidence'],
+                    3,
+                    labels=['Low', 'Medium', 'High'],
+                    duplicates='drop'
+                )
+            except ValueError:
+                # If that still fails, use manual binning based on value ranges
+                confidence_bounds = [
+                    data['confidence'].min(),
+                    data['confidence'].quantile(0.33),
+                    data['confidence'].quantile(0.67),
+                    data['confidence'].max()
+                ]
+                data['confidence_level'] = pd.cut(
+                    data['confidence'],
+                    bins=confidence_bounds,
+                    labels=['Low', 'Medium', 'High'],
+                    include_lowest=True
+                )
+        
+        accuracy_by_conf = data.groupby('confidence_level', observed=True)[
+            'speed_predicts_choice'
+        ].agg(['mean', 'std', 'count'])
+        
+        x = range(len(accuracy_by_conf))
+        plt.bar(x, accuracy_by_conf['mean'], 
+                yerr=accuracy_by_conf['std'], 
+                capsize=5,
+                color=self.config['visualization']['colors']['primary'])
+        
+        plt.xlabel('Confidence Level')
+        plt.ylabel('Prediction Accuracy')
+        plt.title('Speed Prediction Accuracy by Confidence Level')
+        plt.xticks(x, accuracy_by_conf.index, rotation=45)
+        plt.grid(True, alpha=0.3)
+        
+        # Add sample sizes
+        for i, (_, row) in enumerate(accuracy_by_conf.iterrows()):
+            plt.text(i, row['mean'], f'n={int(row["count"])}', 
+                    ha='center', va='bottom')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _plot_user_accuracy_distribution(
+        self,
+        participant_results: List[Dict[str, Any]],
+        output_folder: str,
+        filename: str = 'user_accuracy_distribution.png'
+    ):
+        """Plot distribution of per-user prediction accuracies."""
+        plt.figure(figsize=(10, 6))
+        
+        accuracies = [p['speed_accuracy'] for p in participant_results]
+        
+        plt.hist(accuracies, bins=20, 
+                color=self.config['visualization']['colors']['primary'])
+        plt.axvline(
+            np.mean(accuracies),
+            color=self.config['visualization']['colors']['secondary'],
+            linestyle='--',
+            label=f'Mean: {np.mean(accuracies):.3f}'
+        )
+        
+        plt.xlabel('Prediction Accuracy')
+        plt.ylabel('Number of Participants')
+        plt.title('Distribution of Per-Participant Prediction Accuracies')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _generate_prediction_report(
+            self,
+            results: Dict[str, Any],
+            output_folder: str,
+            filename: str = 'speed_choice_analysis_report.txt'
+        ):
+            """Generate comprehensive analysis report."""
+            report_lines = [
+                "Speed as Choice Proxy Analysis Report",
+                "================================\n",
+                
+                f"Number of participants: {results['n_participants']}",
+                f"Total trials analyzed: {results['n_trials']}",
+                f"Overall prediction accuracy: {results['overall_accuracy']:.1%}\n",
+                
+                "Per-Participant Statistics:",
+                "------------------------"
+            ]
+            
+            accuracies = [p['speed_accuracy'] for p in results['participant_results']]
+            report_lines.extend([
+                f"Mean accuracy: {np.mean(accuracies):.1%}",
+                f"Median accuracy: {np.median(accuracies):.1%}",
+                f"Std deviation: {np.std(accuracies):.1%}",
+                f"Range: [{min(accuracies):.1%}, {max(accuracies):.1%}]"
+            ])
+            
+            with open(os.path.join(output_folder, filename), 'w') as f:
+                f.write('\n'.join(report_lines))
+    
+def load_config(config_path: str) -> Dict[str, Any]:
+    """Load configuration from YAML file."""
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path) as f:
             config = yaml.safe_load(f)
             
-        # Validate required sections
-        required_sections = ['data', 'analysis', 'visualization', 'output']
-        missing = [s for s in required_sections if s not in config]
-        if missing:
-            raise ValueError(f"Missing required config sections: {missing}")
-            
+        # Add default values if not specified
+        defaults = {
+            'visualization': {
+                'style': 'default',
+                'figsize': (10, 6),
+                'dpi': 300,
+                'colors': {
+                    'primary': '#1f77b4',
+                    'secondary': '#ff7f0e'
+                }
+            }
+        }
+        
+        # Update config with defaults for missing values
+        for section, values in defaults.items():
+            if section not in config:
+                config[section] = values
+            elif isinstance(values, dict):
+                for key, value in values.items():
+                    if key not in config[section]:
+                        config[section][key] = value
+        
         return config
         
     except Exception as e:
         logger.error(f"Error loading config from {config_path}: {str(e)}")
         raise
 
-def load_and_validate_data(data_path: str) -> pd.DataFrame:
-    """
-    Load and validate bigram typing data.
-    
-    Parameters
-    ----------
-    data_path : str
-        Path to filtered data CSV file
-        
-    Returns
-    -------
-    pd.DataFrame
-        Validated data with required columns
-    """
-    required_columns = [
-        'user_id', 'chosen_bigram', 'unchosen_bigram',
-        'chosen_bigram_time', 'unchosen_bigram_time', 'sliderValue'
-    ]
-    
-    try:
-        df = pd.read_csv(data_path)
-        
-        # Validate columns
-        missing_cols = set(required_columns) - set(df.columns)
-        if missing_cols:
-            raise ValueError(f"Missing required columns: {missing_cols}")
-            
-        # Basic data validation
-        if df['user_id'].isna().any():
-            raise ValueError("Found missing user IDs")
-            
-        # Convert numeric columns, dropping any non-numeric values
-        numeric_cols = ['chosen_bigram_time', 'unchosen_bigram_time', 'sliderValue']
-        for col in numeric_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            n_dropped = df[col].isna().sum()
-            if n_dropped > 0:
-                logger.warning(f"Dropped {n_dropped} non-numeric values from {col}")
-        
-        # Remove rows with any NaN values in required numeric columns
-        n_before = len(df)
-        df = df.dropna(subset=numeric_cols)
-        n_dropped = n_before - len(df)
-        if n_dropped > 0:
-            logger.warning(f"Dropped {n_dropped} rows with missing values")
-            
-        # Validate value ranges
-        if not (-100 <= df['sliderValue'].max() <= 100 and -100 <= df['sliderValue'].min() <= 100):
-            raise ValueError("sliderValue outside valid range [-100, 100]")
-            
-        if (df['chosen_bigram_time'] < 0).any() or (df['unchosen_bigram_time'] < 0).any():
-            raise ValueError("Negative typing times found")
-            
-        logger.info(f"Loaded {len(df)} rows of data from {len(df['user_id'].unique())} participants")
-        return df
-        
-    except Exception as e:
-        logger.error(f"Error loading data from {data_path}: {str(e)}")
-        raise
-
-class RobustStatistics:
-    """
-    Collection of robust statistical methods for typing analysis.
-    """
-    
-    @staticmethod
-    def normalize_within_participant(
-        data: pd.DataFrame,
-        value_column: str,
-        grouping_column: str = 'user_id',
-        method: str = "median"
-    ) -> pd.Series:
-        """
-        Normalize values within each participant.
-        
-        Parameters
-        ----------
-        data : pd.DataFrame
-            Data containing values and grouping column
-        value_column : str
-            Column to normalize
-        grouping_column : str
-            Column defining groups (default: 'user_id')
-        method : str
-            Normalization method ('median' or 'mean')
-            
-        Returns
-        -------
-        pd.Series
-            Normalized values
-        """
-        if method == "median":
-            return data.groupby(grouping_column)[value_column].transform(
-                lambda x: (x - x.median()) / median_abs_deviation(x, nan_policy='omit')
-            )
-        else:  # mean
-            return data.groupby(grouping_column)[value_column].transform(
-                lambda x: (x - x.mean()) / x.std()
-            )
-    
-    @staticmethod
-    def bootstrap_ci(
-        data: np.ndarray,
-        statistic: callable,
-        n_iterations: int = 1000,
-        ci_level: float = 0.95
-    ) -> Tuple[float, float]:
-        """
-        Calculate bootstrapped confidence intervals.
-        
-        Parameters
-        ----------
-        data : np.ndarray
-            Data to bootstrap
-        statistic : callable
-            Statistical function to apply
-        n_iterations : int
-            Number of bootstrap iterations
-        ci_level : float
-            Confidence interval level (0-1)
-            
-        Returns
-        -------
-        Tuple[float, float]
-            Lower and upper confidence bounds
-        """
-        if len(data) == 0:
-            return np.nan, np.nan
-            
-        try:
-            bootstrap_stats = []
-            for _ in range(n_iterations):
-                sample = np.random.choice(data, size=len(data), replace=True)
-                bootstrap_stats.append(statistic(sample))
-            
-            ci_lower = np.percentile(bootstrap_stats, (1 - ci_level) / 2 * 100)
-            ci_upper = np.percentile(bootstrap_stats, (1 + ci_level) / 2 * 100)
-            
-            return ci_lower, ci_upper
-            
-        except Exception as e:
-            logger.warning(f"Bootstrap failed: {str(e)}")
-            return np.nan, np.nan
-    
-    @staticmethod
-    def robust_regression(
-        X: np.ndarray,
-        y: np.ndarray,
-        method: str = "huber"
-    ) -> Tuple[float, float, float]:
-        """
-        Perform robust regression resistant to outliers.
-        
-        Parameters
-        ----------
-        X : np.ndarray
-            Predictor variables
-        y : np.ndarray
-            Target variable
-        method : str
-            Robust regression method
-            
-        Returns
-        -------
-        Tuple[float, float, float]
-            Slope, intercept, and robust R²
-        """
-        from sklearn.linear_model import HuberRegressor, RANSACRegressor
-        
-        if method == "huber":
-            model = HuberRegressor()
-        else:  # RANSAC
-            model = RANSACRegressor()
-            
-        # Ensure 2D array for X
-        if X.ndim == 1:
-            X = X.reshape(-1, 1)
-            
-        model.fit(X, y)
-        
-        # Calculate robust R² using median absolute deviation
-        y_pred = model.predict(X)
-        residuals = y - y_pred
-        mad_residuals = median_abs_deviation(residuals, nan_policy='omit')
-        mad_y = median_abs_deviation(y, nan_policy='omit')
-        epsilon = 1e-10  # Small value to prevent division by zero
-        r2 = 1 - (mad_residuals / (mad_y + epsilon))**2
-        
-        if hasattr(model, 'coef_'):
-            slope = model.coef_[0]
-        else:
-            slope = model.estimator_.coef_[0]
-            
-        if hasattr(model, 'intercept_'):
-            intercept = model.intercept_
-        else:
-            intercept = model.estimator_.intercept_
-            
-        return slope, intercept, r2
-
-def analyze_typing_speed_differences(
-    data: pd.DataFrame,
-    config: dict
-) -> Dict[str, Any]:
-    """
-    Analyze typing speed differences and their distribution within participants.
-    
-    Parameters
-    ----------
-    data : pd.DataFrame
-        Trial data with typing times
-    config : dict
-        Analysis configuration
-        
-    Returns
-    -------
-    Dict[str, Any]
-        Analysis results including:
-        - Per-participant distribution statistics
-        - Overall distribution characteristics
-        - Bootstrapped confidence intervals
-    """
-    results = {}
-    stats = RobustStatistics()
-    
-    # Calculate speed differences
-    data = data.copy()
-    data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
-    data['speed_diff_norm'] = stats.normalize_within_participant(
-        data, 'speed_diff', method=config['analysis']['normalize_method']
-    )
-    
-    # Analyze per participant
-    participant_stats = []
-    
-    for user_id, user_data in data.groupby('user_id'):
-        if len(user_data) < config['analysis']['min_trials_per_participant']:
-            continue
-            
-        speed_diffs = user_data['speed_diff'].values
-        
-        # Calculate robust statistics
-        participant_stats.append({
-            'user_id': user_id,
-            'n_trials': len(speed_diffs),
-            'median_diff': np.median(speed_diffs),
-            'mad_diff': median_abs_deviation(speed_diffs, nan_policy='omit'),
-            'lower_ci': stats.bootstrap_ci(speed_diffs, np.median)[0],
-            'upper_ci': stats.bootstrap_ci(speed_diffs, np.median)[1],
-            'prop_faster': (speed_diffs < 0).mean()
-        })
-    
-    results['participant_stats'] = pd.DataFrame(participant_stats)
-    
-    # Aggregate statistics
-    results['overall'] = {
-        'n_participants': len(results['participant_stats']),
-        'median_of_medians': results['participant_stats']['median_diff'].median(),
-        'mad_of_medians': median_abs_deviation(
-            results['participant_stats']['median_diff'], 
-            nan_policy='omit'
-        ),
-        'participant_ci': stats.bootstrap_ci(
-            results['participant_stats']['median_diff'],
-            np.median
-        )
-    }
-    
-    return results
-
-def analyze_participant_choice_patterns(
-    data: pd.DataFrame,
-    config: dict
-) -> Dict[str, Any]:
-    """
-    Analyze how typing speed predicts choices within each participant.
-    
-    Parameters
-    ----------
-    data : pd.DataFrame
-        Trial data with choices and typing times
-    config : dict
-        Analysis configuration
-        
-    Returns
-    -------
-    Dict[str, Any]
-        Analysis results including:
-        - Per-participant prediction accuracy
-        - Speed threshold effects
-        - Choice consistency measures
-    """
-    results = {}
-    stats = RobustStatistics()
-    
-    # Prepare analysis data
-    data = data.copy()
-    data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
-    data['speed_predicts_choice'] = data['speed_diff'] < 0
-    
-    # Analyze per participant
-    participant_results = []
-    
-    for user_id, user_data in data.groupby('user_id'):
-        if len(user_data) < config['analysis']['min_trials_per_participant']:
-            continue
-            
-        # Split data into quintiles by speed difference magnitude
-        user_data['diff_magnitude'] = user_data['speed_diff'].abs()
-        user_data['magnitude_quintile'] = pd.qcut(
-            user_data['diff_magnitude'],
-            config['analysis']['n_quantiles'],
-            labels=False
-        )
-        
-        # Calculate accuracy by magnitude
-        quintile_accuracies = user_data.groupby('magnitude_quintile')[
-            'speed_predicts_choice'
-        ].agg(['mean', 'count'])
-        
-        participant_results.append({
-            'user_id': user_id,
-            'n_trials': len(user_data),
-            'overall_accuracy': user_data['speed_predicts_choice'].mean(),
-            'accuracy_ci': stats.bootstrap_ci(
-                user_data['speed_predicts_choice'].values,
-                np.mean
-            ),
-            'quintile_accuracies': quintile_accuracies['mean'].values,
-            'quintile_counts': quintile_accuracies['count'].values,
-            'median_speed_diff': user_data['speed_diff'].median()
-        })
-    
-    results['participant_results'] = pd.DataFrame(participant_results)
-    
-    # Calculate aggregate statistics
-    accuracies = results['participant_results']['overall_accuracy']
-    results['aggregate'] = {
-        'median_accuracy': accuracies.median(),
-        'mad_accuracy': median_abs_deviation(accuracies, nan_policy='omit'),
-        'accuracy_ci': stats.bootstrap_ci(accuracies, np.median),
-        'n_participants': len(accuracies)
-    }
-    
-    # Analyze accuracy by magnitude across participants
-    quintile_stats = []
-    for quintile in range(config['analysis']['n_quantiles']):
-        # Get quintile accuracies for all participants
-        quintile_accs = []
-        for _, row in results['participant_results'].iterrows():
-            try:
-                quintile_accs.append(row['quintile_accuracies'][quintile])
-            except (IndexError, KeyError):
-                continue
-                
-        if quintile_accs:
-            quintile_stats.append({
-                'quintile': quintile,
-                'median_accuracy': np.median(quintile_accs),
-                'mad_accuracy': median_abs_deviation(quintile_accs, nan_policy='omit'),
-                'ci': stats.bootstrap_ci(quintile_accs, np.median)
-            })
-    
-    results['magnitude_effects'] = pd.DataFrame(quintile_stats)
-    
-    return results
-
-def analyze_frequency_effects(
-    data: pd.DataFrame,
-    bigram_frequencies: Dict[str, float],
-    config: dict
-) -> Dict[str, Any]:
-    """
-    Analyze frequency effects on choices after controlling for speed.
-    
-    For each participant:
-    1. Regress out typing speed effects
-    2. Analyze frequency-choice relationship in residuals
-    3. Assess combined speed-frequency models
-    
-    Parameters
-    ----------
-    data : pd.DataFrame
-        Trial data
-    bigram_frequencies : Dict[str, float]
-        Bigram frequency dictionary
-    config : dict
-        Analysis configuration
-        
-    Returns
-    -------
-    Dict[str, Any]
-        Analysis results including:
-        - Per-participant frequency effects
-        - Residual analyses
-        - Model comparisons
-    """
-    results = {}
-    stats = RobustStatistics()
-    
-    # Calculate frequency differences
-    data = data.copy()
-    data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
-
-    # Calculate frequency transform
-    if config['analysis']['frequency_transform'] == 'log10':
-        transform = np.log10
-    else:
-        transform = lambda x: x
-        
-    # Check for missing bigrams
-    missing_bigrams = set()
-    for col in ['chosen_bigram', 'unchosen_bigram']:
-        missing = set(data[col].unique()) - set(bigram_frequencies.keys())
-        if missing:
-            missing_bigrams.update(missing)
-            logger.warning(f"Found missing bigrams in {col}: {missing}")
-    
-    # Filter out rows with missing bigrams
-    valid_bigram_mask = (
-        data['chosen_bigram'].isin(bigram_frequencies.keys()) & 
-        data['unchosen_bigram'].isin(bigram_frequencies.keys())
-    )
-    n_dropped = (~valid_bigram_mask).sum()
-    if n_dropped > 0:
-        logger.warning(f"Dropping {n_dropped} rows with missing bigram frequencies")
-    data = data[valid_bigram_mask]
-    
-    # Calculate frequency differences
-    data['freq_diff'] = data.apply(
-        lambda row: (
-            transform(bigram_frequencies[row['chosen_bigram']]) -
-            transform(bigram_frequencies[row['unchosen_bigram']])
-        ),
-        axis=1
-    )
-        
-    # Analyze per participant
-    participant_results = []
-    
-    for user_id, user_data in data.groupby('user_id'):
-        if len(user_data) < config['analysis']['min_trials_per_participant']:
-            continue
-            
-        # First regress out speed effects
-        X_speed = user_data['speed_diff'].values.reshape(-1, 1)
-        y = (user_data['speed_diff'] < 0).astype(int)
-        
-        slope, intercept, r2_speed = stats.robust_regression(X_speed, y)
-        speed_residuals = y - (slope * X_speed.ravel() + intercept)
-        
-        # Analyze frequency effects on residuals
-        X_freq = user_data['freq_diff'].values.reshape(-1, 1)
-        freq_slope, freq_intercept, r2_freq = stats.robust_regression(X_freq, speed_residuals)
-        
-        # Fit combined model
-        X_combined = np.column_stack([X_speed, X_freq])
-        y_combined = (user_data['speed_diff'] < 0).astype(int)
-        
-        combined_model = LinearRegression()
-        combined_model.fit(X_combined, y_combined)
-        
-        participant_results.append({
-            'user_id': user_id,
-            'n_trials': len(user_data),
-            'speed_r2': r2_speed,
-            'freq_r2': r2_freq,
-            'combined_r2': combined_model.score(X_combined, y_combined),
-            'speed_coef': float(combined_model.coef_[0]),
-            'freq_coef': float(combined_model.coef_[1]),
-            'relative_freq_effect': float(combined_model.coef_[1]) / float(combined_model.coef_[0])
-        })
-    
-    results['participant_results'] = pd.DataFrame(participant_results)
-    
-    # Calculate aggregate statistics
-    for measure in ['speed_r2', 'freq_r2', 'combined_r2', 'relative_freq_effect']:
-        values = results['participant_results'][measure]
-        results[f'aggregate_{measure}'] = {
-            'median': values.median(),
-            'mad': median_abs_deviation(values, nan_policy='omit'),
-            'ci': stats.bootstrap_ci(values, np.median)
-        }
-    
-    return results
-
-class VisualizationHelpers:
-    """Helper functions for creating consistent visualizations."""
-    
-    @staticmethod
-    def setup_plot_style(config: dict):
-        """Apply consistent styling to matplotlib plots."""
-        plt.style.use(config['visualization']['style'])
-        plt.rcParams['figure.figsize'] = config['visualization']['figsize']
-        plt.rcParams['figure.dpi'] = config['visualization']['dpi']
-    
-    @staticmethod
-    def add_confidence_band(x: np.ndarray, y: np.ndarray, ci: np.ndarray, 
-                          color: str, alpha: float = 0.2):
-        """Add confidence band to existing plot."""
-        plt.fill_between(x, ci[:, 0], ci[:, 1], color=color, alpha=alpha)
-
-def visualize_speed_differences(
-    results: Dict[str, Any],
-    output_dir: str,
-    config: dict
-):
-    """
-    Create visualizations of typing speed difference analyses.
-    
-    Parameters
-    ----------
-    results : Dict[str, Any]
-        Results from speed difference analysis
-    output_dir : str
-        Output directory for plots
-    config : dict
-        Visualization configuration
-    """
-    viz = VisualizationHelpers()
-    viz.setup_plot_style(config)
-    
-    # 1. Distribution of median speed differences across participants
-    plt.figure()
-    sns.histplot(
-        results['participant_stats']['median_diff'],
-        stat='density',
-        color=config['visualization']['colors']['primary']
-    )
-    plt.axvline(
-        results['overall']['median_of_medians'],
-        color=config['visualization']['colors']['secondary'],
-        linestyle='--',
-        label=f"Overall Median: {results['overall']['median_of_medians']:.1f}ms"
-    )
-    plt.xlabel('Median Speed Difference (ms)')
-    plt.ylabel('Density')
-    plt.title('Distribution of Per-Participant Median Speed Differences')
-    plt.legend()
-    plt.savefig(os.path.join(output_dir, 'speed_diff_distribution.png'))
-    plt.close()
-    
-    # Add more visualizations as needed...
-
-def visualize_choice_patterns(
-    results: Dict[str, Any],
-    output_dir: str,
-    config: dict
-):
-    """
-    Create visualizations of choice pattern analyses.
-    
-    Parameters
-    ----------
-    results : Dict[str, Any]
-        Results from choice pattern analysis
-    output_dir : str
-        Output directory for plots
-    config : dict
-        Visualization configuration
-    """
-    viz = VisualizationHelpers()
-    viz.setup_plot_style(config)
-    
-    # 1. Accuracy by speed difference magnitude
-    plt.figure()
-    magnitude_data = results['magnitude_effects']
-    plt.errorbar(
-        magnitude_data['quintile'],
-        magnitude_data['median_accuracy'],
-        yerr=[
-            magnitude_data['median_accuracy'] - magnitude_data['ci'].apply(lambda x: x[0]),
-            magnitude_data['ci'].apply(lambda x: x[1]) - magnitude_data['median_accuracy']
-        ],
-        fmt='o-',
-        color=config['visualization']['colors']['primary'],
-        capsize=5
-    )
-    plt.xlabel('Speed Difference Magnitude Quintile')
-    plt.ylabel('Choice Prediction Accuracy')
-    plt.title('Speed Difference Magnitude vs. Choice Accuracy\n(Error bars: 95% CI)')
-    plt.savefig(os.path.join(output_dir, 'accuracy_by_magnitude.png'))
-    plt.close()
-    
-    # Add more visualizations as needed...
-
-def visualize_frequency_effects(
-    results: Dict[str, Any],
-    output_dir: str,
-    config: dict
-):
-    """
-    Create visualizations of frequency effect analyses.
-    
-    Parameters
-    ----------
-    results : Dict[str, Any]
-        Results from frequency effect analysis
-    output_dir : str
-        Output directory for plots
-    config : dict
-        Visualization configuration
-    """
-    viz = VisualizationHelpers()
-    viz.setup_plot_style(config)
-    
-    # 1. Model comparison plot
-    plt.figure()
-    model_results = results['participant_results']
-    
-    plt.boxplot(
-        [model_results['speed_r2'], 
-         model_results['freq_r2'], 
-         model_results['combined_r2']],
-        tick_labels=['Speed Only', 'Frequency Only', 'Combined'],
-        showfliers=False
-    )
-    plt.ylabel('R² Value')
-    plt.title('Model Comparison Across Participants')
-    plt.savefig(os.path.join(output_dir, 'model_comparison.png'))
-    plt.close()
-    
-    # Add more visualizations as needed...
-
-def generate_analysis_report(
-    speed_results: Dict[str, Any],
-    choice_results: Dict[str, Any],
-    frequency_results: Dict[str, Any],
-    output_path: str
-):
-    """
-    Generate comprehensive analysis report.
-    
-    Parameters
-    ----------
-    speed_results : Dict[str, Any]
-        Results from speed difference analysis
-    choice_results : Dict[str, Any]
-        Results from choice pattern analysis
-    frequency_results : Dict[str, Any]
-        Results from frequency effect analysis
-    output_path : str
-        Path for saving report
-    """
-    report_lines = [
-        "Bigram Typing Analysis Report",
-        "===========================\n",
-        
-        "1. Speed Difference Analysis",
-        "--------------------------",
-        f"Number of participants: {speed_results['overall']['n_participants']}",
-        f"Median speed difference: {speed_results['overall']['median_of_medians']:.1f}ms",
-        f"MAD of speed differences: {speed_results['overall']['mad_of_medians']:.1f}ms",
-        f"95% CI: [{speed_results['overall']['participant_ci'][0]:.1f}, "
-        f"{speed_results['overall']['participant_ci'][1]:.1f}]ms\n",
-        
-        "2. Choice Pattern Analysis",
-        "------------------------",
-        f"Median prediction accuracy: {choice_results['aggregate']['median_accuracy']:.1%}",
-        f"MAD of accuracies: {choice_results['aggregate']['mad_accuracy']:.1%}",
-        f"95% CI: [{choice_results['aggregate']['accuracy_ci'][0]:.1%}, "
-        f"{choice_results['aggregate']['accuracy_ci'][1]:.1%}]\n",
-        
-        "3. Frequency Effect Analysis",
-        "--------------------------",
-        f"Speed-only R² (median): {frequency_results['aggregate_speed_r2']['median']:.3f}",
-        f"Combined model R² (median): {frequency_results['aggregate_combined_r2']['median']:.3f}",
-        f"Relative frequency effect: {frequency_results['aggregate_relative_freq_effect']['median']:.3f}",
-        
-        "\nDetailed Statistics",
-        "------------------"
-    ]
-    
-    # Add detailed statistics as needed...
-    
-    with open(output_path, 'w') as f:
-        f.write('\n'.join(report_lines))
-
-def setup_output_directories(config: dict) -> Dict[str, str]:
-    """
-    Create output directory structure.
-    
-    Parameters
-    ----------
-    config : dict
-        Configuration containing output paths
-        
-    Returns
-    -------
-    Dict[str, str]
-        Mapping of analysis types to output directories
-    """
-    output_dirs = {}
-    base_dir = Path(config['output']['base_dir'])
-    
-    for analysis_type, subdir in config['output']['subdirs'].items():
-        full_path = base_dir / subdir
-        full_path.mkdir(parents=True, exist_ok=True)
-        output_dirs[analysis_type] = str(full_path)
-        
-    return output_dirs
-
-def run_analysis_pipeline(config_path: str = "config.yaml") -> Dict[str, Any]:
-    """
-    Run complete analysis pipeline.
-    
-    Parameters
-    ----------
-    config_path : str
-        Path to configuration file
-        
-    Returns
-    -------
-    Dict[str, Any]
-        Complete analysis results
-    """
-    try:
-        # Load configuration and setup
-        config = load_config(config_path)
-        output_dirs = setup_output_directories(config)
-        logger.info("Configuration loaded and output directories created")
-        
-        # Load and validate data using path from config
-        data_path = os.path.join(
-            config['data']['input_dir'],
-            config['data']['filtered_data_file']
-        )
-        data = load_and_validate_data(data_path)
-        logger.info(f"Loaded {len(data)} trials from {data['user_id'].nunique()} participants")
-        
-        # Create bigram frequency dictionary
-        bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
-        
-        # Run analyses
-        logger.info("Starting speed difference analysis...")
-        speed_results = analyze_typing_speed_differences(data, config)
-        
-        logger.info("Starting choice pattern analysis...")
-        choice_results = analyze_participant_choice_patterns(data, config)
-        
-        logger.info("Starting frequency effect analysis...")
-        frequency_results = analyze_frequency_effects(data, bigram_freqs, config)
-        
-        # Generate visualizations
-        logger.info("Generating visualizations...")
-        visualize_speed_differences(
-            speed_results,
-            output_dirs['time_analysis'],
-            config
-        )
-        
-        visualize_choice_patterns(
-            choice_results,
-            output_dirs['participant_analysis'],
-            config
-        )
-        
-        visualize_frequency_effects(
-            frequency_results,
-            output_dirs['frequency_analysis'],
-            config
-        )
-        
-        # Generate report
-        logger.info("Generating analysis report...")
-        report_path = Path(output_dirs['participant_analysis']) / 'analysis_report.txt'
-        generate_analysis_report(
-            speed_results,
-            choice_results,
-            frequency_results,
-            str(report_path)
-        )
-        
-        return {
-            'speed_results': speed_results,
-            'choice_results': choice_results,
-            'frequency_results': frequency_results,
-            'output_dirs': output_dirs
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in analysis pipeline: {str(e)}")
-        raise
-
-if __name__ == "__main__":
-    # Set up argument parsing
-    import argparse
+def create_output_dirs(base_dir: str, subdirs: List[str]) -> None:
+    """Create output directories if they don't exist."""
+    for subdir in subdirs:
+        os.makedirs(os.path.join(base_dir, subdir), exist_ok=True)
+          
+def main():
+    # Parse arguments
     parser = argparse.ArgumentParser(description='Analyze bigram typing data')
     parser.add_argument('--config', default='config.yaml',
                        help='Path to configuration file')
     args = parser.parse_args()
     
     try:
-        # Run analysis pipeline with just config path
-        results = run_analysis_pipeline(args.config)
-        logger.info("Analysis completed successfully")
+        # Load configuration
+        config = load_config(args.config)
         
-        # Print key findings
-        print("\nKey Findings:")
-        print("-----------")
-        print(f"Number of participants: {results['speed_results']['overall']['n_participants']}")
-        print(f"Median prediction accuracy: "
-              f"{results['choice_results']['aggregate']['median_accuracy']:.1%}")
-        print(f"Frequency effect size: "
-              f"{results['frequency_results']['aggregate_relative_freq_effect']['median']:.3f}")
+        # Create output directories
+        output_dirs = [
+            'bigram_choice_analysis',
+            'bigram_typing_time_and_frequency_analysis'
+        ]
+        create_output_dirs(config['output']['base_dir'], output_dirs)
         
-        # Print output locations
-        print("\nOutput Locations:")
-        print("----------------")
-        for analysis_type, directory in results['output_dirs'].items():
-            print(f"{analysis_type}: {directory}")
+        # Initialize analyzer
+        analyzer = BigramAnalysis(config)
         
+        # Load data
+        data_path = os.path.join(
+            config['data']['input_dir'],
+            config['data']['filtered_data_file']
+        )
+        data = analyzer.load_and_validate_data(data_path)
+        
+        # Run analyses and generate plots
+        choice_folder = os.path.join(config['output']['base_dir'], 'bigram_choice_analysis')
+        freq_folder = os.path.join(config['output']['base_dir'], 
+                                 'bigram_typing_time_and_frequency_analysis')
+        
+        logger.info("Analyzing typing times and slider values...")
+        choice_results = analyzer.analyze_typing_times_slider_values(data, choice_folder)
+        
+        logger.info("Analyzing frequency-typing relationship...")
+        freq_results = analyzer.analyze_frequency_typing_relationship(data, freq_folder)
+        
+        # Log results summary
+        logger.info("\nAnalysis Summary:")
+        logger.info(f"Processed {len(data)} trials from {data['user_id'].nunique()} participants")
+        logger.info(f"Generated plots in {config['output']['base_dir']}")
+        
+        logger.info("\nFrequency-Typing Relationship:")
+        logger.info(f"Raw correlation: {freq_results['raw_correlation']['coefficient']:.3f} "
+                   f"(p = {freq_results['raw_correlation']['p_value']:.3e})")
+        logger.info(f"Normalized correlation: {freq_results['normalized_correlation']['coefficient']:.3f} "
+                   f"(p = {freq_results['normalized_correlation']['p_value']:.3e})")
+
+        # Speed choice analysis
+        logger.info("Analyzing speed choice prediction...")
+        speed_choice_folder = os.path.join(config['output']['base_dir'], 'speed_choice_analysis')
+        os.makedirs(speed_choice_folder, exist_ok=True)
+        prediction_results = analyzer.analyze_speed_choice_prediction(data, speed_choice_folder)
+
+        logger.info(f"\nSpeed Choice Prediction Results:")
+        logger.info(f"Overall accuracy: {prediction_results['overall_accuracy']:.1%}")
+
     except Exception as e:
         logger.error(f"Analysis failed: {str(e)}")
         raise
+
+if __name__ == "__main__":
+    main()
