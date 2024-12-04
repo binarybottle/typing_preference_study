@@ -31,7 +31,7 @@ The purpose of the scripts in this repository is to determine which bigram in ea
 
   - analyze/analyze_data.py: script to analyze experiment's bigram typing data
 
-    - Input: csv tables of filtered user data
+    - Input config.yaml file with various settings, including the csv table of filtered user data.
     - Step 1. Analyze bigram typing times, frequencies, and their relationship to bigram choices. 
 
   ### process_data.py notes:

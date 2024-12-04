@@ -1,0 +1,50 @@
+# Bigram Typing Analysis Configuration
+
+# Data settings
+data:
+  input_dir: "/Users/arno.klein/Documents/osf/processed_output_all4studies_303of406participants_0improbable"
+  filtered_data_file: "tables/processed_data/filtered_bigram_data.csv"
+  
+# Analysis parameters
+analysis:
+  # Participant-level settings
+  min_trials_per_participant: 10
+  outlier_threshold_sd: 3.0
+  min_bigram_occurrences: 5
+  
+  # Statistical settings
+  bootstrap_iterations: 1000
+  confidence_level: 0.95
+  
+  # Time difference analysis
+  max_time_ms: 2000
+  normalize_method: "median"  # Options: median, mean
+  n_quantiles: 5
+  
+  # Frequency analysis
+  frequency_transform: "log10"  # Options: log10, log2, none
+  
+# Visualization settings
+visualization:
+  dpi: 300
+  figsize: [10, 6]
+  style: "default"
+  colors:
+    primary: "#1f77b4"
+    secondary: "#ff7f0e"
+    error_bars: "#2ca02c"
+  
+# Output settings
+output:
+  base_dir: "/Users/arno.klein/Documents/osf/plots"
+  subdirs:
+    participant_analysis: "participant_level"
+    time_analysis: "timing_analysis"
+    frequency_analysis: "frequency_analysis"
+    combined_analysis: "combined_effects"
+  
+# Logging settings
+logging:
+  level: "INFO"
+  file: "bigram_analysis.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

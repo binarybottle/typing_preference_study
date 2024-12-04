@@ -664,13 +664,9 @@ if __name__ == "__main__":
     easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_1_easy_choice_pair_LH.csv')
     easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
-    # Load remove pairs
-    remove_pairs_file = None #os.path.join(parent_dir, 'bigram_tables', 'bigram_remove_pairs.csv')
-    remove_pairs = None #load_bigram_pairs(remove_pairs_file)
-
     # Load, combine, and save the data
     data = load_and_combine_data(input_folder, output_tables_folder, verbose=False)
-    processed_data = process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, verbose=True)
+    processed_data = process_data(data, easy_choice_pairs, None, output_tables_folder, verbose=True)
 
     ##############################################################
     # Filter users by inconsistent or improbable choice thresholds
