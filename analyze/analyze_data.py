@@ -136,6 +136,26 @@ class BigramAnalysis:
             logger.error(f"Error loading data from {data_path}: {str(e)}")
             raise
 
+    def _apply_time_limit(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Apply maximum time limit to typing times."""
+        max_time = self.config['analysis']['max_time_ms']
+        data = data.copy()
+        
+        # Get counts before clipping
+        chosen_clipped = len(data[data['chosen_bigram_time'] > max_time])
+        unchosen_clipped = len(data[data['unchosen_bigram_time'] > max_time])
+        
+        # Clip chosen and unchosen times
+        data['chosen_bigram_time'] = data['chosen_bigram_time'].clip(upper=max_time)
+        data['unchosen_bigram_time'] = data['unchosen_bigram_time'].clip(upper=max_time)
+        
+        total_clipped = chosen_clipped + unchosen_clipped
+        if total_clipped > 0:
+            logger.info(f"Clipped {total_clipped} typing times ({chosen_clipped} chosen, "
+                    f"{unchosen_clipped} unchosen) to maximum of {max_time}ms")
+        
+        return data
+        
     def analyze_typing_times_slider_values(
         self,
         data: pd.DataFrame,
@@ -147,81 +167,76 @@ class BigramAnalysis:
         """
         results = {}
         
-        # Calculate speed differences
+        # Create copy and apply time limit
         data = data.copy()
+        data = self._apply_time_limit(data)
+        
+        # Calculate speed differences
         data['time_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
         data['time_diff_norm'] = self.stats.normalize_within_participant(data, 'time_diff')
         
-        # Per-participant statistics
-        participant_stats = []
-        for user_id, user_data in data.groupby('user_id', observed=True):
-            faster_chosen = (user_data['time_diff'] < 0)
-            participant_stats.append({
-                'user_id': user_id,
-                'n_trials': len(user_data),
-                'prop_faster_chosen': faster_chosen.mean(),
-                'median_diff': user_data['time_diff'].median(),
-                'mad_diff': median_abs_deviation(user_data['time_diff'], nan_policy='omit')
-            })
-        
-        results['participant_stats'] = pd.DataFrame(participant_stats)
-        
-        # Generate original plots with enhanced statistics
-        self._plot_chosen_vs_unchosen(data, output_folder)
+        # Generate plots
+        self._plot_chosen_vs_unchosen_scatter(data, output_folder)
         self._plot_time_diff_slider(data, output_folder)
         self._plot_time_diff_histograms(data, output_folder)
         
+        # Generate overlaid histogram plots
+        self._plot_overlaid_time_histograms(data, output_folder, 'raw_')
+        self._plot_overlaid_time_histograms(data, output_folder, 'normalized_')
+        
+        self._plot_chosen_vs_unchosen_scatter(data, output_folder)
+
         return results
 
-    def _plot_chosen_vs_unchosen(
+    def _plot_chosen_vs_unchosen_scatter(
         self,
         data: pd.DataFrame,
         output_folder: str,
-        filename: str = 'chosen_vs_unchosen_times.png'
+        filename: str = 'chosen_vs_unchosen_times_scatter_regression.png'
     ):
-        """Create boxplot comparing chosen vs unchosen typing times."""
-        plt.figure(figsize=(10, 6))
+        """Create scatter plot comparing chosen vs unchosen median typing times."""
+        plt.figure(figsize=(10, 8))
         
-        # Calculate per-participant statistics
-        chosen_stats = []
-        unchosen_stats = []
+        # Calculate median times for each bigram pair
+        scatter_data = data.groupby('bigram_pair').agg(
+            chosen_median=('chosen_bigram_time', 'median'),
+            unchosen_median=('unchosen_bigram_time', 'median')
+        ).reset_index()
         
-        for _, user_data in data.groupby('user_id', observed=True):
-            chosen_stats.append({
-                'median': user_data['chosen_bigram_time'].median(),
-                'mad': median_abs_deviation(user_data['chosen_bigram_time'], nan_policy='omit')
-            })
-            unchosen_stats.append({
-                'median': user_data['unchosen_bigram_time'].median(),
-                'mad': median_abs_deviation(user_data['unchosen_bigram_time'], nan_policy='omit')
-            })
+        # Calculate correlation
+        correlation = scatter_data['chosen_median'].corr(scatter_data['unchosen_median'])
         
-        chosen_df = pd.DataFrame(chosen_stats)
-        unchosen_df = pd.DataFrame(unchosen_stats)
-        
-        plt.boxplot(
-            [chosen_df['median'], unchosen_df['median']],
-            labels=['Chosen', 'Unchosen'],
-            medianprops=dict(color="red"),
-            showfliers=False
+        # Create scatter plot
+        plt.scatter(
+            scatter_data['chosen_median'],
+            scatter_data['unchosen_median'],
+            alpha=0.7,
+            color='#1f77b4' 
         )
         
-        plt.ylabel('Typing Time (ms)')
-        plt.title('Typing Times for Chosen vs Unchosen Bigrams')
+        # Add diagonal line
+        max_val = max(scatter_data['chosen_median'].max(), scatter_data['unchosen_median'].max())
+        plt.plot([0, max_val], [0, max_val], 'r--', alpha=0.5)
+        
+        # Add correlation text
+        plt.text(0.05, 0.8, f'Correlation: {correlation:.2f}', 
+                transform=plt.gca().transAxes)
+        
+        plt.xlabel('Chosen Bigram Median Time (ms)')
+        plt.ylabel('Unchosen Bigram Median Time (ms)')
+        plt.title('Chosen vs Unchosen Bigram Median Typing Times')
         
         plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
         plt.close()
-        logger.info(f"Saved plot to {filename}")
 
     def _plot_time_diff_slider(
         self,
         data: pd.DataFrame,
         output_folder: str,
-        filename: str = 'typing_time_diff_vs_slider_value.png'
     ):
-        """Create scatter plot of time differences vs slider values."""
+        """Create scatter plots of time differences vs slider values."""
+        # Plot normalized version
         plt.figure(figsize=(10, 6))
-        
         plt.scatter(
             data['sliderValue'],
             data['time_diff_norm'],
@@ -231,56 +246,232 @@ class BigramAnalysis:
         
         plt.xlabel('Slider Value')
         plt.ylabel('Normalized Time Difference (Chosen - Unchosen)')
-        plt.title('Typing Time Difference vs. Slider Value')
+        plt.title('Normalized Typing Time Difference vs. Slider Value')
         
-        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
+        plt.savefig(os.path.join(output_folder, 'normalized_typing_time_diff_vs_slider_value.png'), 
+                    dpi=300, bbox_inches='tight')
         plt.close()
-        logger.info(f"Saved plot to {filename}")
+        
+        # Plot raw version
+        plt.figure(figsize=(10, 6))
+        plt.scatter(
+            data['sliderValue'],
+            data['time_diff'],
+            alpha=0.5,
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        plt.xlabel('Slider Value')
+        plt.ylabel('Time Difference (ms) (Chosen - Unchosen)')
+        plt.title('Raw Typing Time Difference vs. Slider Value')
+        
+        plt.savefig(os.path.join(output_folder, 'raw_typing_time_diff_vs_slider_value.png'), 
+                    dpi=300, bbox_inches='tight')
+        plt.close()
 
     def _plot_time_diff_histograms(
         self,
         data: pd.DataFrame,
         output_folder: str,
-        filename: str = 'typing_time_diff_vs_slider_value_histograms.png'
     ):
         """Create histograms of typing time differences by slider value range."""
+        # Create both normalized and raw versions
+        for version in ['normalized', 'raw']:
+            plt.figure(figsize=(15, 10))
+            
+            # Create slider value bins
+            slider_ranges = [(-100, -60), (-60, -20), (-20, 20), (20, 60), (60, 100)]
+            fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+            axes = axes.flatten()
+            
+            # Data to plot based on version
+            plot_data = data['time_diff_norm'] if version == 'normalized' else data['time_diff']
+            ylabel = 'Normalized Time Difference' if version == 'normalized' else 'Time Difference (ms)'
+            
+            # Plot histograms for each range
+            for i, (low, high) in enumerate(slider_ranges):
+                mask = (data['sliderValue'] >= low) & (data['sliderValue'] < high)
+                subset = plot_data[mask]
+                
+                if len(subset) > 0:
+                    axes[i].hist(
+                        subset,
+                        bins=30,
+                        alpha=0.5,
+                        label=f'n={len(subset)}',
+                        color='blue'
+                    )
+                    
+                    axes[i].set_title(f'Slider Values [{low}, {high})')
+                    axes[i].set_xlabel(ylabel)
+                    axes[i].set_ylabel('Frequency')
+                    axes[i].legend()
+                    axes[i].grid(True, alpha=0.3)
+            
+            # Add all values plot in last subplot
+            axes[-1].hist(
+                plot_data,
+                bins=30,
+                alpha=0.5,
+                label=f'All values (n={len(plot_data)})',
+                color='blue'
+            )
+            axes[-1].set_title('All Slider Values')
+            axes[-1].set_xlabel(ylabel)
+            axes[-1].set_ylabel('Frequency')
+            axes[-1].legend()
+            axes[-1].grid(True, alpha=0.3)
+            
+            plt.suptitle(f'Distribution of {"Normalized" if version == "normalized" else "Raw"} '
+                        f'Time Differences by Slider Value Range', y=1.02)
+            plt.tight_layout()
+            
+            plt.savefig(os.path.join(output_folder, 
+                                    f'{version}_typing_time_diff_vs_slider_value_histograms.png'),
+                    dpi=300, bbox_inches='tight')
+            plt.close()
+
+    def _plot_overlaid_time_histograms(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename_prefix: str = ''  # Can be 'raw_' or 'normalized_'
+    ):
+        """Create histograms of chosen vs unchosen times by slider value range."""
         plt.figure(figsize=(15, 10))
-        
+            
         # Create slider value bins
         slider_ranges = [(-100, -60), (-60, -20), (-20, 20), (20, 60), (60, 100)]
         fig, axes = plt.subplots(2, 3, figsize=(15, 10))
         axes = axes.flatten()
+        
+        # Data preparation
+        data = data.copy()
+        if filename_prefix == 'normalized_':
+            # Create normalized versions of the columns
+            data['chosen_bigram_time_norm'] = self.stats.normalize_within_participant(
+                data, 'chosen_bigram_time')
+            data['unchosen_bigram_time_norm'] = self.stats.normalize_within_participant(
+                data, 'unchosen_bigram_time')
+            chosen_col = 'chosen_bigram_time_norm'
+            unchosen_col = 'unchosen_bigram_time_norm'
+            xlabel = 'Normalized Typing Time'
+        else:
+            chosen_col = 'chosen_bigram_time'
+            unchosen_col = 'unchosen_bigram_time'
+            xlabel = 'Typing Time (ms)'
         
         for i, (low, high) in enumerate(slider_ranges):
             mask = (data['sliderValue'] >= low) & (data['sliderValue'] < high)
             subset = data[mask]
             
             if len(subset) > 0:
-                # Plot normalized differences
+                # Plot chosen times
                 axes[i].hist(
-                    subset['time_diff_norm'],
+                    subset[chosen_col],
                     bins=30,
                     alpha=0.5,
-                    label='Normalized Differences',
+                    label='Chosen',
                     color='blue'
                 )
                 
+                # Plot unchosen times
+                axes[i].hist(
+                    subset[unchosen_col],
+                    bins=30,
+                    alpha=0.5,
+                    label='Unchosen',
+                    color='red'
+                )
+                
                 axes[i].set_title(f'Slider Values [{low}, {high})')
-                axes[i].set_xlabel('Normalized Time Difference')
+                axes[i].set_xlabel(xlabel)
                 axes[i].set_ylabel('Frequency')
                 axes[i].legend()
                 axes[i].grid(True, alpha=0.3)
         
-        # Remove extra subplot
-        axes[-1].remove()
+        # Add all values plot in last subplot
+        axes[-1].hist(
+            data[chosen_col],
+            bins=30,
+            alpha=0.5,
+            label=f'Chosen (n={len(data)})',
+            color='blue'
+        )
+        axes[-1].hist(
+            data[unchosen_col],
+            bins=30,
+            alpha=0.5,
+            label=f'Unchosen (n={len(data)})',
+            color='red'
+        )
+        axes[-1].set_title('All Slider Values')
+        axes[-1].set_xlabel(xlabel)
+        axes[-1].set_ylabel('Frequency')
+        axes[-1].legend()
+        axes[-1].grid(True, alpha=0.3)
         
-        plt.suptitle('Distribution of Time Differences by Slider Value Range', y=1.02)
+        plt.suptitle(f'Distribution of {"Normalized " if filename_prefix == "normalized_" else ""}Typing Times by Slider Value Range', y=1.02)
         plt.tight_layout()
+        
+        output_filename = f"{filename_prefix}overlaid_typing_times_by_slider_value_histograms.png"
+        plt.savefig(os.path.join(output_folder, output_filename), dpi=300, bbox_inches='tight')
+        plt.close()
+            
+    def _plot_chosen_vs_unchosen_scatter(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'chosen_vs_unchosen_times_scatter_regression.png'
+    ):
+        """Create scatter plot comparing chosen vs unchosen median typing times."""
+        plt.figure(figsize=(10, 8))
+        
+        # Calculate median times for each bigram pair
+        scatter_data = data.groupby('bigram_pair').agg(
+            chosen_median=('chosen_bigram_time', 'median'),
+            unchosen_median=('unchosen_bigram_time', 'median')
+        ).reset_index()
+        
+        # Calculate correlation and p-value
+        correlation, p_value = stats.pearsonr(scatter_data['chosen_median'], 
+                                            scatter_data['unchosen_median'])
+        
+        # Calculate R²
+        slope, intercept = np.polyfit(scatter_data['chosen_median'], 
+                                    scatter_data['unchosen_median'], 1)
+        y_pred = slope * scatter_data['chosen_median'] + intercept
+        r2 = 1 - (np.sum((scatter_data['unchosen_median'] - y_pred) ** 2) / 
+                np.sum((scatter_data['unchosen_median'] - scatter_data['unchosen_median'].mean()) ** 2))
+        
+        # Create scatter plot
+        plt.scatter(
+            scatter_data['chosen_median'],
+            scatter_data['unchosen_median'],
+            alpha=0.7,
+            color='#1f77b4'
+        )
+        
+        # Add diagonal line
+        max_val = max(scatter_data['chosen_median'].max(), scatter_data['unchosen_median'].max())
+        plt.plot([0, max_val], [0, max_val], 'r--', alpha=0.5)
+        
+        # Add correlation info
+        plt.text(0.05, 0.95, f'Correlation: {correlation:.3f}\np-value: {p_value:.2e}', 
+                transform=plt.gca().transAxes,
+                bbox=dict(facecolor='white', alpha=0.8))
+        
+        # Add R² in legend
+        plt.plot([], [], 'r--', label=f'R² = {r2:.3f}')
+        plt.legend()
+        
+        plt.xlabel('Chosen Bigram Median Time (ms)')
+        plt.ylabel('Unchosen Bigram Median Time (ms)')
+        plt.title('Chosen vs Unchosen Bigram Median Typing Times')
         
         plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
         plt.close()
-        logger.info(f"Saved plot to {filename}")
-
+            
     def analyze_frequency_typing_relationship(
         self,
         data: pd.DataFrame,
@@ -295,9 +486,11 @@ class BigramAnalysis:
         
         # Calculate normalized typing times per participant
         data = data.copy()
+        data = self._apply_time_limit(data)  # Unpack both return values
+        
         for col in ['chosen_bigram_time', 'unchosen_bigram_time']:
             data[f'{col}_norm'] = self.stats.normalize_within_participant(data, col)
-        
+
         # Combine chosen and unchosen data
         typing_data = pd.concat([
             pd.DataFrame({
@@ -330,6 +523,32 @@ class BigramAnalysis:
         output_folder: str
     ):
         """Create plots showing relationship between frequency and typing time."""
+        # Helper function to add regression and correlation
+        def add_regression_and_correlation(x, y):
+            # Calculate correlation and p-value
+            correlation, p_value = stats.spearmanr(x, y, nan_policy='omit')
+            
+            # Fit regression line
+            slope, intercept = np.polyfit(np.log10(x), y, 1)
+            x_line = np.logspace(np.log10(x.min()), np.log10(x.max()), 100)
+            y_line = slope * np.log10(x_line) + intercept
+            
+            # Calculate R²
+            y_pred = slope * np.log10(x) + intercept
+            r2 = 1 - (np.sum((y - y_pred) ** 2) / 
+                    np.sum((y - y.mean()) ** 2))
+            
+            # Plot regression line
+            plt.plot(x_line, y_line, 'r--', label=f'R² = {r2:.3f}')
+            
+            # Add correlation and p-value
+            plt.text(0.05, 0.90, 
+                    f'Correlation: {correlation:.3f}\np-value: {p_value:.2e}',
+                    transform=plt.gca().transAxes,
+                    bbox=dict(facecolor='white', alpha=0.8))
+            
+            plt.legend()
+        
         # 1. Raw timing plot
         plt.figure(figsize=(10, 6))
         plt.semilogx()
@@ -340,6 +559,8 @@ class BigramAnalysis:
             alpha=0.5,
             color=self.config['visualization']['colors']['primary']
         )
+        
+        add_regression_and_correlation(data['frequency'], data['time'])
         
         plt.xlabel('Bigram Frequency (log scale)')
         plt.ylabel('Typing Time (ms)')
@@ -359,13 +580,15 @@ class BigramAnalysis:
             color=self.config['visualization']['colors']['primary']
         )
         
+        add_regression_and_correlation(data['frequency'], data['time_norm'])
+        
         plt.xlabel('Bigram Frequency (log scale)')
         plt.ylabel('Normalized Typing Time')
         plt.title('Normalized Typing Times vs. Frequency')
         
         plt.savefig(os.path.join(output_folder, 'freq_vs_time_normalized.png'), dpi=300, bbox_inches='tight')
         plt.close()
-
+        
     def _calculate_frequency_timing_statistics(
         self,
         data: pd.DataFrame
@@ -398,88 +621,85 @@ class BigramAnalysis:
         }
 
     def analyze_speed_choice_prediction(
-            self,
-            data: pd.DataFrame,
-            output_folder: str
-        ) -> Dict[str, Any]:
-            """
-            Analyze how well typing speed and frequency predict bigram choices.
-            
-            Generates:
-            - speed_accuracy_by_magnitude.png
-            - speed_accuracy_by_confidence.png 
-            - user_accuracy_distribution.png
-            - speed_choice_analysis_report.txt
-            """
-            # Calculate speed differences and prediction accuracy
-            data = data.copy()
-            data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
-            data['speed_predicts_choice'] = data['speed_diff'] < 0
-            data['confidence'] = data['sliderValue'].abs()
-            
-            # Calculate normalized speed differences per participant
-            data['speed_diff_norm'] = self.stats.normalize_within_participant(data, 'speed_diff')
-            
-            # Add frequency differences if available
-            bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
-            try:
-                data['freq_diff'] = data.apply(
-                    lambda row: np.log10(bigram_freqs[row['chosen_bigram']]) - 
-                            np.log10(bigram_freqs[row['unchosen_bigram']]),
-                    axis=1
+        self,
+        data: pd.DataFrame,
+        output_folder: str
+    ) -> Dict[str, Any]:
+        """
+        Analyze how well typing speed and frequency predict bigram choices.
+        
+        Generates:
+        - speed_accuracy_by_magnitude.png
+        - speed_accuracy_by_confidence.png 
+        - user_accuracy_distribution.png
+        - speed_choice_analysis_report.txt
+        """
+        # Calculate speed differences and prediction accuracy
+        data = data.copy()
+        data = self._apply_time_limit(data)  # Unpack both return values
+        data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
+        data['speed_predicts_choice'] = data['speed_diff'] < 0
+        data['confidence'] = data['sliderValue'].abs()
+        
+        # Calculate normalized speed differences per participant
+        data['speed_diff_norm'] = self.stats.normalize_within_participant(data, 'speed_diff')
+        
+        # Add frequency differences if available
+        bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
+        missing_bigrams = set()
+        for col in ['chosen_bigram', 'unchosen_bigram']:
+            missing = set(data[col].unique()) - set(bigram_freqs.keys())
+            if missing:
+                missing_bigrams.update(missing)
+        
+        # Analyze by magnitude quintiles
+        data['speed_diff_mag'] = data['speed_diff'].abs()
+        data['magnitude_quintile'] = pd.qcut(
+            data['speed_diff_mag'],
+            5,
+            labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
+            duplicates='drop'
+        )
+        
+        # Per-participant analysis
+        participant_results = []
+        for user_id, user_data in data.groupby('user_id', observed=True):
+            if len(user_data) >= self.config['analysis'].get('min_trials_per_participant', 5):
+                speed_accuracy = user_data['speed_predicts_choice'].mean()
+                ci_lower, ci_upper = self.stats.compute_confidence_intervals(
+                    user_data['speed_predicts_choice'].values
                 )
-            except:
-                logger.warning("Could not calculate frequency differences")
-                data['freq_diff'] = np.nan
-            
-            # Analyze by magnitude quintiles
-            data['speed_diff_mag'] = data['speed_diff'].abs()
-            data['magnitude_quintile'] = pd.qcut(
-                data['speed_diff_mag'],
-                5,
-                labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
-                duplicates='drop'
-            )
-            
-            # Per-participant analysis
-            participant_results = []
-            for user_id, user_data in data.groupby('user_id', observed=True):
-                if len(user_data) >= self.config['analysis'].get('min_trials_per_participant', 5):
-                    speed_accuracy = user_data['speed_predicts_choice'].mean()
-                    ci_lower, ci_upper = self.stats.compute_confidence_intervals(
-                        user_data['speed_predicts_choice'].values
-                    )
-                    
-                    # Calculate accuracy by magnitude for this participant
-                    mag_accuracies = user_data.groupby('magnitude_quintile', observed=True)[
-                        'speed_predicts_choice'
-                    ].mean()
-                    
-                    participant_results.append({
-                        'user_id': user_id,
-                        'n_trials': len(user_data),
-                        'speed_accuracy': speed_accuracy,
-                        'ci_lower': ci_lower,
-                        'ci_upper': ci_upper,
-                        'magnitude_accuracies': mag_accuracies.to_dict()
-                    })
-            
-            results = {
-                'participant_results': participant_results,
-                'overall_accuracy': data['speed_predicts_choice'].mean(),
-                'n_participants': len(participant_results),
-                'n_trials': len(data)
-            }
-            
-            # Generate plots
-            self._plot_accuracy_by_magnitude(data, output_folder)
-            self._plot_accuracy_by_confidence(data, output_folder)
-            self._plot_user_accuracy_distribution(participant_results, output_folder)
-            
-            # Generate report
-            self._generate_prediction_report(results, output_folder)
-            
-            return results
+                
+                # Calculate accuracy by magnitude for this participant
+                mag_accuracies = user_data.groupby('magnitude_quintile', observed=True)[
+                    'speed_predicts_choice'
+                ].mean()
+                
+                participant_results.append({
+                    'user_id': user_id,
+                    'n_trials': len(user_data),
+                    'speed_accuracy': speed_accuracy,
+                    'ci_lower': ci_lower,
+                    'ci_upper': ci_upper,
+                    'magnitude_accuracies': mag_accuracies.to_dict()
+                })
+        
+        results = {
+            'participant_results': participant_results,
+            'overall_accuracy': data['speed_predicts_choice'].mean(),
+            'n_participants': len(participant_results),
+            'n_trials': len(data)
+        }
+        
+        # Generate plots
+        self._plot_accuracy_by_magnitude(data, output_folder)
+        self._plot_accuracy_by_confidence(data, output_folder)
+        self._plot_user_accuracy_distribution(participant_results, output_folder)
+        
+        # Generate report
+        self._generate_prediction_report(results, output_folder)
+        
+        return results
 
     def _plot_accuracy_by_magnitude(
         self,
@@ -614,34 +834,34 @@ class BigramAnalysis:
         plt.close()
 
     def _generate_prediction_report(
-            self,
-            results: Dict[str, Any],
-            output_folder: str,
-            filename: str = 'speed_choice_analysis_report.txt'
-        ):
-            """Generate comprehensive analysis report."""
-            report_lines = [
-                "Speed as Choice Proxy Analysis Report",
-                "================================\n",
-                
-                f"Number of participants: {results['n_participants']}",
-                f"Total trials analyzed: {results['n_trials']}",
-                f"Overall prediction accuracy: {results['overall_accuracy']:.1%}\n",
-                
-                "Per-Participant Statistics:",
-                "------------------------"
-            ]
+        self,
+        results: Dict[str, Any],
+        output_folder: str,
+        filename: str = 'speed_choice_analysis_report.txt'
+    ):
+        """Generate comprehensive analysis report."""
+        report_lines = [
+            "Speed as Choice Proxy Analysis Report",
+            "================================\n",
             
-            accuracies = [p['speed_accuracy'] for p in results['participant_results']]
-            report_lines.extend([
-                f"Mean accuracy: {np.mean(accuracies):.1%}",
-                f"Median accuracy: {np.median(accuracies):.1%}",
-                f"Std deviation: {np.std(accuracies):.1%}",
-                f"Range: [{min(accuracies):.1%}, {max(accuracies):.1%}]"
-            ])
+            f"Number of participants: {results['n_participants']}",
+            f"Total trials analyzed: {results['n_trials']}",
+            f"Overall prediction accuracy: {results['overall_accuracy']:.1%}\n",
             
-            with open(os.path.join(output_folder, filename), 'w') as f:
-                f.write('\n'.join(report_lines))
+            "Per-Participant Statistics:",
+            "------------------------"
+        ]
+        
+        accuracies = [p['speed_accuracy'] for p in results['participant_results']]
+        report_lines.extend([
+            f"Mean accuracy: {np.mean(accuracies):.1%}",
+            f"Median accuracy: {np.median(accuracies):.1%}",
+            f"Std deviation: {np.std(accuracies):.1%}",
+            f"Range: [{min(accuracies):.1%}, {max(accuracies):.1%}]"
+        ])
+        
+        with open(os.path.join(output_folder, filename), 'w') as f:
+            f.write('\n'.join(report_lines))
     
 def load_config(config_path: str) -> Dict[str, Any]:
     """Load configuration from YAML file."""

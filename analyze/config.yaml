@@ -17,7 +17,7 @@ analysis:
   confidence_level: 0.95
   
   # Time difference analysis
-  max_time_ms: 2000
+  max_time_ms: 3000
   normalize_method: "median"  # Options: median, mean
   n_quantiles: 5
   
