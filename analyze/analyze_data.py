@@ -38,57 +38,462 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Load configuration
+with open('config.yaml', 'r') as config_file:
+    config = yaml.safe_load(config_file)  
+               
+class PlottingUtils:
+    """
+    Utility class for creating consistent visualizations across analyses.
+    
+    Handles:
+    - Common plot styling and configuration
+    - Error bar calculations
+    - Legend and annotation placement
+    - Color scheme management
+    """
+    
+    def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize plotting utilities with configuration.
+        
+        Args:
+            config: Configuration dictionary containing visualization settings
+        """
+        self.config = config
+        self.setup_style()
+        
+    def setup_style(self) -> None:
+        """Configure global matplotlib style settings."""
+        plt.style.use(self.config['visualization']['style'])
+        plt.rcParams['figure.figsize'] = self.config['visualization']['figsize']
+        plt.rcParams['figure.dpi'] = self.config['visualization']['dpi']
+        
+    def create_figure(
+        self,
+        plot_type: str
+    ) -> Tuple[plt.Figure, plt.Axes]:
+        """
+        Create a new figure with appropriate settings.
+        
+        Args:
+            plot_type: Type of plot to create (determines settings)
+            
+        Returns:
+            Tuple of (figure, axes)
+        """
+        plot_config = self.config['visualization']['plots'].get(plot_type, {})
+        figsize = plot_config.get('figsize', self.config['visualization']['figsize'])
+        
+        fig, ax = plt.subplots(figsize=figsize)
+        
+        # Only add grid for certain plot types
+        #if plot_type != 'time_diff':
+        #    ax.grid(True, alpha=plot_config.get('grid_alpha', 0.3))
+        
+        return fig, ax
+        
+    def add_error_bars(
+        self,
+        ax: plt.Axes,
+        x: np.ndarray,
+        y: np.ndarray,
+        yerr: np.ndarray,
+        plot_type: str
+    ) -> None:
+        """
+        Add error bars to an existing plot.
+        
+        Args:
+            ax: Axes to add error bars to
+            x: X-coordinates
+            y: Y-coordinates
+            yerr: Error bar values
+            plot_type: Type of plot (determines styling)
+        """
+        plot_config = self.config['visualization']['plots'].get(plot_type, {})
+        
+        ax.errorbar(
+            x, y, yerr=yerr,
+            capsize=plot_config.get('error_capsize', 5),
+            color=self.config['visualization']['colors']['error_bars'],
+            alpha=plot_config.get('error_alpha', 0.2),
+            fmt='none'
+        )
+        
+    def add_regression_line(
+        self,
+        ax: plt.Axes,
+        x: np.ndarray,
+        y: np.ndarray,
+        plot_type: str
+    ) -> Dict[str, float]:
+        """
+        Add regression line to scatter plot.
+        
+        Args:
+            ax: Axes to add line to
+            x: X values
+            y: Y values
+            plot_type: Type of plot
+            
+        Returns:
+            Dictionary containing regression statistics
+        """
+        plot_config = self.config['visualization']['plots'].get(plot_type, {})
+        
+        # Calculate regression
+        slope, intercept = np.polyfit(x, y, 1)
+        y_pred = slope * x + intercept
+        r2 = 1 - (np.sum((y - y_pred) ** 2) / np.sum((y - y.mean()) ** 2))
+        
+        # Plot regression line
+        ax.plot(
+            x, y_pred,
+            '--',
+            color=self.config['visualization']['colors']['regression'],
+            alpha=plot_config.get('regression_alpha', 0.7),
+            label=f'R² = {r2:.3f}'
+        )
+        
+        return {
+            'slope': slope,
+            'intercept': intercept,
+            'r2': r2
+        }
+        
+    def add_correlation_info(
+        self,
+        ax: plt.Axes,
+        correlation: float,
+        p_value: float,
+        plot_type: str
+    ) -> None:
+        """
+        Add correlation information to plot.
+        
+        Args:
+            ax: Axes to add information to
+            correlation: Correlation coefficient
+            p_value: P-value
+            plot_type: Type of plot
+        """
+        plot_config = self.config['visualization']['plots'].get(plot_type, {})
+        
+        # Add text box with correlation info
+        ax.text(
+            0.05, 0.95,
+            f'Correlation: {correlation:.3f}\np-value: {p_value:.3e}',
+            transform=ax.transAxes,
+            bbox=dict(
+                facecolor='white',
+                alpha=plot_config.get('confidence_alpha', 0.8)
+            )
+        )
+
 class RobustStatistics:
-    """Core statistical methods for analysis."""
+    """
+    Core statistical methods implementing robust statistical measures and analyses.
+    
+    This class provides methods for:
+    - Within-participant data normalization
+    - Confidence interval computation using bootstrap
+    - Outlier-resistant statistical calculations
+    """
     
     @staticmethod
     def normalize_within_participant(
         data: pd.DataFrame,
         value_column: str,
-        user_column: str = 'user_id'
+        user_column: str = 'user_id',
+        eps: float = 1e-10
     ) -> pd.Series:
-        """Normalize values within each participant using robust statistics."""
+        """
+        Normalize values within each participant using robust statistics.
+        
+        Uses median and median absolute deviation (MAD) for robustness against outliers:
+        normalized_value = (x - median(x)) / (MAD(x) + eps)
+        
+        Args:
+            data: DataFrame containing the data
+            value_column: Name of column to normalize
+            user_column: Name of column containing participant IDs
+            eps: Small value to prevent division by zero
+            
+        Returns:
+            Series containing normalized values
+            
+        Notes:
+            - MAD is scaled to be consistent with standard deviation for normal distribution
+            - Small epsilon value prevents division by zero for constant sequences
+        """
         return data.groupby(user_column, observed=True)[value_column].transform(
-            lambda x: (x - x.median()) / (median_abs_deviation(x, nan_policy='omit') + 1e-10)
+            lambda x: (x - x.median()) / (median_abs_deviation(x, nan_policy='omit') + eps)
         )
     
     @staticmethod
     def compute_confidence_intervals(
         values: np.ndarray,
-        confidence: float = 0.95
+        confidence: float = 0.95,
+        n_bootstrap: int = 1000
     ) -> Tuple[float, float]:
-        """Compute confidence intervals using bootstrap."""
+        """
+        Compute confidence intervals using bootstrap resampling.
+        
+        Args:
+            values: Array of values to analyze
+            confidence: Confidence level (0 to 1)
+            n_bootstrap: Number of bootstrap samples
+            
+        Returns:
+            Tuple of (lower_bound, upper_bound)
+            
+        Notes:
+            - Uses non-parametric bootstrap to avoid distribution assumptions
+            - Returns nan values if input array has less than 2 values
+            - Handles extreme confidence levels by clamping to valid percentiles
+        """
         if len(values) < 2:
             return np.nan, np.nan
         
         try:
+            # Generate bootstrap samples
             bootstrap_samples = np.random.choice(
                 values, 
-                size=(1000, len(values)), 
+                size=(n_bootstrap, len(values)), 
                 replace=True
             )
+            
+            # Calculate median for each bootstrap sample
             bootstrap_medians = np.median(bootstrap_samples, axis=1)
-            ci_lower = np.percentile(bootstrap_medians, (1 - confidence) / 2 * 100)
-            ci_upper = np.percentile(bootstrap_medians, (1 + confidence) / 2 * 100)
+            
+            # Calculate percentile-based confidence intervals
+            lower_percentile = ((1 - confidence) / 2) * 100
+            upper_percentile = (1 - (1 - confidence) / 2) * 100
+            
+            ci_lower = np.percentile(bootstrap_medians, lower_percentile)
+            ci_upper = np.percentile(bootstrap_medians, upper_percentile)
+            
             return ci_lower, ci_upper
-        except:
+            
+        except Exception as e:
+            logger.warning(f"Error computing confidence intervals: {str(e)}")
             return np.nan, np.nan
-
+        
 class BigramAnalysis:
     """Main analysis class combining legacy and enhanced approaches."""
     
     def __init__(self, config: Dict[str, Any]):
+        """
+        Initialize analysis with configuration.
+        
+        Args:
+            config: Configuration dictionary containing analysis parameters
+        """
         self.config = config
         self.stats = RobustStatistics()
-        self.setup_plotting()
+        self.plotter = PlottingUtils(config)
+
+    # Analysis functions
+
+    def analyze_typing_times_slider_values(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+    ) -> Dict[str, Any]:
+        """
+        Analyze typing times in relation to slider values.
+        Enhanced version with robust statistics.
         
-    def setup_plotting(self):
-        """Configure matplotlib plotting style."""
-        plt.style.use(self.config['visualization']['style'])
-        plt.rcParams['figure.figsize'] = self.config['visualization']['figsize']
-        plt.rcParams['figure.dpi'] = self.config['visualization']['dpi']
-    
-    def load_and_validate_data(self, data_path: str) -> pd.DataFrame:
+        Args:
+            data: DataFrame containing trial data
+            output_folder: Directory to save outputs
+            
+        Returns:
+            Dictionary containing analysis results
+        """
+        results = {}
+        
+        # Create copy and apply time limit
+        data = data.copy()
+        data = self._apply_time_limit(data)
+        
+        # Calculate speed differences and normalize
+        data['time_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
+        data['time_diff_norm'] = self.stats.normalize_within_participant(data, 'time_diff')
+        
+        # Generate plots using plotting utilities
+        try:
+            # Typing time distributions
+            self._plot_typing_times(data, output_folder)
+            
+            # Relationship between chosen and unchosen times
+            self._plot_chosen_vs_unchosen_scatter(data, output_folder)
+            
+            # Time differences vs slider values
+            self._plot_time_diff_slider(data, output_folder)
+            
+            # Histograms of time differences
+            self._plot_time_diff_histograms(data, output_folder)
+            
+            # Overlaid time histograms
+            for prefix in ['raw_', 'normalized_']:
+                self._plot_overlaid_time_histograms(data, output_folder, prefix)
+                
+        except Exception as e:
+            logger.error(f"Error generating plots: {str(e)}")
+            raise
+            
+        return results
+
+    def analyze_frequency_typing_relationship(
+        self,
+        data: pd.DataFrame,
+        output_folder: str
+    ) -> Dict[str, Any]:
+        """
+        Analyze relationship between bigram frequency and typing times.
+        
+        Args:
+            data: DataFrame containing trial data
+            output_folder: Directory to save outputs
+            
+        Returns:
+            Dictionary containing analysis results
+        """
+        # Create frequency dictionary
+        bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
+        
+        # Calculate aggregate statistics
+        bigram_stats = []
+        for bigram in set(data['chosen_bigram'].unique()) | set(data['unchosen_bigram'].unique()):
+            # Combine chosen and unchosen times
+            times = pd.concat([
+                data[data['chosen_bigram'] == bigram]['chosen_bigram_time'],
+                data[data['unchosen_bigram'] == bigram]['unchosen_bigram_time']
+            ])
+            
+            if len(times) > 0 and bigram in bigram_freqs:
+                bigram_stats.append({
+                    'bigram': bigram,
+                    'frequency': bigram_freqs[bigram],
+                    'median_time': times.median(),
+                    'min_time': times.min(),
+                    'std_time': times.std(),
+                    'n_samples': len(times)
+                })
+        
+        df_stats = pd.DataFrame(bigram_stats)
+        
+        try:
+            # Generate plots
+            self._plot_distribution(df_stats, output_folder)
+            self._plot_median_times(df_stats, output_folder)
+            self._plot_min_times(df_stats, output_folder)
+            
+            # Calculate and save statistics
+            n_groups = self.config['analysis'].get('n_quantiles', 5)
+            df_stats['freq_group'] = pd.qcut(df_stats['frequency'], n_groups, labels=False)
+            group_stats = self._calculate_group_stats(df_stats, n_groups)
+            
+            # Generate reports
+            self._save_frequency_group_timing_analysis(
+                df_stats,
+                *self._calculate_frequency_timing_statistics(df_stats),
+                group_stats,
+                output_folder
+            )
+            
+            return {
+                'n_bigrams': len(df_stats),
+                'total_instances': df_stats['n_samples'].sum(),
+                'group_stats': group_stats.to_dict('records')
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in frequency analysis: {str(e)}")
+            raise
+
+    def analyze_speed_choice_prediction(
+        self,
+        data: pd.DataFrame,
+        output_folder: str
+    ) -> Dict[str, Any]:
+        """
+        Analyze how well typing speed predicts bigram choices.
+        
+        Args:
+            data: DataFrame containing trial data
+            output_folder: Directory to save outputs
+            
+        Returns:
+            Dictionary containing prediction results
+        """
+        # Prepare data
+        data = data.copy()
+        data = self._apply_time_limit(data)
+        
+        # Calculate predictors
+        data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
+        data['speed_predicts_choice'] = data['speed_diff'] < 0
+        data['confidence'] = data['sliderValue'].abs()
+        data['speed_diff_norm'] = self.stats.normalize_within_participant(data, 'speed_diff')
+        
+        # Add frequency differences if available
+        try:
+            self._add_frequency_differences(data)
+        except Exception as e:
+            logger.warning(f"Could not add frequency differences: {str(e)}")
+        
+        # Calculate magnitude quintiles
+        data['speed_diff_mag'] = data['speed_diff'].abs()
+        data['magnitude_quintile'] = pd.qcut(
+            data['speed_diff_mag'],
+            self.config['analysis'].get('n_quantiles', 5),
+            labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
+            duplicates='drop'
+        )
+        
+        # Analyze per participant
+        participant_results = self._analyze_per_participant(
+            data, 
+            self.config['analysis'].get('min_trials_per_participant', 5)
+        )
+        
+        try:
+            # Generate plots
+            self._plot_accuracy_by_magnitude(data, output_folder)
+            self._plot_accuracy_by_confidence(data, output_folder)
+            self._plot_user_accuracy_distribution(participant_results, output_folder)
+            
+            # Generate report
+            self._generate_prediction_report(
+                {
+                    'participant_results': participant_results,
+                    'overall_accuracy': data['speed_predicts_choice'].mean(),
+                    'n_participants': len(participant_results),
+                    'n_trials': len(data)
+                },
+                output_folder
+            )
+            
+            return {
+                'overall_accuracy': data['speed_predicts_choice'].mean(),
+                'n_participants': len(participant_results),
+                'n_trials': len(data),
+                'participant_results': participant_results
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in prediction analysis: {str(e)}")
+            raise
+
+    # Data Handling Methods
+
+    def load_and_validate_data(
+        self,
+        data_path: str
+    ) -> pd.DataFrame:
         """Load and validate experiment data."""
         required_columns = [
             'user_id', 'chosen_bigram', 'unchosen_bigram',
@@ -136,7 +541,49 @@ class BigramAnalysis:
             logger.error(f"Error loading data from {data_path}: {str(e)}")
             raise
 
-    def _apply_time_limit(self, data: pd.DataFrame) -> pd.DataFrame:
+    def _add_frequency_differences(self, data: pd.DataFrame) -> None:
+        """Add frequency differences to the dataset."""
+        bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
+        data['freq_diff'] = data.apply(
+            lambda row: (
+                np.log10(bigram_freqs.get(row['chosen_bigram'], np.nan)) - 
+                np.log10(bigram_freqs.get(row['unchosen_bigram'], np.nan))
+            ),
+            axis=1
+        )
+
+    def _analyze_per_participant(
+        self,
+        data: pd.DataFrame,
+        min_trials: int
+    ) -> List[Dict[str, Any]]:
+        """Analyze prediction accuracy per participant."""
+        results = []
+        for user_id, user_data in data.groupby('user_id', observed=True):
+            if len(user_data) >= min_trials:
+                speed_accuracy = user_data['speed_predicts_choice'].mean()
+                ci_lower, ci_upper = self.stats.compute_confidence_intervals(
+                    user_data['speed_predicts_choice'].values
+                )
+                
+                mag_accuracies = user_data.groupby('magnitude_quintile', observed=True)[
+                    'speed_predicts_choice'
+                ].mean()
+                
+                results.append({
+                    'user_id': user_id,
+                    'n_trials': len(user_data),
+                    'speed_accuracy': speed_accuracy,
+                    'ci_lower': ci_lower,
+                    'ci_upper': ci_upper,
+                    'magnitude_accuracies': mag_accuracies.to_dict()
+                })
+        return results
+
+    def _apply_time_limit(
+        self,
+        data: pd.DataFrame
+    ) -> pd.DataFrame:
         """Apply maximum time limit to typing times."""
         max_time = self.config['analysis']['max_time_ms']
         data = data.copy()
@@ -155,666 +602,46 @@ class BigramAnalysis:
                     f"{unchosen_clipped} unchosen) to maximum of {max_time}ms")
         
         return data
-        
-    def analyze_typing_times_slider_values(
+
+    # Statistical Calculation Methods
+
+    def _calculate_frequency_timing_statistics(
         self,
-        data: pd.DataFrame,
-        output_folder: str,
-    ) -> Dict[str, Any]:
+        df_stats: pd.DataFrame
+    ) -> Tuple[float, float, float]:
         """
-        Analyze typing times in relation to slider values.
-        Enhanced version of original analysis with robust statistics.
+        Calculate correlation and regression statistics for frequency-timing relationship.
+        
+        Args:
+            df_stats: DataFrame containing per-bigram statistics
+            
+        Returns:
+            Tuple of (correlation, p_value, r_squared)
         """
-        results = {}
-        
-        # Create copy and apply time limit
-        data = data.copy()
-        data = self._apply_time_limit(data)
-        
-        # Calculate speed differences
-        data['time_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
-        data['time_diff_norm'] = self.stats.normalize_within_participant(data, 'time_diff')
-        
-        # Generate plots
-        self._plot_typing_times(data, output_folder)
-        self._plot_chosen_vs_unchosen_scatter(data, output_folder)
-        self._plot_time_diff_slider(data, output_folder)
-        self._plot_time_diff_histograms(data, output_folder)
-        
-        # Generate overlaid histogram plots
-        self._plot_overlaid_time_histograms(data, output_folder, 'raw_')
-        self._plot_overlaid_time_histograms(data, output_folder, 'normalized_')
-        
-        self._plot_chosen_vs_unchosen_scatter(data, output_folder)
-
-        return results
-    
-    def _plot_typing_times(
-        self,
-        bigram_data: pd.DataFrame,
-        output_folder: str,
-        filename: str = 'bigram_times_barplot.png'
-    ):
-        """
-        Generate and save bar plot for median bigram typing times with horizontal x-axis labels.
-        """
-        # Prepare data by combining chosen and unchosen bigrams
-        plot_data = pd.concat([
-            bigram_data[['chosen_bigram', 'chosen_bigram_time']].rename(columns={'chosen_bigram': 'bigram', 'chosen_bigram_time': 'time'}),
-            bigram_data[['unchosen_bigram', 'unchosen_bigram_time']].rename(columns={'unchosen_bigram': 'bigram', 'unchosen_bigram_time': 'time'})
-        ])
-
-        # Calculate median times and Median Absolute Deviation (MAD) for each bigram
-        grouped_data = plot_data.groupby('bigram')['time']
-        median_times = grouped_data.median().sort_values()
-        mad_times = grouped_data.apply(lambda x: median_abs_deviation(x, nan_policy='omit')).reindex(median_times.index)
-
-        # Create the plot
-        plt.figure(figsize=(20, 10))
-        plt.bar(range(len(median_times)), median_times.values, yerr=mad_times.values, capsize=5, alpha=0.8)
-
-        # Add titles and labels
-        plt.title('Typing Times for Each Bigram: Median (MAD)', fontsize=16)
-        plt.xlabel('Bigram', fontsize=12)
-        plt.ylabel('Time (ms)', fontsize=12)
-
-        # Customize x-axis ticks
-        plt.xticks(range(len(median_times)), median_times.index, rotation=90, ha='center', fontsize=8)
-        plt.xlim(-0.5, len(median_times) - 0.5)
-
-        # Apply tight layout to adjust spacing
-        plt.tight_layout()
-
-        # Save the plot
-        os.makedirs(output_folder, exist_ok=True)
-        output_path = os.path.join(output_folder, filename)
-        plt.savefig(output_path, dpi=300, bbox_inches='tight')
-        #print(f"Median bigram typing times bar plot saved to: {output_path}")
-
-        # Close the plot
-        plt.close()
-        
-    def _plot_time_diff_slider(
-        self,
-        data: pd.DataFrame,
-        output_folder: str,
-    ):
-        """Create scatter plots of time differences vs slider values."""
-        # Plot normalized version
-        plt.figure(figsize=(10, 6))
-        plt.scatter(
-            data['sliderValue'],
-            data['time_diff_norm'],
-            alpha=0.5,
-            color=self.config['visualization']['colors']['primary']
-        )
-        
-        plt.xlabel('Slider Value')
-        plt.ylabel('Normalized Time Difference (Chosen - Unchosen)')
-        plt.title('Normalized Typing Time Difference vs. Slider Value')
-        
-        plt.savefig(os.path.join(output_folder, 'normalized_typing_time_diff_vs_slider_value.png'), 
-                    dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # Plot raw version
-        plt.figure(figsize=(10, 6))
-        plt.scatter(
-            data['sliderValue'],
-            data['time_diff'],
-            alpha=0.5,
-            color=self.config['visualization']['colors']['primary']
-        )
-        
-        plt.xlabel('Slider Value')
-        plt.ylabel('Time Difference (ms) (Chosen - Unchosen)')
-        plt.title('Raw Typing Time Difference vs. Slider Value')
-        
-        plt.savefig(os.path.join(output_folder, 'raw_typing_time_diff_vs_slider_value.png'), 
-                    dpi=300, bbox_inches='tight')
-        plt.close()
-
-    def _plot_time_diff_histograms(
-        self,
-        data: pd.DataFrame,
-        output_folder: str,
-    ):
-        """Create histograms of typing time differences by slider value range."""
-        # Create both normalized and raw versions
-        for version in ['normalized', 'raw']:
-            plt.figure(figsize=(15, 10))
-            
-            # Create slider value bins
-            slider_ranges = [(-100, -60), (-60, -20), (-20, 20), (20, 60), (60, 100)]
-            fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-            axes = axes.flatten()
-            
-            # Data to plot based on version
-            plot_data = data['time_diff_norm'] if version == 'normalized' else data['time_diff']
-            ylabel = 'Normalized Time Difference' if version == 'normalized' else 'Time Difference (ms)'
-            
-            # Plot histograms for each range
-            for i, (low, high) in enumerate(slider_ranges):
-                mask = (data['sliderValue'] >= low) & (data['sliderValue'] < high)
-                subset = plot_data[mask]
-                
-                if len(subset) > 0:
-                    axes[i].hist(
-                        subset,
-                        bins=30,
-                        alpha=0.5,
-                        label=f'n={len(subset)}',
-                        color='blue'
-                    )
-                    
-                    axes[i].set_title(f'Slider Values [{low}, {high})')
-                    axes[i].set_xlabel(ylabel)
-                    axes[i].set_ylabel('Frequency')
-                    axes[i].legend()
-                    axes[i].grid(True, alpha=0.3)
-            
-            # Add all values plot in last subplot
-            axes[-1].hist(
-                plot_data,
-                bins=30,
-                alpha=0.5,
-                label=f'All values (n={len(plot_data)})',
-                color='blue'
-            )
-            axes[-1].set_title('All Slider Values')
-            axes[-1].set_xlabel(ylabel)
-            axes[-1].set_ylabel('Frequency')
-            axes[-1].legend()
-            axes[-1].grid(True, alpha=0.3)
-            
-            plt.suptitle(f'Distribution of {"Normalized" if version == "normalized" else "Raw"} '
-                        f'Time Differences by Slider Value Range', y=1.02)
-            plt.tight_layout()
-            
-            plt.savefig(os.path.join(output_folder, 
-                                    f'{version}_typing_time_diff_vs_slider_value_histograms.png'),
-                    dpi=300, bbox_inches='tight')
-            plt.close()
-
-    def _plot_overlaid_time_histograms(
-        self,
-        data: pd.DataFrame,
-        output_folder: str,
-        filename_prefix: str = ''  # Can be 'raw_' or 'normalized_'
-    ):
-        """Create histograms of chosen vs unchosen times by slider value range."""
-        plt.figure(figsize=(15, 10))
-            
-        # Create slider value bins
-        slider_ranges = [(-100, -60), (-60, -20), (-20, 20), (20, 60), (60, 100)]
-        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-        axes = axes.flatten()
-        
-        # Data preparation
-        data = data.copy()
-        if filename_prefix == 'normalized_':
-            # Create normalized versions of the columns
-            data['chosen_bigram_time_norm'] = self.stats.normalize_within_participant(
-                data, 'chosen_bigram_time')
-            data['unchosen_bigram_time_norm'] = self.stats.normalize_within_participant(
-                data, 'unchosen_bigram_time')
-            chosen_col = 'chosen_bigram_time_norm'
-            unchosen_col = 'unchosen_bigram_time_norm'
-            xlabel = 'Normalized Typing Time'
-        else:
-            chosen_col = 'chosen_bigram_time'
-            unchosen_col = 'unchosen_bigram_time'
-            xlabel = 'Typing Time (ms)'
-        
-        for i, (low, high) in enumerate(slider_ranges):
-            mask = (data['sliderValue'] >= low) & (data['sliderValue'] < high)
-            subset = data[mask]
-            
-            if len(subset) > 0:
-                # Plot chosen times
-                axes[i].hist(
-                    subset[chosen_col],
-                    bins=30,
-                    alpha=0.5,
-                    label='Chosen',
-                    color='blue'
-                )
-                
-                # Plot unchosen times
-                axes[i].hist(
-                    subset[unchosen_col],
-                    bins=30,
-                    alpha=0.5,
-                    label='Unchosen',
-                    color='red'
-                )
-                
-                axes[i].set_title(f'Slider Values [{low}, {high})')
-                axes[i].set_xlabel(xlabel)
-                axes[i].set_ylabel('Frequency')
-                axes[i].legend()
-                axes[i].grid(True, alpha=0.3)
-        
-        # Add all values plot in last subplot
-        axes[-1].hist(
-            data[chosen_col],
-            bins=30,
-            alpha=0.5,
-            label=f'Chosen (n={len(data)})',
-            color='blue'
-        )
-        axes[-1].hist(
-            data[unchosen_col],
-            bins=30,
-            alpha=0.5,
-            label=f'Unchosen (n={len(data)})',
-            color='red'
-        )
-        axes[-1].set_title('All Slider Values')
-        axes[-1].set_xlabel(xlabel)
-        axes[-1].set_ylabel('Frequency')
-        axes[-1].legend()
-        axes[-1].grid(True, alpha=0.3)
-        
-        plt.suptitle(f'Distribution of {"Normalized " if filename_prefix == "normalized_" else ""}Typing Times by Slider Value Range', y=1.02)
-        plt.tight_layout()
-        
-        output_filename = f"{filename_prefix}overlaid_typing_times_by_slider_value_histograms.png"
-        plt.savefig(os.path.join(output_folder, output_filename), dpi=300, bbox_inches='tight')
-        plt.close()
-            
-    def _plot_chosen_vs_unchosen_scatter(
-        self,
-        data: pd.DataFrame,
-        output_folder: str,
-        filename: str = 'chosen_vs_unchosen_times_scatter_regression.png'
-    ):
-        """Create scatter plot comparing chosen vs unchosen median typing times."""
-        plt.figure(figsize=(10, 8))
-        
-        # Calculate median times for each bigram pair
-        scatter_data = data.groupby('bigram_pair').agg(
-            chosen_median=('chosen_bigram_time', 'median'),
-            unchosen_median=('unchosen_bigram_time', 'median')
-        ).reset_index()
-        
-        # Calculate correlation and p-value
-        correlation, p_value = stats.pearsonr(scatter_data['chosen_median'], 
-                                            scatter_data['unchosen_median'])
-        
-        # Calculate R²
-        slope, intercept = np.polyfit(scatter_data['chosen_median'], 
-                                    scatter_data['unchosen_median'], 1)
-        y_pred = slope * scatter_data['chosen_median'] + intercept
-        r2 = 1 - (np.sum((scatter_data['unchosen_median'] - y_pred) ** 2) / 
-                np.sum((scatter_data['unchosen_median'] - scatter_data['unchosen_median'].mean()) ** 2))
-        
-        # Create scatter plot
-        plt.scatter(
-            scatter_data['chosen_median'],
-            scatter_data['unchosen_median'],
-            alpha=0.7,
-            color='#1f77b4'
-        )
-        
-        # Add diagonal line
-        max_val = max(scatter_data['chosen_median'].max(), scatter_data['unchosen_median'].max())
-        plt.plot([0, max_val], [0, max_val], 'r--', alpha=0.5)
-        
-        # Add correlation info
-        plt.text(0.05, 0.95, f'Correlation: {correlation:.3f}\np-value: {p_value:.2e}', 
-                transform=plt.gca().transAxes,
-                bbox=dict(facecolor='white', alpha=0.8))
-        
-        # Add R² in legend
-        plt.plot([], [], 'r--', label=f'R² = {r2:.3f}')
-        plt.legend()
-        
-        plt.xlabel('Chosen Bigram Median Time (ms)')
-        plt.ylabel('Unchosen Bigram Median Time (ms)')
-        plt.title('Chosen vs Unchosen Bigram Median Typing Times')
-        
-        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
-        plt.close()
-            
-    def analyze_frequency_typing_relationship(
-        self,
-        data: pd.DataFrame,
-        output_folder: str
-    ) -> Dict[str, Any]:
-        """
-        Analyze relationship between bigram frequency and typing times.
-        Generates distribution, median, and minimum time plots with statistics.
-        """
-        # Create frequency dictionary
-        bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
-        
-        # Calculate aggregate statistics per bigram
-        bigram_stats = []
-        for bigram in set(data['chosen_bigram'].unique()) | set(data['unchosen_bigram'].unique()):
-            # Combine chosen and unchosen times for this bigram
-            times = pd.concat([
-                data[data['chosen_bigram'] == bigram]['chosen_bigram_time'],
-                data[data['unchosen_bigram'] == bigram]['unchosen_bigram_time']
-            ])
-            
-            if len(times) > 0 and bigram in bigram_freqs:
-                bigram_stats.append({
-                    'bigram': bigram,
-                    'frequency': bigram_freqs[bigram],
-                    'median_time': times.median(),
-                    'min_time': times.min(),
-                    'std_time': times.std(),
-                    'n_samples': len(times)
-                })
-        
-        df_stats = pd.DataFrame(bigram_stats)
-        
-        # Calculate correlations and regressions
-        freq_log = np.log10(df_stats['frequency'])
-        
-        # For median times
-        median_corr, median_p = stats.spearmanr(freq_log, df_stats['median_time'])
-        median_slope, median_intercept = np.polyfit(freq_log, df_stats['median_time'], 1)
-        median_pred = median_slope * freq_log + median_intercept
-        median_r2 = 1 - (np.sum((df_stats['median_time'] - median_pred) ** 2) / 
-                        np.sum((df_stats['median_time'] - df_stats['median_time'].mean()) ** 2))
-        
-        # For minimum times
-        min_corr, min_p = stats.spearmanr(freq_log, df_stats['min_time'])
-        min_slope, min_intercept = np.polyfit(freq_log, df_stats['min_time'], 1)
-        min_pred = min_slope * freq_log + min_intercept
-        min_r2 = 1 - (np.sum((df_stats['min_time'] - min_pred) ** 2) / 
-                    np.sum((df_stats['min_time'] - df_stats['min_time'].mean()) ** 2))
-        
-        # Generate plots
-        self._plot_distribution(df_stats, output_folder)
-        self._plot_median_times(df_stats, median_corr, median_p, median_r2, output_folder)
-        self._plot_min_times(df_stats, min_corr, min_p, min_r2, output_folder)
-        
-        # Calculate additional statistics for text output
-        n_groups = 5
-        df_stats['freq_group'] = pd.qcut(df_stats['frequency'], n_groups, labels=False)
-        group_stats = self._calculate_group_stats(df_stats, n_groups)
-        
-        # Generate text reports
-        self._save_frequency_group_timing_analysis(
-            df_stats, median_corr, median_p, median_r2, group_stats, output_folder)
-        
-        logger.error(f"FIX _save_bigram_time_difference_analysis")
-        #self._save_bigram_time_difference_analysis(
-        #    data, df_stats, output_folder)
-        
-        return {
-            'median_correlation': median_corr,
-            'median_p_value': median_p,
-            'median_r2': median_r2,
-            'min_correlation': min_corr,
-            'min_p_value': min_p,
-            'min_r2': min_r2,
-            'n_bigrams': len(df_stats),
-            'total_instances': df_stats['n_samples'].sum()
-        }
-
-    def _plot_distribution(
-        self,
-        df_stats: pd.DataFrame,
-        output_folder: str,
-        filename: str = 'frequency_and_timing_distribution.png'
-    ):
-        """Create distribution plot with error bars and sample size indicators."""
-        plt.figure(figsize=(12, 8))
-        
-        # Calculate correlation and regression
         freq_log = np.log10(df_stats['frequency'])
         correlation, p_value = stats.spearmanr(freq_log, df_stats['median_time'])
         slope, intercept = np.polyfit(freq_log, df_stats['median_time'], 1)
+        pred = slope * freq_log + intercept
+        r2 = 1 - (np.sum((df_stats['median_time'] - pred) ** 2) / 
+                np.sum((df_stats['median_time'] - df_stats['median_time'].mean()) ** 2))
         
-        # Create scatter plot with sized points
-        sizes = np.clip(df_stats['n_samples'] / 10, 10, 100)  # Scale sizes
-        plt.scatter(df_stats['frequency'], df_stats['median_time'], 
-                    s=sizes, alpha=0.6, color='#1f77b4')
-        
-        # Add error bars
-        plt.errorbar(df_stats['frequency'], df_stats['median_time'],
-                    yerr=df_stats['std_time'], alpha=0.2,
-                    fmt='none', color='lightblue')
-        
-        # Add regression line
-        x_line = np.logspace(np.log10(df_stats['frequency'].min()),
-                            np.log10(df_stats['frequency'].max()), 100)
-        y_line = slope * np.log10(x_line) + intercept
-        plt.plot(x_line, y_line, 'r-', alpha=0.7)
-        
-        # Add correlation info
-        plt.text(0.05, 0.90, 
-                f'Correlation: {correlation:.3f}\np-value: {p_value:.3e}',
-                transform=plt.gca().transAxes,
-                bbox=dict(facecolor='white', alpha=0.8))
-        
-        # Add legend for sample sizes
-        legend_elements = [
-            plt.scatter([], [], s=n/10, label=f'n={n} samples', alpha=0.6)
-            for n in [10, 50, 100, 500, 1000]
-        ]
-        plt.legend(handles=legend_elements, title='Number of timing samples',
-                bbox_to_anchor=(1.05, 1), loc='upper left')
-        
-        plt.xscale('log')
-        plt.xlabel('Bigram Frequency')
-        plt.ylabel('Median Typing Time (ms)')
-        plt.title('Distribution of Typing Times vs. Frequency')
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
-        plt.close()
-
-    def _plot_median_times(
-        self,
-        df_stats: pd.DataFrame,
-        correlation: float,
-        p_value: float,
-        r2: float,
-        output_folder: str,
-        filename: str = 'frequency_and_timing_median.png'
-    ):
-        """Create median times plot with bigram labels."""
-        plt.figure(figsize=(12, 8))
-        
-        # Create scatter plot
-        plt.scatter(df_stats['frequency'], df_stats['median_time'],
-                    alpha=0.6, color='#1f77b4')
-        
-        # Add bigram labels
-        for _, row in df_stats.iterrows():
-            plt.annotate(row['bigram'],
-                        (row['frequency'], row['median_time']),
-                        xytext=(2, 2), textcoords='offset points',
-                        fontsize=8)
-        
-        # Add regression line
-        freq_log = np.log10(df_stats['frequency'])
-        slope, intercept = np.polyfit(freq_log, df_stats['median_time'], 1)
-        x_line = np.logspace(np.log10(df_stats['frequency'].min()),
-                            np.log10(df_stats['frequency'].max()), 100)
-        y_line = slope * np.log10(x_line) + intercept
-        plt.plot(x_line, y_line, 'r-', alpha=0.7, label=f'R² = {r2:.3f}')
-        
-        # Add correlation info
-        plt.text(0.05, 0.95,
-                f'Correlation: {correlation:.3f}\np-value: {p_value:.3e}',
-                transform=plt.gca().transAxes,
-                bbox=dict(facecolor='white', alpha=0.8))
-        
-        plt.xscale('log')
-        plt.xlabel('Bigram Frequency (log scale)')
-        plt.ylabel('Median Typing Time (ms)')
-        plt.title('Median Times vs. Frequency')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
-        plt.close()
-
-    def _plot_min_times(
-        self,
-        df_stats: pd.DataFrame,
-        correlation: float,
-        p_value: float,
-        r2: float,
-        output_folder: str,
-        filename: str = 'frequency_and_timing_minimum.png'
-    ):
-        """Create minimum times plot with bigram labels."""
-        plt.figure(figsize=(12, 8))
-        
-        # Create scatter plot
-        plt.scatter(df_stats['frequency'], df_stats['min_time'],
-                    alpha=0.6, color='#1f77b4')
-        
-        # Add bigram labels
-        for _, row in df_stats.iterrows():
-            plt.annotate(row['bigram'],
-                        (row['frequency'], row['min_time']),
-                        xytext=(2, 2), textcoords='offset points',
-                        fontsize=8)
-        
-        # Add regression line
-        freq_log = np.log10(df_stats['frequency'])
-        slope, intercept = np.polyfit(freq_log, df_stats['min_time'], 1)
-        x_line = np.logspace(np.log10(df_stats['frequency'].min()),
-                            np.log10(df_stats['frequency'].max()), 100)
-        y_line = slope * np.log10(x_line) + intercept
-        plt.plot(x_line, y_line, 'r-', alpha=0.7, label=f'R² = {r2:.3f}')
-        
-        # Add correlation info
-        plt.text(0.05, 0.95,
-                f'Correlation: {correlation:.3f}\np-value: {p_value:.3e}',
-                transform=plt.gca().transAxes,
-                bbox=dict(facecolor='white', alpha=0.8))
-        
-        plt.xscale('log')
-        plt.xlabel('Bigram Frequency (log scale)')
-        plt.ylabel('Minimum Typing Time (ms)')
-        plt.title('Fastest Times vs. Frequency')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
-        plt.close()
-        
-    def _plot_frequency_timing_relationship(
-        self,
-        data: pd.DataFrame,
-        output_folder: str
-    ):
-        """Create plots showing relationship between frequency and typing time."""
-        # Helper function to add regression and correlation
-        def add_regression_and_correlation(x, y):
-            # Calculate correlation and p-value
-            correlation, p_value = stats.spearmanr(x, y, nan_policy='omit')
-            
-            # Fit regression line
-            slope, intercept = np.polyfit(np.log10(x), y, 1)
-            x_line = np.logspace(np.log10(x.min()), np.log10(x.max()), 100)
-            y_line = slope * np.log10(x_line) + intercept
-            
-            # Calculate R²
-            y_pred = slope * np.log10(x) + intercept
-            r2 = 1 - (np.sum((y - y_pred) ** 2) / 
-                    np.sum((y - y.mean()) ** 2))
-            
-            # Plot regression line
-            plt.plot(x_line, y_line, 'r--', label=f'R² = {r2:.3f}')
-            
-            # Add correlation and p-value
-            plt.text(0.05, 0.90, 
-                    f'Correlation: {correlation:.3f}\np-value: {p_value:.2e}',
-                    transform=plt.gca().transAxes,
-                    bbox=dict(facecolor='white', alpha=0.8))
-            
-            plt.legend()
-        
-        # 1. Raw timing plot
-        plt.figure(figsize=(10, 6))
-        plt.semilogx()
-        
-        plt.scatter(
-            data['frequency'],
-            data['time'],
-            alpha=0.5,
-            color=self.config['visualization']['colors']['primary']
-        )
-        
-        add_regression_and_correlation(data['frequency'], data['time'])
-        
-        plt.xlabel('Bigram Frequency (log scale)')
-        plt.ylabel('Typing Time (ms)')
-        plt.title('Raw Typing Times vs. Frequency')
-        
-        plt.savefig(os.path.join(output_folder, 'freq_vs_time_raw.png'), dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        # 2. Normalized timing plot
-        plt.figure(figsize=(10, 6))
-        plt.semilogx()
-        
-        plt.scatter(
-            data['frequency'],
-            data['time_norm'],
-            alpha=0.5,
-            color=self.config['visualization']['colors']['primary']
-        )
-        
-        add_regression_and_correlation(data['frequency'], data['time_norm'])
-        
-        plt.xlabel('Bigram Frequency (log scale)')
-        plt.ylabel('Normalized Typing Time')
-        plt.title('Normalized Typing Times vs. Frequency')
-        
-        plt.savefig(os.path.join(output_folder, 'freq_vs_time_normalized.png'), dpi=300, bbox_inches='tight')
-        plt.close()
-        
-    def _calculate_frequency_timing_statistics(
-        self,
-        data: pd.DataFrame
-    ) -> Dict[str, Any]:
-        """Calculate statistics for frequency-timing relationship."""
-        # Calculate correlations
-        raw_corr = stats.spearmanr(
-            np.log10(data['frequency']),
-            data['time'],
-            nan_policy='omit'
-        )
-        
-        norm_corr = stats.spearmanr(
-            np.log10(data['frequency']),
-            data['time_norm'],
-            nan_policy='omit'
-        )
-        
-        return {
-            'raw_correlation': {
-                'coefficient': raw_corr.correlation,
-                'p_value': raw_corr.pvalue
-            },
-            'normalized_correlation': {
-                'coefficient': norm_corr.correlation,
-                'p_value': norm_corr.pvalue
-            },
-            'n_bigrams': len(data['bigram'].unique()),
-            'n_observations': len(data)
-        }
+        return correlation, p_value, r2
 
     def _calculate_group_stats(
         self,
         df_stats: pd.DataFrame,
         n_groups: int
     ) -> pd.DataFrame:
-        """Calculate statistics for frequency groups."""
+        """
+        Calculate statistics for frequency groups.
+        
+        Args:
+            df_stats: DataFrame containing per-bigram statistics
+            n_groups: Number of groups to create
+            
+        Returns:
+            DataFrame containing group statistics
+        """
         group_stats = []
         
         for group in range(n_groups):
@@ -834,6 +661,256 @@ class BigramAnalysis:
                 })
         
         return pd.DataFrame(group_stats)
+
+    def _calculate_correlation_stats(
+        self,
+        x: np.ndarray,
+        y: np.ndarray
+    ) -> Dict[str, float]:
+        """
+        Calculate correlation statistics between two arrays.
+        
+        Args:
+            x: First array of values
+            y: Second array of values
+            
+        Returns:
+            Dictionary containing correlation statistics
+        """
+        correlation, p_value = stats.spearmanr(x, y)
+        slope, intercept = np.polyfit(x, y, 1)
+        y_pred = slope * x + intercept
+        r2 = 1 - (np.sum((y - y_pred) ** 2) / np.sum((y - y.mean()) ** 2))
+        
+        return {
+            'correlation': correlation,
+            'p_value': p_value,
+            'r2': r2,
+            'slope': slope,
+            'intercept': intercept
+        }
+
+    def _calculate_user_correlations(
+        self,
+        data: pd.DataFrame,
+        min_trials: int
+    ) -> Dict[str, List[float]]:
+        """
+        Calculate per-user correlations.
+        
+        Args:
+            data: DataFrame containing user data
+            min_trials: Minimum number of trials required per user
+            
+        Returns:
+            Dictionary containing lists of user correlations
+        """
+        user_correlations = {'raw': [], 'normalized': []}
+        
+        for user_id, user_data in data.groupby('user_id', observed=True):
+            if len(user_data) >= min_trials:
+                # Calculate raw correlation
+                raw_corr = stats.spearmanr(
+                    user_data['freq_diff'],
+                    user_data['time_diff']
+                )[0]
+                user_correlations['raw'].append(raw_corr)
+                
+                # Calculate normalized correlation
+                norm_corr = stats.spearmanr(
+                    user_data['freq_diff'],
+                    user_data['time_diff_norm']
+                )[0]
+                user_correlations['normalized'].append(norm_corr)
+        
+        return user_correlations
+
+    def _calculate_correlation_stats(
+        self,
+        x: pd.Series,
+        y: pd.Series
+    ) -> Dict[str, float]:
+        """
+        Calculate correlation statistics between two series.
+        
+        Args:
+            x: First series of values
+            y: Second series of values
+            
+        Returns:
+            Dictionary containing correlation statistics
+        """
+        correlation, p_value = stats.spearmanr(x, y)
+        slope, intercept = np.polyfit(x, y, 1)
+        y_pred = slope * x + intercept
+        r2 = 1 - (np.sum((y - y_pred) ** 2) / 
+                np.sum((y - y.mean()) ** 2))
+        
+        return {
+            'correlation': correlation,
+            'p_value': p_value,
+            'r2': r2,
+            'slope': slope,
+            'intercept': intercept
+        }
+
+    # Report Generation Methods
+
+    def _save_frequency_group_timing_analysis(
+        self,
+        df_stats: pd.DataFrame,
+        correlation: float,
+        p_value: float,
+        r2: float,
+        group_stats: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'frequency_timing_analysis_results.txt'
+    ) -> None:
+        """
+        Generate comprehensive frequency-timing analysis report.
+        
+        Args:
+            df_stats: DataFrame containing bigram statistics
+            correlation: Overall correlation coefficient
+            p_value: Overall p-value
+            r2: R-squared value
+            group_stats: DataFrame containing group statistics
+            output_folder: Directory to save report
+            filename: Name of output file
+        """
+        # Perform ANOVA
+        groups = [group_data['median_time'].values 
+                for _, group_data in df_stats.groupby('freq_group', observed=True)]
+        f_stat, anova_p = stats.f_oneway(*groups)
+        
+        # Generate report content
+        report_lines = [
+            "Frequency-Timing Analysis Results",
+            "==============================\n",
+            f"Overall correlation: {correlation:.3f} (p = {p_value:.3e})",
+            f"R-squared: {r2:.3f}",
+            f"Number of bigrams: {len(df_stats)}",
+            f"Total instances: {df_stats['n_samples'].sum()}\n",
+            "ANOVA Results:",
+            f"F-statistic: {f_stat:.3f}",
+            f"p-value: {anova_p:.3e}\n",
+            "Group Analysis:"
+        ]
+        
+        # Add group statistics
+        for _, group in group_stats.iterrows():
+            report_lines.extend([
+                f"\nGroup {group['group']}:",
+                f"  Frequency range: {group['freq_range']}",
+                f"  Mean time: {group['mean_time']:.2f} ms",
+                f"  Std dev: {group['timing_std']:.2f} ms",
+                f"  Bigrams: {group['n_bigrams']}",
+                f"  Instances: {group['total_instances']}"
+            ])
+        
+        # Save report
+        with open(os.path.join(output_folder, filename), 'w') as f:
+            f.write('\n'.join(report_lines))
+
+    def _save_bigram_time_difference_analysis(
+        self,
+        data: pd.DataFrame,
+        df_stats: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'time_frequency_analysis.txt'
+    ) -> None:
+        """
+        Generate comprehensive analysis of bigram time differences and their relationship
+        with frequency differences.
+        
+        Args:
+            data: DataFrame containing trial data
+            df_stats: DataFrame containing per-bigram statistics
+            output_folder: Directory to save output
+            filename: Name of output file
+            
+        Saves analysis results including:
+        - Raw and normalized time difference correlations
+        - Per-user correlation analysis
+        - Regression statistics
+        - Magnitude analysis
+        """
+        try:
+            # Calculate raw time differences with proper error handling
+            data = data.copy()
+            data['time_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
+            data['time_diff_norm'] = self.stats.normalize_within_participant(data, 'time_diff')
+            
+            # Safely calculate frequency differences
+            bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
+            data['freq_diff'] = data.apply(
+                lambda row: (
+                    np.log10(bigram_freqs.get(row['chosen_bigram'], np.nan)) - 
+                    np.log10(bigram_freqs.get(row['unchosen_bigram'], np.nan))
+                ),
+                axis=1
+            )
+            
+            # Remove rows with missing frequency data
+            valid_data = data.dropna(subset=['freq_diff', 'time_diff', 'time_diff_norm'])
+            
+            if len(valid_data) == 0:
+                logger.warning("No valid data pairs found for time-frequency analysis")
+                return
+                
+            # Calculate correlations with error handling
+            analysis_results = {
+                'raw': self._calculate_correlation_stats(
+                    valid_data['freq_diff'], 
+                    valid_data['time_diff']
+                ),
+                'normalized': self._calculate_correlation_stats(
+                    valid_data['freq_diff'], 
+                    valid_data['time_diff_norm']
+                )
+            }
+            
+            # Per-user analysis with minimum trial threshold
+            min_trials = self.config['analysis'].get('min_trials_per_participant', 5)
+            user_correlations = self._calculate_user_correlations(
+                valid_data, 
+                min_trials
+            )
+            
+            # Generate report
+            report_lines = [
+                "Time-Frequency Difference Analysis Results",
+                "=======================================\n",
+                
+                "Raw Analysis:",
+                f"Correlation: {analysis_results['raw']['correlation']:.3f}",
+                f"P-value: {analysis_results['raw']['p_value']:.3e}",
+                f"R-squared: {analysis_results['raw']['r2']:.3f}",
+                f"Regression slope: {analysis_results['raw']['slope']:.3f}\n",
+                
+                "Normalized Analysis:",
+                f"Correlation: {analysis_results['normalized']['correlation']:.3f}",
+                f"P-value: {analysis_results['normalized']['p_value']:.3e}",
+                f"R-squared: {analysis_results['normalized']['r2']:.3f}",
+                f"Regression slope: {analysis_results['normalized']['slope']:.3f}\n",
+                
+                "User-Level Analysis:",
+                f"Number of users with {min_trials}+ trials: {len(user_correlations['raw'])}",
+                "Raw correlations:",
+                f"  Mean: {np.mean(user_correlations['raw']):.3f}",
+                f"  Std: {np.std(user_correlations['raw']):.3f}",
+                "Normalized correlations:",
+                f"  Mean: {np.mean(user_correlations['normalized']):.3f}",
+                f"  Std: {np.std(user_correlations['normalized']):.3f}"
+            ]
+            
+            # Save report
+            with open(os.path.join(output_folder, filename), 'w') as f:
+                f.write('\n'.join(report_lines))
+                
+        except Exception as e:
+            logger.error(f"Error in time difference analysis: {str(e)}")
+            raise
 
     def _save_frequency_group_timing_analysis(
         self,
@@ -912,171 +989,288 @@ class BigramAnalysis:
         with open(os.path.join(output_folder, filename), 'w') as f:
             f.write('\n'.join(report_lines))
 
-    def _save_bigram_time_difference_analysis(
+    def _generate_prediction_report(
         self,
-        data: pd.DataFrame,
-        df_stats: pd.DataFrame,
+        results: Dict[str, Any],
         output_folder: str,
-        filename: str = 'time_frequency_analysis.txt'
-    ):
-        """Generate time-frequency difference analysis report."""
-        # Calculate raw time differences
-        data = data.copy()
-        data['time_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
-        data['time_diff_norm'] = self.stats.normalize_within_participant(data, 'time_diff')
+        filename: str = 'preference_prediction_report.txt'
+    ) -> None:
+        """
+        Generate comprehensive prediction analysis report.
         
-        # Calculate frequency differences
-        bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
-        data['freq_diff'] = data.apply(
-            lambda row: np.log10(bigram_freqs[row['chosen_bigram']]) - 
-                    np.log10(bigram_freqs[row['unchosen_bigram']])
-            if row['chosen_bigram'] in bigram_freqs and row['unchosen_bigram'] in bigram_freqs
-            else np.nan,
-            axis=1
-        )
-        
-        # Calculate correlations and regressions
-        raw_corr, raw_p = stats.spearmanr(data['freq_diff'].dropna(), 
-                                        data['time_diff'].dropna())
-        norm_corr, norm_p = stats.spearmanr(data['freq_diff'].dropna(), 
-                                        data['time_diff_norm'].dropna())
-        
-        # Calculate R² values
-        raw_slope, raw_intercept = np.polyfit(data['freq_diff'].dropna(), 
-                                            data['time_diff'].dropna(), 1)
-        raw_pred = raw_slope * data['freq_diff'].dropna() + raw_intercept
-        raw_r2 = 1 - (np.sum((data['time_diff'].dropna() - raw_pred) ** 2) / 
-                    np.sum((data['time_diff'].dropna() - data['time_diff'].dropna().mean()) ** 2))
-        
-        norm_slope, norm_intercept = np.polyfit(data['freq_diff'].dropna(), 
-                                            data['time_diff_norm'].dropna(), 1)
-        norm_pred = norm_slope * data['freq_diff'].dropna() + norm_intercept
-        norm_r2 = 1 - (np.sum((data['time_diff_norm'].dropna() - norm_pred) ** 2) / 
-                    np.sum((data['time_diff_norm'].dropna() - data['time_diff_norm'].dropna().mean()) ** 2))
-        
-        # Calculate per-user correlations
-        user_raw_corrs = []
-        user_norm_corrs = []
-        for user_id, user_data in data.groupby('user_id', observed=True):
-            if len(user_data) >= 5:  # Only include users with enough data points
-                if not user_data['freq_diff'].isna().all():
-                    raw_corr_user = stats.spearmanr(user_data['freq_diff'].dropna(), 
-                                                user_data['time_diff'].dropna())[0]
-                    norm_corr_user = stats.spearmanr(user_data['freq_diff'].dropna(), 
-                                                user_data['time_diff_norm'].dropna())[0]
-                    user_raw_corrs.append(raw_corr_user)
-                    user_norm_corrs.append(norm_corr_user)
-        
-        # Generate report
+        Args:
+            results: Dictionary containing prediction results
+            output_folder: Directory to save report
+            filename: Name of output file
+        """
         report_lines = [
-            "Time-Frequency Difference Analysis Results",
-            "=======================================\n",
-            
-            "Raw Analysis:",
-            f"Correlation: {raw_corr:.3f}",
-            f"P-value: {raw_p:.3e}",
-            f"R-squared: {raw_r2:.3f}",
-            f"Regression coefficient: {raw_slope:.3f}\n",
-            
-            "Normalized Analysis:",
-            f"Correlation: {norm_corr:.3f}",
-            f"P-value: {norm_p:.3e}",
-            f"R-squared: {norm_r2:.3f}",
-            f"Regression coefficient: {norm_slope:.3f}\n",
-            
-            "User-Level Analysis:",
-            "Raw correlations:",
-            f"  Mean: {np.mean(user_raw_corrs):.3f}",
-            f"  Std: {np.std(user_raw_corrs):.3f}",
-            "Normalized correlations:",
-            f"  Mean: {np.mean(user_norm_corrs):.3f}",
-            f"  Std: {np.std(user_norm_corrs):.3f}",
-            f"Number of users: {len(user_raw_corrs)}"
+            "Speed as Choice Proxy Analysis Report",
+            "================================\n",
+            f"Number of participants: {results['n_participants']}",
+            f"Total trials analyzed: {results['n_trials']}",
+            f"Overall prediction accuracy: {results['overall_accuracy']:.1%}\n",
+            "Per-Participant Statistics:"
         ]
+        
+        accuracies = [p['speed_accuracy'] for p in results['participant_results']]
+        if accuracies:
+            report_lines.extend([
+                f"Mean accuracy: {np.mean(accuracies):.1%}",
+                f"Median accuracy: {np.median(accuracies):.1%}",
+                f"Std deviation: {np.std(accuracies):.1%}",
+                f"Range: [{min(accuracies):.1%}, {max(accuracies):.1%}]"
+            ])
         
         with open(os.path.join(output_folder, filename), 'w') as f:
             f.write('\n'.join(report_lines))
 
-    def analyze_speed_choice_prediction(
+    # Plotting Methods
+
+    def _plot_typing_times(
         self,
-        data: pd.DataFrame,
-        output_folder: str
-    ) -> Dict[str, Any]:
-        """
-        Analyze how well typing speed and frequency predict bigram choices.
+        bigram_data: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'bigram_times_barplot.png'
+    ):
+        """Generate and save bar plot for median bigram typing times."""
+        # Create figure using plotting utilities
+        fig, ax = self.plotter.create_figure('time_diff')
         
-        Generates:
-        - speed_accuracy_by_magnitude.png
-        - speed_accuracy_by_confidence.png 
-        - user_accuracy_distribution.png
-        - preference_prediction_report.txt
-        """
-        # Calculate speed differences and prediction accuracy
-        data = data.copy()
-        data = self._apply_time_limit(data)  # Unpack both return values
-        data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
-        data['speed_predicts_choice'] = data['speed_diff'] < 0
-        data['confidence'] = data['sliderValue'].abs()
-        
-        # Calculate normalized speed differences per participant
-        data['speed_diff_norm'] = self.stats.normalize_within_participant(data, 'speed_diff')
-        
-        # Add frequency differences if available
-        bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
-        missing_bigrams = set()
-        for col in ['chosen_bigram', 'unchosen_bigram']:
-            missing = set(data[col].unique()) - set(bigram_freqs.keys())
-            if missing:
-                missing_bigrams.update(missing)
-        
-        # Analyze by magnitude quintiles
-        data['speed_diff_mag'] = data['speed_diff'].abs()
-        data['magnitude_quintile'] = pd.qcut(
-            data['speed_diff_mag'],
-            5,
-            labels=['Q1', 'Q2', 'Q3', 'Q4', 'Q5'],
-            duplicates='drop'
+        # Prepare data
+        plot_data = pd.concat([
+            bigram_data[['chosen_bigram', 'chosen_bigram_time']].rename(
+                columns={'chosen_bigram': 'bigram', 'chosen_bigram_time': 'time'}),
+            bigram_data[['unchosen_bigram', 'unchosen_bigram_time']].rename(
+                columns={'unchosen_bigram': 'bigram', 'unchosen_bigram_time': 'time'})
+        ])
+
+        # Calculate statistics
+        grouped_data = plot_data.groupby('bigram')['time']
+        median_times = grouped_data.median().sort_values()
+        mad_times = grouped_data.apply(lambda x: median_abs_deviation(x, nan_policy='omit')).reindex(median_times.index)
+
+        # Create bar plot
+        bars = ax.bar(
+            range(len(median_times)), 
+            median_times.values,
+            alpha=self.config['visualization']['plots']['time_diff']['alpha']
         )
         
-        # Per-participant analysis
-        participant_results = []
-        for user_id, user_data in data.groupby('user_id', observed=True):
-            if len(user_data) >= self.config['analysis'].get('min_trials_per_participant', 5):
-                speed_accuracy = user_data['speed_predicts_choice'].mean()
-                ci_lower, ci_upper = self.stats.compute_confidence_intervals(
-                    user_data['speed_predicts_choice'].values
-                )
+        # Add error bars using plotting utilities
+        self.plotter.add_error_bars(
+            ax,
+            range(len(median_times)),
+            median_times.values,
+            mad_times.values,
+            'time_diff'
+        )
+
+        # Customize axes
+        ax.set_title('Typing Times for Each Bigram: Median (MAD)', 
+                    fontsize=self.config['visualization']['plots']['distribution']['title_fontsize'])
+        ax.set_xlabel('Bigram', 
+                     fontsize=self.config['visualization']['plots']['distribution']['label_fontsize'])
+        ax.set_ylabel('Time (ms)', 
+                     fontsize=self.config['visualization']['plots']['distribution']['label_fontsize'])
+
+        # Customize x-axis ticks
+        ax.set_xticks(range(len(median_times)))
+        ax.set_xticklabels(
+            median_times.index,
+            rotation=90,
+            ha='center',
+            fontsize=self.config['visualization']['plots']['frequency']['label_fontsize']
+        )
+        ax.set_xlim(-0.5, len(median_times) - 0.5)
+
+        plt.tight_layout()
+        
+        # Save plot
+        output_path = os.path.join(output_folder, filename)
+        plt.savefig(output_path, dpi=self.config['visualization']['dpi'], bbox_inches='tight')
+        plt.close()
+
+    def _plot_chosen_vs_unchosen_scatter(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'chosen_vs_unchosen_times_scatter_regression.png'
+    ):
+        """Create scatter plot comparing chosen vs unchosen median typing times."""
+        # Create figure using plotting utilities
+        fig, ax = self.plotter.create_figure('frequency')
+        
+        # Calculate median times for each bigram pair
+        scatter_data = data.groupby('bigram_pair').agg(
+            chosen_median=('chosen_bigram_time', 'median'),
+            unchosen_median=('unchosen_bigram_time', 'median')
+        ).reset_index()
+        
+        # Create scatter plot
+        ax.scatter(
+            scatter_data['chosen_median'],
+            scatter_data['unchosen_median'],
+            alpha=self.config['visualization']['plots']['frequency']['scatter_alpha'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        # Add regression line and get statistics
+        regression_stats = self.plotter.add_regression_line(
+            ax,
+            scatter_data['chosen_median'],
+            scatter_data['unchosen_median'],
+            'frequency'
+        )
+        
+        # Calculate and add correlation info
+        correlation, p_value = stats.pearsonr(
+            scatter_data['chosen_median'],
+            scatter_data['unchosen_median']
+        )
+        self.plotter.add_correlation_info(ax, correlation, p_value, 'frequency')
+        
+        # Add diagonal line
+        max_val = max(scatter_data['chosen_median'].max(), 
+                     scatter_data['unchosen_median'].max())
+        ax.plot([0, max_val], [0, max_val], 'r--', alpha=0.5)
+        
+        # Customize axes
+        ax.set_xlabel('Chosen Bigram Median Time (ms)')
+        ax.set_ylabel('Unchosen Bigram Median Time (ms)')
+        ax.set_title('Chosen vs Unchosen Bigram Median Typing Times')
+        
+        plt.savefig(os.path.join(output_folder, filename), 
+                   dpi=self.config['visualization']['dpi'], 
+                   bbox_inches='tight')
+        plt.close()
+
+    def _plot_time_diff_slider(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+    ):
+        """Create scatter plots of time differences vs slider values."""
+        # Plot normalized version
+        fig, ax = self.plotter.create_figure('time_diff')
+        
+        ax.scatter(
+            data['sliderValue'],
+            data['time_diff_norm'],
+            alpha=self.config['visualization']['plots']['time_diff']['alpha'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        # Add regression line and statistics
+        regression_stats = self.plotter.add_regression_line(
+            ax,
+            data['sliderValue'],
+            data['time_diff_norm'],
+            'time_diff'
+        )
+        
+        ax.set_xlabel('Slider Value')
+        ax.set_ylabel('Normalized Time Difference (Chosen - Unchosen)')
+        ax.set_title('Normalized Typing Time Difference vs. Slider Value')
+        
+        plt.savefig(
+            os.path.join(output_folder, 'normalized_typing_time_diff_vs_slider_value.png'),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+        
+        # Plot raw version
+        fig, ax = self.plotter.create_figure('time_diff')
+        
+        ax.scatter(
+            data['sliderValue'],
+            data['time_diff'],
+            alpha=self.config['visualization']['plots']['time_diff']['alpha'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        self.plotter.add_regression_line(
+            ax,
+            data['sliderValue'],
+            data['time_diff'],
+            'time_diff'
+        )
+        
+        ax.set_xlabel('Slider Value')
+        ax.set_ylabel('Time Difference (ms) (Chosen - Unchosen)')
+        ax.set_title('Raw Typing Time Difference vs. Slider Value')
+        
+        plt.savefig(
+            os.path.join(output_folder, 'raw_typing_time_diff_vs_slider_value.png'),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+
+    def _plot_time_diff_histograms(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+    ):
+        """Create histograms of typing time differences by slider value range."""
+        for version in ['normalized', 'raw']:
+            # Create slider value bins
+            slider_ranges = [(-100, -60), (-60, -20), (-20, 20), (20, 60), (60, 100)]
+            fig, axes = plt.subplots(2, 3, figsize=self.config['visualization']['plots']['distribution']['figsize'])
+            axes = axes.flatten()
+            
+            # Data to plot based on version
+            plot_data = data['time_diff_norm'] if version == 'normalized' else data['time_diff']
+            ylabel = 'Normalized Time Difference' if version == 'normalized' else 'Time Difference (ms)'
+            
+            # Plot histograms for each range
+            for i, (low, high) in enumerate(slider_ranges):
+                mask = (data['sliderValue'] >= low) & (data['sliderValue'] < high)
+                subset = plot_data[mask]
                 
-                # Calculate accuracy by magnitude for this participant
-                mag_accuracies = user_data.groupby('magnitude_quintile', observed=True)[
-                    'speed_predicts_choice'
-                ].mean()
-                
-                participant_results.append({
-                    'user_id': user_id,
-                    'n_trials': len(user_data),
-                    'speed_accuracy': speed_accuracy,
-                    'ci_lower': ci_lower,
-                    'ci_upper': ci_upper,
-                    'magnitude_accuracies': mag_accuracies.to_dict()
-                })
-        
-        results = {
-            'participant_results': participant_results,
-            'overall_accuracy': data['speed_predicts_choice'].mean(),
-            'n_participants': len(participant_results),
-            'n_trials': len(data)
-        }
-        
-        # Generate plots
-        self._plot_accuracy_by_magnitude(data, output_folder)
-        self._plot_accuracy_by_confidence(data, output_folder)
-        self._plot_user_accuracy_distribution(participant_results, output_folder)
-        
-        # Generate report
-        self._generate_prediction_report(results, output_folder)
-        
-        return results
+                if len(subset) > 0:
+                    axes[i].hist(
+                        subset,
+                        bins=self.config['visualization']['plots']['time_diff']['bins'],
+                        alpha=self.config['visualization']['plots']['time_diff']['alpha'],
+                        label=f'n={len(subset)}',
+                        color=self.config['visualization']['colors']['primary']
+                    )
+                    
+                    axes[i].set_title(f'Slider Values [{low}, {high})')
+                    axes[i].set_xlabel(ylabel)
+                    axes[i].set_ylabel('Frequency')
+                    axes[i].legend()
+                    axes[i].grid(True, alpha=self.config['visualization']['plots']['distribution']['grid_alpha'])
+            
+            # Add all values plot in last subplot
+            axes[-1].hist(
+                plot_data,
+                bins=self.config['visualization']['plots']['time_diff']['bins'],
+                alpha=self.config['visualization']['plots']['time_diff']['alpha'],
+                label=f'All values (n={len(plot_data)})',
+                color=self.config['visualization']['colors']['primary']
+            )
+            axes[-1].set_title('All Slider Values')
+            axes[-1].set_xlabel(ylabel)
+            axes[-1].set_ylabel('Frequency')
+            axes[-1].legend()
+            axes[-1].grid(True, alpha=self.config['visualization']['plots']['distribution']['grid_alpha'])
+            
+            plt.suptitle(
+                f'Distribution of {"Normalized" if version == "normalized" else "Raw"} '
+                f'Time Differences by Slider Value Range',
+                y=1.02,
+                fontsize=self.config['visualization']['plots']['distribution']['title_fontsize']
+            )
+            plt.tight_layout()
+            
+            plt.savefig(
+                os.path.join(output_folder, f'{version}_typing_time_diff_vs_slider_value_histograms.png'),
+                dpi=self.config['visualization']['dpi'],
+                bbox_inches='tight'
+            )
+            plt.close()
 
     def _plot_accuracy_by_magnitude(
         self,
@@ -1085,47 +1279,521 @@ class BigramAnalysis:
         filename: str = 'speed_accuracy_by_magnitude.png'
     ):
         """Plot prediction accuracy by speed difference magnitude."""
-        plt.figure(figsize=(10, 6))
+        fig, ax = self.plotter.create_figure('prediction')
         
         # Calculate accuracy by magnitude quintile
         accuracy_by_mag = data.groupby('magnitude_quintile', observed=True)[
             'speed_predicts_choice'
         ].agg(['mean', 'std', 'count'])
         
-        plt.errorbar(
+        # Create error bar plot
+        self.plotter.add_error_bars(
+            ax,
             range(len(accuracy_by_mag)),
             accuracy_by_mag['mean'],
-            yerr=accuracy_by_mag['std'],
-            fmt='o-',
-            capsize=5,
+            accuracy_by_mag['std'],
+            'prediction'
+        )
+        
+        ax.plot(
+            range(len(accuracy_by_mag)),
+            accuracy_by_mag['mean'],
+            'o-',
             color=self.config['visualization']['colors']['primary']
         )
         
-        plt.xlabel('Speed Difference Magnitude Quintile')
-        plt.ylabel('Prediction Accuracy')
-        plt.title('Speed Prediction Accuracy by Magnitude of Speed Difference')
-        plt.grid(True, alpha=0.3)
-        
-        # Add quintile sizes
+        # Add sample sizes
         for i, (_, row) in enumerate(accuracy_by_mag.iterrows()):
-            plt.text(i, row['mean'], f'n={int(row["count"])}', 
-                    ha='center', va='bottom')
+            ax.text(
+                i,
+                row['mean'],
+                f'n={int(row["count"])}',
+                ha='center',
+                va='bottom',
+                fontsize=self.config['visualization']['plots']['frequency']['label_fontsize']
+            )
         
-        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
+        ax.set_xlabel('Speed Difference Magnitude Quintile')
+        ax.set_ylabel('Prediction Accuracy')
+        ax.set_title('Speed Prediction Accuracy by Magnitude of Speed Difference')
+        
+        plt.savefig(
+            os.path.join(output_folder, filename),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
         plt.close()
 
+    def _plot_user_accuracy_distribution(
+        self,
+        participant_results: List[Dict[str, Any]],
+        output_folder: str,
+        filename: str = 'user_accuracy_distribution.png'
+    ):
+        """Plot distribution of per-user prediction accuracies."""
+        fig, ax = self.plotter.create_figure('prediction')
+        
+        accuracies = [p['speed_accuracy'] for p in participant_results]
+        
+        ax.hist(
+            accuracies,
+            bins=self.config['visualization']['plots']['prediction']['hist_bins'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        # Add mean line
+        mean_accuracy = np.mean(accuracies)
+        ax.axvline(
+            mean_accuracy,
+            color=self.config['visualization']['colors']['secondary'],
+            linestyle='--',
+            label=f'Mean: {mean_accuracy:.3f}'
+        )
+        
+        ax.set_xlabel('Prediction Accuracy')
+        ax.set_ylabel('Number of Participants')
+        ax.set_title('Distribution of Per-Participant Prediction Accuracies')
+        ax.legend(fontsize=self.config['visualization']['plots']['distribution']['legend_fontsize'])
+        
+        plt.savefig(
+            os.path.join(output_folder, filename),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+
+    def _plot_frequency_timing_relationship(
+        self,
+        data: pd.DataFrame,
+        output_folder: str
+    ):
+        """Create plots showing relationship between frequency and typing time."""
+        # Plot raw timing data
+        fig, ax = self.plotter.create_figure('frequency')
+        ax.set_xscale('log')
+        
+        ax.scatter(
+            data['frequency'],
+            data['time'],
+            alpha=self.config['visualization']['plots']['frequency']['scatter_alpha'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        # Add regression and correlation
+        regression_stats = self.plotter.add_regression_line(
+            ax,
+            np.log10(data['frequency']),
+            data['time'],
+            'frequency'
+        )
+        
+        correlation, p_value = stats.spearmanr(
+            np.log10(data['frequency']),
+            data['time'],
+            nan_policy='omit'
+        )
+        self.plotter.add_correlation_info(ax, correlation, p_value, 'frequency')
+        
+        ax.set_xlabel('Bigram Frequency (log scale)')
+        ax.set_ylabel('Typing Time (ms)')
+        ax.set_title('Raw Typing Times vs. Frequency')
+        
+        plt.savefig(
+            os.path.join(output_folder, 'freq_vs_time_raw.png'),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+        
+        # Plot normalized timing data
+        fig, ax = self.plotter.create_figure('frequency')
+        ax.set_xscale('log')
+        
+        ax.scatter(
+            data['frequency'],
+            data['time_norm'],
+            alpha=self.config['visualization']['plots']['frequency']['scatter_alpha'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        regression_stats = self.plotter.add_regression_line(
+            ax,
+            np.log10(data['frequency']),
+            data['time_norm'],
+            'frequency'
+        )
+        
+        correlation, p_value = stats.spearmanr(
+            np.log10(data['frequency']),
+            data['time_norm'],
+            nan_policy='omit'
+        )
+        self.plotter.add_correlation_info(ax, correlation, p_value, 'frequency')
+        
+        ax.set_xlabel('Bigram Frequency (log scale)')
+        ax.set_ylabel('Normalized Typing Time')
+        ax.set_title('Normalized Typing Times vs. Frequency')
+        
+        plt.savefig(
+            os.path.join(output_folder, 'freq_vs_time_normalized.png'),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+
+    def _plot_overlaid_time_histograms(
+        self,
+        data: pd.DataFrame,
+        output_folder: str,
+        filename_prefix: str = ''  # Can be 'raw_' or 'normalized_'
+    ) -> None:
+        """
+        Create histograms of chosen vs unchosen times by slider value range.
+        
+        Args:
+            data: DataFrame containing typing data
+            output_folder: Directory to save plot
+            filename_prefix: Prefix for output filename ('raw_' or 'normalized_')
+        """
+        fig, axes = plt.subplots(2, 3, figsize=self.config['visualization']['plots']['distribution']['figsize'])
+        axes = axes.flatten()
+        
+        # Data preparation
+        data = data.copy()
+        if filename_prefix == 'normalized_':
+            data['chosen_bigram_time_norm'] = self.stats.normalize_within_participant(
+                data, 'chosen_bigram_time')
+            data['unchosen_bigram_time_norm'] = self.stats.normalize_within_participant(
+                data, 'unchosen_bigram_time')
+            chosen_col = 'chosen_bigram_time_norm'
+            unchosen_col = 'unchosen_bigram_time_norm'
+            xlabel = 'Normalized Typing Time'
+        else:
+            chosen_col = 'chosen_bigram_time'
+            unchosen_col = 'unchosen_bigram_time'
+            xlabel = 'Typing Time (ms)'
+        
+        slider_ranges = [(-100, -60), (-60, -20), (-20, 20), (20, 60), (60, 100)]
+        
+        for i, (low, high) in enumerate(slider_ranges):
+            ax = axes[i]
+            mask = (data['sliderValue'] >= low) & (data['sliderValue'] < high)
+            subset = data[mask]
+            
+            if len(subset) > 0:
+                # Plot chosen times
+                ax.hist(
+                    subset[chosen_col],
+                    bins=self.config['visualization']['plots']['time_diff']['bins'],
+                    alpha=self.config['visualization']['plots']['time_diff']['alpha'],
+                    label='Chosen',
+                    color=self.config['visualization']['colors']['primary']
+                )
+                
+                # Plot unchosen times
+                ax.hist(
+                    subset[unchosen_col],
+                    bins=self.config['visualization']['plots']['time_diff']['bins'],
+                    alpha=self.config['visualization']['plots']['time_diff']['alpha'],
+                    label='Unchosen',
+                    color=self.config['visualization']['colors']['secondary']
+                )
+                
+                ax.set_title(f'Slider Values [{low}, {high})')
+                ax.set_xlabel(xlabel)
+                ax.set_ylabel('Frequency')
+                ax.legend()
+                ax.grid(True, alpha=self.config['visualization']['plots']['distribution']['grid_alpha'])
+        
+        # Add all values plot in last subplot
+        axes[-1].hist(
+            data[chosen_col],
+            bins=self.config['visualization']['plots']['time_diff']['bins'],
+            alpha=self.config['visualization']['plots']['time_diff']['alpha'],
+            label=f'Chosen (n={len(data)})',
+            color=self.config['visualization']['colors']['primary']
+        )
+        axes[-1].hist(
+            data[unchosen_col],
+            bins=self.config['visualization']['plots']['time_diff']['bins'],
+            alpha=self.config['visualization']['plots']['time_diff']['alpha'],
+            label=f'Unchosen (n={len(data)})',
+            color=self.config['visualization']['colors']['secondary']
+        )
+        
+        axes[-1].set_title('All Slider Values')
+        axes[-1].set_xlabel(xlabel)
+        axes[-1].set_ylabel('Frequency')
+        axes[-1].legend()
+        axes[-1].grid(True, alpha=self.config['visualization']['plots']['distribution']['grid_alpha'])
+        
+        plt.suptitle(
+            f'Distribution of {"Normalized " if filename_prefix == "normalized_" else ""}Typing Times by Slider Value Range',
+            y=1.02,
+            fontsize=self.config['visualization']['plots']['distribution']['title_fontsize']
+        )
+        plt.tight_layout()
+        
+        output_filename = f"{filename_prefix}overlaid_typing_times_by_slider_value_histograms.png"
+        plt.savefig(
+            os.path.join(output_folder, output_filename),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+
+    def _plot_distribution(
+        self,
+        df_stats: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'frequency_and_timing_distribution.png'
+    ) -> None:
+        """
+        Create distribution plot with error bars and sample size indicators.
+        
+        Args:
+            df_stats: DataFrame containing bigram statistics
+            output_folder: Directory to save plot
+            filename: Name of output file
+        """
+        fig, ax = self.plotter.create_figure('frequency')
+        
+        # Calculate correlation and regression
+        freq_log = np.log10(df_stats['frequency'])
+        stats_dict = self._calculate_correlation_stats(freq_log, df_stats['median_time'])
+        
+        # Create scatter plot with sized points
+        sizes = np.clip(df_stats['n_samples'] / 10, 10, 100)
+        ax.scatter(
+            df_stats['frequency'],
+            df_stats['median_time'],
+            s=sizes,
+            alpha=self.config['visualization']['plots']['frequency']['scatter_alpha'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        # Add error bars
+        self.plotter.add_error_bars(
+            ax,
+            df_stats['frequency'],
+            df_stats['median_time'],
+            df_stats['std_time'],
+            'frequency'
+        )
+        
+        # Create evenly spaced points for regression line in log space
+        x_log = np.linspace(freq_log.min(), freq_log.max(), 100)
+        y_pred = stats_dict['slope'] * x_log + stats_dict['intercept']
+        
+        # Convert back to linear space for plotting
+        ax.plot(
+            10**x_log,
+            y_pred,
+            '--',
+            color=self.config['visualization']['colors']['regression'],
+            alpha=self.config['visualization']['plots']['frequency']['regression_alpha'],
+            label=f'R² = {stats_dict["r2"]:.3f}'
+        )
+        
+        self.plotter.add_correlation_info(
+            ax,
+            stats_dict['correlation'],
+            stats_dict['p_value'],
+            'frequency'
+        )
+        
+        ax.set_xscale('log')
+        ax.set_xlabel('Bigram Frequency')
+        ax.set_ylabel('Median Typing Time (ms)')
+        ax.set_title('Distribution of Typing Times vs. Frequency')
+        
+        # Add legend for sample sizes
+        legend_elements = [
+            plt.scatter([], [], s=n/10, label=f'n={n} samples', alpha=0.6)
+            for n in [10, 50, 100, 500, 1000]
+        ]
+        legend_elements.append(plt.Line2D([0], [0], linestyle='--', 
+                                        color=self.config['visualization']['colors']['regression'],
+                                        label=f'R² = {stats_dict["r2"]:.3f}'))
+        
+        ax.legend(
+            handles=legend_elements,
+            title='Number of timing samples',
+            bbox_to_anchor=(1.05, 1),
+            loc='upper left'
+        )
+        
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(output_folder, filename),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+
+    def _plot_min_times(
+        self,
+        df_stats: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'frequency_and_timing_minimum.png'
+    ) -> None:
+        """
+        Create minimum times plot with bigram labels.
+        
+        Args:
+            df_stats: DataFrame containing bigram statistics
+            output_folder: Directory to save plot
+            filename: Name of output file
+        """
+        fig, ax = self.plotter.create_figure('frequency')
+        
+        # Create scatter plot
+        ax.scatter(
+            df_stats['frequency'],
+            df_stats['min_time'],
+            alpha=self.config['visualization']['plots']['frequency']['scatter_alpha'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        # Add bigram labels
+        for _, row in df_stats.iterrows():
+            ax.annotate(
+                row['bigram'],
+                (row['frequency'], row['min_time']),
+                xytext=(2, 2),
+                textcoords='offset points',
+                fontsize=self.config['visualization']['plots']['frequency']['label_fontsize']
+            )
+        
+        # Add regression line and get statistics
+        freq_log = np.log10(df_stats['frequency'])
+        stats_dict = self._calculate_correlation_stats(freq_log, df_stats['min_time'])
+        
+        # Create evenly spaced points for regression line in log space
+        x_log = np.linspace(freq_log.min(), freq_log.max(), 100)
+        y_pred = stats_dict['slope'] * x_log + stats_dict['intercept']
+        
+        # Convert back to linear space for plotting
+        ax.plot(
+            10**x_log,
+            y_pred,
+            '--',
+            color=self.config['visualization']['colors']['regression'],
+            alpha=self.config['visualization']['plots']['frequency']['regression_alpha'],
+            label=f'R² = {stats_dict["r2"]:.3f}'
+        )
+        
+        self.plotter.add_correlation_info(
+            ax,
+            stats_dict['correlation'],
+            stats_dict['p_value'],
+            'frequency'
+        )
+        
+        ax.set_xscale('log')
+        ax.set_xlabel('Bigram Frequency (log scale)')
+        ax.set_ylabel('Minimum Typing Time (ms)')
+        ax.set_title('Fastest Times vs. Frequency')
+        ax.legend()
+        
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(output_folder, filename),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+
+    def _plot_median_times(
+        self,
+        df_stats: pd.DataFrame,
+        output_folder: str,
+        filename: str = 'frequency_and_timing_median.png'
+    ) -> None:
+        """
+        Create median times plot with bigram labels.
+        
+        Args:
+            df_stats: DataFrame containing bigram statistics
+            output_folder: Directory to save plot
+            filename: Name of output file
+        """
+        fig, ax = self.plotter.create_figure('frequency')
+        
+        # Create scatter plot
+        ax.scatter(
+            df_stats['frequency'],
+            df_stats['median_time'],
+            alpha=self.config['visualization']['plots']['frequency']['scatter_alpha'],
+            color=self.config['visualization']['colors']['primary']
+        )
+        
+        # Add bigram labels
+        for _, row in df_stats.iterrows():
+            ax.annotate(
+                row['bigram'],
+                (row['frequency'], row['median_time']),
+                xytext=(2, 2),
+                textcoords='offset points',
+                fontsize=self.config['visualization']['plots']['frequency']['label_fontsize']
+            )
+        
+        # Add regression line and get statistics
+        freq_log = np.log10(df_stats['frequency'])
+        stats_dict = self._calculate_correlation_stats(freq_log, df_stats['median_time'])
+        
+        # Create evenly spaced points for regression line in log space
+        x_log = np.linspace(freq_log.min(), freq_log.max(), 100)
+        y_pred = stats_dict['slope'] * x_log + stats_dict['intercept']
+        
+        # Convert back to linear space for plotting
+        ax.plot(
+            10**x_log,  # Convert log space back to linear
+            y_pred,
+            '--',
+            color=self.config['visualization']['colors']['regression'],
+            alpha=self.config['visualization']['plots']['frequency']['regression_alpha'],
+            label=f'R² = {stats_dict["r2"]:.3f}'
+        )
+        
+        self.plotter.add_correlation_info(
+            ax,
+            stats_dict['correlation'],
+            stats_dict['p_value'],
+            'frequency'
+        )
+        
+        ax.set_xscale('log')
+        ax.set_xlabel('Bigram Frequency (log scale)')
+        ax.set_ylabel('Median Typing Time (ms)')
+        ax.set_title('Median Times vs. Frequency')
+        ax.legend()
+        
+        plt.savefig(
+            os.path.join(output_folder, filename),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+        
     def _plot_accuracy_by_confidence(
         self,
         data: pd.DataFrame,
         output_folder: str,
         filename: str = 'speed_accuracy_by_confidence.png'
-    ):
-        """Plot prediction accuracy by confidence level."""
-        plt.figure(figsize=(10, 6))
+    ) -> None:
+        """
+        Plot prediction accuracy by confidence level.
         
-        # Create confidence bins, handling potential duplicate values
+        Args:
+            data: DataFrame containing prediction data
+            output_folder: Directory to save plot
+            filename: Name of output file
+        """
+        fig, ax = self.plotter.create_figure('prediction')
+        
         try:
-            # First try 4 bins
+            # Create confidence bins
             data['confidence_level'] = pd.qcut(
                 data['confidence'],
                 4,
@@ -1134,7 +1802,6 @@ class BigramAnalysis:
             )
         except ValueError:
             try:
-                # If that fails, try 3 bins
                 data['confidence_level'] = pd.qcut(
                     data['confidence'],
                     3,
@@ -1142,7 +1809,7 @@ class BigramAnalysis:
                     duplicates='drop'
                 )
             except ValueError:
-                # If that still fails, use manual binning based on value ranges
+                # Manual binning if automatic fails
                 confidence_bounds = [
                     data['confidence'].min(),
                     data['confidence'].quantile(0.33),
@@ -1156,90 +1823,47 @@ class BigramAnalysis:
                     include_lowest=True
                 )
         
+        # Calculate accuracy by confidence level
         accuracy_by_conf = data.groupby('confidence_level', observed=True)[
             'speed_predicts_choice'
         ].agg(['mean', 'std', 'count'])
         
+        # Create bar plot
         x = range(len(accuracy_by_conf))
-        plt.bar(x, accuracy_by_conf['mean'], 
-                yerr=accuracy_by_conf['std'], 
-                capsize=5,
-                color=self.config['visualization']['colors']['primary'])
-        
-        plt.xlabel('Confidence Level')
-        plt.ylabel('Prediction Accuracy')
-        plt.title('Speed Prediction Accuracy by Confidence Level')
-        plt.xticks(x, accuracy_by_conf.index, rotation=45)
-        plt.grid(True, alpha=0.3)
+        ax.bar(
+            x,
+            accuracy_by_conf['mean'],
+            yerr=accuracy_by_conf['std'],
+            capsize=self.config['visualization']['plots']['prediction']['error_capsize'],
+            color=self.config['visualization']['colors']['primary'],
+            alpha=self.config['visualization']['plots']['prediction']['bar_alpha']
+        )
         
         # Add sample sizes
         for i, (_, row) in enumerate(accuracy_by_conf.iterrows()):
-            plt.text(i, row['mean'], f'n={int(row["count"])}', 
-                    ha='center', va='bottom')
+            ax.text(
+                i,
+                row['mean'],
+                f'n={int(row["count"])}',
+                ha='center',
+                va='bottom',
+                fontsize=self.config['visualization']['plots']['frequency']['label_fontsize']
+            )
+        
+        ax.set_xlabel('Confidence Level')
+        ax.set_ylabel('Prediction Accuracy')
+        ax.set_title('Speed Prediction Accuracy by Confidence Level')
+        ax.set_xticks(x)
+        ax.set_xticklabels(accuracy_by_conf.index, rotation=45)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
-        plt.close()
-
-    def _plot_user_accuracy_distribution(
-        self,
-        participant_results: List[Dict[str, Any]],
-        output_folder: str,
-        filename: str = 'user_accuracy_distribution.png'
-    ):
-        """Plot distribution of per-user prediction accuracies."""
-        plt.figure(figsize=(10, 6))
-        
-        accuracies = [p['speed_accuracy'] for p in participant_results]
-        
-        plt.hist(accuracies, bins=20, 
-                color=self.config['visualization']['colors']['primary'])
-        plt.axvline(
-            np.mean(accuracies),
-            color=self.config['visualization']['colors']['secondary'],
-            linestyle='--',
-            label=f'Mean: {np.mean(accuracies):.3f}'
+        plt.savefig(
+            os.path.join(output_folder, filename),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
         )
-        
-        plt.xlabel('Prediction Accuracy')
-        plt.ylabel('Number of Participants')
-        plt.title('Distribution of Per-Participant Prediction Accuracies')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        
-        plt.savefig(os.path.join(output_folder, filename), dpi=300, bbox_inches='tight')
         plt.close()
 
-    def _generate_prediction_report(
-        self,
-        results: Dict[str, Any],
-        output_folder: str,
-        filename: str = 'preference_prediction_report.txt'
-    ):
-        """Generate comprehensive analysis report."""
-        report_lines = [
-            "Speed as Choice Proxy Analysis Report",
-            "================================\n",
-            
-            f"Number of participants: {results['n_participants']}",
-            f"Total trials analyzed: {results['n_trials']}",
-            f"Overall prediction accuracy: {results['overall_accuracy']:.1%}\n",
-            
-            "Per-Participant Statistics:",
-            "------------------------"
-        ]
-        
-        accuracies = [p['speed_accuracy'] for p in results['participant_results']]
-        report_lines.extend([
-            f"Mean accuracy: {np.mean(accuracies):.1%}",
-            f"Median accuracy: {np.median(accuracies):.1%}",
-            f"Std deviation: {np.std(accuracies):.1%}",
-            f"Range: [{min(accuracies):.1%}, {max(accuracies):.1%}]"
-        ])
-        
-        with open(os.path.join(output_folder, filename), 'w') as f:
-            f.write('\n'.join(report_lines))
-    
 def load_config(config_path: str) -> Dict[str, Any]:
     """Load configuration from YAML file."""
     try:
@@ -1269,16 +1893,11 @@ def load_config(config_path: str) -> Dict[str, Any]:
                         config[section][key] = value
         
         return config
-        
+            
     except Exception as e:
         logger.error(f"Error loading config from {config_path}: {str(e)}")
         raise
 
-def create_output_dirs(base_dir: str, subdirs: List[str]) -> None:
-    """Create output directories if they don't exist."""
-    for subdir in subdirs:
-        os.makedirs(os.path.join(base_dir, subdir), exist_ok=True)
-          
 def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='Analyze bigram typing data')
@@ -1291,59 +1910,35 @@ def main():
         config = load_config(args.config)
         
         # Create output directories
-        output_dirs = [
-            'typing_time_vs_frequency',
-            'typing_time_vs_preference'
-        ]
-        create_output_dirs(config['output']['base_dir'], output_dirs)
-        
+        choice_folder = os.path.join(config['output']['base_dir'], 
+                                     config['output']['subdirs']['typing_time_vs_preference'])
+        freq_folder = os.path.join(config['output']['base_dir'], 
+                                   config['output']['subdirs']['typing_time_vs_frequency'])
+        predict_folder = os.path.join(config['output']['base_dir'], 
+                                      config['output']['subdirs']['preference_prediction'])
+        os.makedirs(choice_folder, exist_ok=True)
+        os.makedirs(freq_folder, exist_ok=True)
+        os.makedirs(predict_folder, exist_ok=True)
+
         # Initialize analyzer
         analyzer = BigramAnalysis(config)
         
         # Load data
-        data_path = os.path.join(
-            config['data']['input_dir'],
-            config['data']['filtered_data_file']
-        )
+        data_path = os.path.join(config['data']['input_dir'], 
+                                 config['data']['filtered_data_file'])
         data = analyzer.load_and_validate_data(data_path)
-        
+        logger.info(f"Processing {len(data)} trials from {data['user_id'].nunique()} participants...")
+
         # Run analyses and generate plots
-        choice_folder = os.path.join(config['output']['base_dir'], 'typing_time_vs_frequency')
-        freq_folder = os.path.join(config['output']['base_dir'], 
-                                 'typing_time_vs_preference')
-        
-        logger.info("Analyzing typing times and slider values...")
+        logger.info("Analyzing typing times vs. preference...")
         choice_results = analyzer.analyze_typing_times_slider_values(data, choice_folder)
         
-        logger.info("Analyzing frequency-typing relationship...")
+        logger.info("Analyzing typing times vs. frequency...")
         freq_results = analyzer.analyze_frequency_typing_relationship(data, freq_folder)
         
-        # Log results summary
-        logger.info("\nAnalysis Summary:")
-        logger.info(f"Processed {len(data)} trials from {data['user_id'].nunique()} participants")
-        logger.info(f"Generated plots in {config['output']['base_dir']}")
-        
-        logger.info("\nFrequency-Typing Relationship:")
-
-
-
-
-        #logger.info(f"Raw correlation: {freq_results['raw_correlation']['coefficient']:.3f} "
-        #           f"(p = {freq_results['raw_correlation']['p_value']:.3e})")
-        #logger.info(f"Normalized correlation: {freq_results['normalized_correlation']['coefficient']:.3f} "
-        #           f"(p = {freq_results['normalized_correlation']['p_value']:.3e})")
-
-
-
-
-        # Speed choice analysis
-        logger.info("Analyzing speed choice prediction...")
-        speed_choice_folder = os.path.join(config['output']['base_dir'], 'preference_prediction')
-        os.makedirs(speed_choice_folder, exist_ok=True)
-        prediction_results = analyzer.analyze_speed_choice_prediction(data, speed_choice_folder)
-
-        logger.info(f"\nSpeed Choice Prediction Results:")
-        logger.info(f"Overall accuracy: {prediction_results['overall_accuracy']:.1%}")
+        logger.info("Analyzing preference prediction...")
+        prediction_results = analyzer.analyze_speed_choice_prediction(data, predict_folder)
+        logger.info(f"    Overall accuracy: {prediction_results['overall_accuracy']:.1%}")
 
     except Exception as e:
         logger.error(f"Analysis failed: {str(e)}")

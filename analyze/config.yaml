@@ -3,6 +3,7 @@
 # Data settings
 data:
   input_dir: "/Users/arno.klein/Documents/osf/processed_output_all4studies_303of406participants_0improbable"
+  #input_dir: "/Users/arno.klein/Documents/osf/processed_output_all4studies_406participants"
   filtered_data_file: "tables/processed_data/filtered_bigram_data.csv"
   
 # Analysis parameters
@@ -24,6 +25,20 @@ analysis:
   # Frequency analysis
   frequency_transform: "log10"  # Options: log10, log2, none
   
+# Output settings
+output:
+  base_dir: "/Users/arno.klein/Documents/osf/plots"
+  subdirs:
+    typing_time_vs_preference: "typing_time_vs_preference"
+    typing_time_vs_frequency: "typing_time_vs_frequency"
+    preference_prediction: "preference_prediction"
+  
+# Logging settings
+logging:
+  level: "INFO"
+  file: "bigram_analysis.log"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
 # Visualization settings
 visualization:
   dpi: 300
@@ -33,18 +48,36 @@ visualization:
     primary: "#1f77b4"
     secondary: "#ff7f0e"
     error_bars: "#2ca02c"
-  
-# Output settings
-output:
-  base_dir: "/Users/arno.klein/Documents/osf/plots"
-  subdirs:
-    participant_analysis: "participant_level"
-    time_analysis: "timing_analysis"
-    frequency_analysis: "frequency_analysis"
-    combined_analysis: "combined_effects"
-  
-# Logging settings
-logging:
-  level: "INFO"
-  file: "bigram_analysis.log"
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    regression: "#9467bd"
+    
+  plots:
+    time_diff:
+      figsize: [12, 8]
+      alpha: 0.5
+      grid_alpha: 0.3
+      bins: 30
+      confidence_alpha: 0.8
+      error_alpha: 0.2
+      error_capsize: 5
+      
+    frequency:
+      figsize: [12, 8]
+      scatter_alpha: 0.6
+      error_alpha: 0.2
+      regression_alpha: 0.7
+      label_fontsize: 8
+      grid_alpha: 0.3
+      
+    prediction:
+      figsize: [10, 6]
+      hist_bins: 20
+      bar_alpha: 0.8
+      error_capsize: 5
+      grid_alpha: 0.3
+      
+    distribution:
+      figsize: [15, 10]
+      grid_alpha: 0.3
+      legend_fontsize: 10
+      title_fontsize: 16
+      label_fontsize: 12

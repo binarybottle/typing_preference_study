@@ -32,7 +32,7 @@ The purpose of the scripts in this repository is to determine which bigram in ea
   - analyze/analyze_data.py: script to analyze experiment's bigram typing data
 
     - Input config.yaml file with various settings, including the csv table of filtered user data.
-    - Step 1. Analyze bigram typing times, frequencies, and their relationship to bigram choices. 
+    - See analyze/README_analyze_data.txt 
 
   ### process_data.py notes:
    - 2. Filter users by inconsistent or improbable choice thresholds
@@ -45,4 +45,4 @@ The purpose of the scripts in this repository is to determine which bigram in ea
   Here we determine a winning bigram for each bigram pair across all users and all trials. If the winning bigram for every user is the same, the winning score is the median score. If the winning bigram differs across users, the winning score is calculated as follows: we subtract the sum of the absolute values of the scores for one bigram from the other, and divide by the number of choices the made for that bigram pair across the dataset.
 
   ### analyze_data.py notes:
-  This analysis of bigram typing times was intended to determine whether there is a correlation between typing speed and typing comfort, in case we could use speed as a proxy for comfort in future work. Unfortunately, while there is a significant correlation, it appears from this data that the relationship is not consistent enough to warrant application.
+  This analysis of bigram typing times was intended to determine whether there is a correlation between typing speed and typing preference, in case we could use speed as a proxy for comfort in future work.
