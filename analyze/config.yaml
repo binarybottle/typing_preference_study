@@ -2,9 +2,11 @@
 
 # Data settings
 data:
-  input_dir: "/Users/arno.klein/Documents/osf/processed_output_all4studies_303of406participants_0improbable"
+  #input_dir: "/Users/arno.klein/Documents/osf/processed_output_all4studies_303of406participants_0inconsistencies_with_no_improbable"
+  #input_dir: "/Users/arno.klein/Documents/osf/processed_output_all4studies_303of406participants_with_no_improbable"
+  input_dir: "/Users/arno.klein/Documents/osf/processed_output_all4studies_406participants_0inconsistencies"
   #input_dir: "/Users/arno.klein/Documents/osf/processed_output_all4studies_406participants"
-  filtered_data_file: "tables/processed_data/filtered_bigram_data.csv"
+  filtered_data_file: "tables/processed_data/processed_bigram_data.csv"
   
 # Analysis parameters
 analysis:
