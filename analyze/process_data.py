@@ -143,7 +143,7 @@ def load_bigram_pairs(file_path):
         return []
     
 def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
-                 filter_single_presentations=False, verbose=True):
+                 filter_single_or_inconsistent_presentations=False, verbose=True):
     """
     Process the bigram data from a DataFrame and create additional dataframes for specific subsets.
     Identify specified "easy choice" bigram pairs, and remove specified bigram pairs from all data.
@@ -192,7 +192,7 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
     # Calculate the size of each group
     group_sizes = grouped_data.size()
     
-    if filter_single_presentations:
+    if filter_single_or_inconsistent_presentations:
         # Keep only groups with size >= 2
         valid_groups = group_sizes[group_sizes >= 2].reset_index()[['user_id', 'std_bigram_pair']]
         
@@ -217,8 +217,8 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
         # Check consistency (only for pairs that appear more than once)
         is_consistent = len(set(group['chosenBigram'])) == 1 if len(group) > 1 else None
         
-        # Skip inconsistent choices if filter_single_presentations is True
-        if filter_single_presentations and is_consistent is False:
+        # Skip inconsistent choices if filter_single_or_inconsistent_presentations is True
+        if filter_single_or_inconsistent_presentations and is_consistent is False:
             continue
 
         for _, row in group.iterrows():
@@ -298,7 +298,7 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
         #       'chosen_bigram_time', 'unchosen_bigram_time', 'chosen_bigram_correct',
         #       'unchosen_bigram_correct', 'sliderValue', 'text', 'is_consistent',
         #       'is_probable', 'is_improbable', 'group_size'], dtype='object')
-        print("Data filtering mode:", "Removing single presentations and inconsistent choices" if filter_single_presentations else "Normal")
+        print("Data filtering mode:", "Removing single presentations and inconsistent choices" if filter_single_or_inconsistent_presentations else "Normal")
         print(bigram_data.describe())
         print(bigram_data.columns)
         print_headers = ['user_id', 'chosen_bigram', 'unchosen_bigram', 'chosen_bigram_time', 'sliderValue']
@@ -672,7 +672,7 @@ if __name__ == "__main__":
     # Data filtering mode:
     # Filter participants by inconsistent or improbable choice thresholds,
     # or filter data to remove single-presentation bigram pairs.
-    filter_single_presentations = True
+    filter_single_or_inconsistent_presentations = True
     filter_participants_by_num_inconsistencies = False
     filter_participants_by_num_improbable_choices = False
 
@@ -707,10 +707,10 @@ if __name__ == "__main__":
     else:
         easy_choice_pairs = []
 
-    # Load, combine, filter_single_presentations, and save the data
+    # Load, combine, filter_single_or_inconsistent_presentations, and save the data
     data = load_and_combine_data(input_folder, output_tables_folder, verbose=False)
     processed_data = process_data(data, easy_choice_pairs, None, output_tables_folder, 
-                                  filter_single_presentations=filter_single_presentations, 
+                                  filter_single_or_inconsistent_presentations=filter_single_or_inconsistent_presentations, 
                                   verbose=True)
 
     # Filter data by a max threshold of inconsistent or improbable choices
