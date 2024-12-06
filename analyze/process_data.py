@@ -142,7 +142,8 @@ def load_bigram_pairs(file_path):
         print(f"Error loading pairs: {str(e)}")
         return []
     
-def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, verbose=True):
+def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
+                 filter_single_presentations=False, verbose=True):
     """
     Process the bigram data from a DataFrame and create additional dataframes for specific subsets.
     Identify specified "easy choice" bigram pairs, and remove specified bigram pairs from all data.
@@ -191,6 +192,22 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
     # Calculate the size of each group
     group_sizes = grouped_data.size()
     
+    if filter_single_presentations:
+        # Keep only groups with size >= 2
+        valid_groups = group_sizes[group_sizes >= 2].reset_index()[['user_id', 'std_bigram_pair']]
+        
+        # Create a merged DataFrame to filter the original data
+        data_filtered = pd.merge(
+            data_filtered, 
+            valid_groups, 
+            on=['user_id', 'std_bigram_pair'],
+            how='inner'
+        )
+        
+        # Regroup the filtered data
+        grouped_data = data_filtered.groupby(['user_id', 'std_bigram_pair'])
+        group_sizes = grouped_data.size()
+
     result_list = []
     
     for (user_id, std_bigram_pair), group in grouped_data:
@@ -200,6 +217,10 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
         # Check consistency (only for pairs that appear more than once)
         is_consistent = len(set(group['chosenBigram'])) == 1 if len(group) > 1 else None
         
+        # Skip inconsistent choices if filter_single_presentations is True
+        if filter_single_presentations and is_consistent is False:
+            continue
+
         for _, row in group.iterrows():
             chosen_bigram = row['chosenBigram']
             unchosen_bigram = row['unchosenBigram']
@@ -277,6 +298,7 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, ve
         #       'chosen_bigram_time', 'unchosen_bigram_time', 'chosen_bigram_correct',
         #       'unchosen_bigram_correct', 'sliderValue', 'text', 'is_consistent',
         #       'is_probable', 'is_improbable', 'group_size'], dtype='object')
+        print("Data filtering mode:", "Removing single presentations and inconsistent choices" if filter_single_presentations else "Normal")
         print(bigram_data.describe())
         print(bigram_data.columns)
         print_headers = ['user_id', 'chosen_bigram', 'unchosen_bigram', 'chosen_bigram_time', 'sliderValue']
@@ -647,9 +669,25 @@ def determine_winner(group):
 # Main execution
 if __name__ == "__main__":
 
-    ##########################
-    # Load and preprocess data
-    ##########################
+    # Data filtering mode:
+    # Filter participants by inconsistent or improbable choice thresholds,
+    # or filter data to remove single-presentation bigram pairs.
+    filter_single_presentations = True
+    filter_participants_by_num_inconsistencies = False
+    filter_participants_by_num_improbable_choices = False
+
+    if filter_participants_by_num_inconsistencies:
+        inconsistent_threshold = 10
+    else:
+        inconsistent_threshold = np.Inf
+    if filter_participants_by_num_improbable_choices:
+        improbable_threshold = 0
+    else:
+        improbable_threshold = np.Inf
+
+    ################################
+    # Load, combine, and filter data
+    ################################
     # Set the paths for input and output
     input_folder = '/Users/arno.klein/Documents/osf/summary_data'
     output_folder = os.path.join(os.path.dirname(input_folder), 'output')
@@ -659,28 +697,24 @@ if __name__ == "__main__":
     os.makedirs(output_plots_folder, exist_ok=True)
 
     # Load improbable pairs
-    current_dir = os.getcwd()  # Get the current working directory
-    parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_1_easy_choice_pair_LH.csv')
-    easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
+    # The "improbable" choice is choosing the bigram "vr" as easier to type than "fr",
+    # and can be used as an option to filter users that may have chosen slider values randomly.
+    if filter_participants_by_num_improbable_choices:
+        current_dir = os.getcwd()  # Get the current working directory
+        parent_dir = os.path.dirname(current_dir)  # Get the parent directory
+        easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_1_easy_choice_pair_LH.csv')
+        easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
+    else:
+        easy_choice_pairs = []
 
-    # Load, combine, and save the data
+    # Load, combine, filter_single_presentations, and save the data
     data = load_and_combine_data(input_folder, output_tables_folder, verbose=False)
-    processed_data = process_data(data, easy_choice_pairs, None, output_tables_folder, verbose=True)
+    processed_data = process_data(data, easy_choice_pairs, None, output_tables_folder, 
+                                  filter_single_presentations=filter_single_presentations, 
+                                  verbose=True)
 
-    ##############################################################
-    # Filter users by inconsistent or improbable choice thresholds
-    ##############################################################
-    """
-    The "improbable" choice is choosing the bigram "vr" as easier to type than "fr",
-    and can be used as an option to filter users that may have chosen slider values randomly.
-    """
-    visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="processed_")
-
-    # Filter data by an max threshold of inconsistent or improbable choices
+    # Filter data by a max threshold of inconsistent or improbable choices
     first_user_data = processed_data['user_stats'].iloc[0]
-    improbable_threshold = 0 #np.Inf
-    inconsistent_threshold = np.Inf
     filtered_users_data = filter_users(processed_data, output_tables_folder,
                                        improbable_threshold, inconsistent_threshold)
 
