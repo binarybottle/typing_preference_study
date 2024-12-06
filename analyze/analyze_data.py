@@ -508,28 +508,23 @@ class BigramAnalysis:
         output_folder: str
     ) -> Dict[str, float]:
         """
-        Analyze variance explained and predictive power of speed and frequency,
-        focusing on confidence magnitude and choice prediction.
+        Analyze variance explained and predictive power of speed and frequency.
         """
-        # [Previous preprocessing code stays the same]
+        # [Previous preprocessing code stays the same] 
         data = data.copy()
         data = self._apply_time_limit(data)
         
-        # Calculate predictors
-        data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
-        data['speed_diff_mag'] = data['speed_diff'].abs()
-        data['speed_diff_norm'] = self.stats.normalize_within_participant(data, 'speed_diff')
-        
-        # Add frequency differences
-        self._add_frequency_differences(data)
-        data = data.dropna(subset=['freq_diff'])
-        
         results = {}
         
-        # Calculate variance explained in confidence magnitude
+        # [Previous variance calculations stay the same]
+        data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
+        data['speed_diff_mag'] = data['speed_diff'].abs()
         speed_confidence_corr = stats.spearmanr(data['speed_diff_mag'], data['abs_sliderValue'])[0]
         results['speed_variance'] = speed_confidence_corr ** 2 * 100
         
+        # Add frequency differences and calculate frequency variance
+        self._add_frequency_differences(data)
+        data = data.dropna(subset=['freq_diff'])
         freq_confidence_corr = stats.spearmanr(data['freq_diff'].abs(), data['abs_sliderValue'])[0]
         results['frequency_variance'] = freq_confidence_corr ** 2 * 100
         
@@ -540,33 +535,50 @@ class BigramAnalysis:
         )
         results['frequency_partial_variance'] = partial_corr ** 2 * 100
         
-        # Calculate individual prediction accuracies
+        # Calculate basic prediction rates
         data['speed_predicts_choice'] = data['speed_diff'] < 0
         results['speed_predictive'] = np.mean(data['speed_predicts_choice']) * 100
         
         data['freq_predicts_choice'] = data['freq_diff'] > 0
         results['frequency_predictive'] = np.mean(data['freq_predicts_choice']) * 100
         
-        # For combined prediction, we'll predict their actual choices 
-        # using both speed and frequency differences
-        X_combined = np.column_stack([
-            data['speed_diff_norm'],  # Using normalized differences for better modeling
-            data['freq_diff']
-        ])
-        # Target: whether they chose left or right bigram
+        # Add logistic regression analysis
+        from statsmodels.discrete.discrete_model import Logit
+        import statsmodels.api as sm
+        
+        # Standardize predictors
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        speed_diff_std = scaler.fit_transform(data['speed_diff'].values.reshape(-1, 1))
+        freq_diff_std = scaler.fit_transform(data['freq_diff'].values.reshape(-1, 1))
+        
+        # Prepare target
         y = (data['sliderValue'] > 0).astype(int)
         
-        # Cross-validated prediction
-        model = LogisticRegression(random_state=42)
-        results['combined_predictive'] = np.mean(cross_val_score(
-            model, X_combined, y, cv=5, scoring='accuracy'
-        )) * 100
+        # Run logistic regressions
+        null_model = Logit(y, np.ones_like(y)).fit(disp=0)
+        
+        X_speed = sm.add_constant(speed_diff_std)
+        speed_model = Logit(y, X_speed).fit(disp=0)
+        results['speed_logistic_r2'] = (1 - (speed_model.llf / null_model.llf)) * 100
+        results['speed_odds_ratio'] = np.exp(speed_model.params[1])
+        results['speed_p_value'] = speed_model.pvalues[1]
+        
+        X_freq = sm.add_constant(freq_diff_std)
+        freq_model = Logit(y, X_freq).fit(disp=0)
+        results['freq_logistic_r2'] = (1 - (freq_model.llf / null_model.llf)) * 100
+        results['freq_odds_ratio'] = np.exp(freq_model.params[1])
+        results['freq_p_value'] = freq_model.pvalues[1]
+        
+        X_both = sm.add_constant(np.column_stack([speed_diff_std, freq_diff_std]))
+        full_model = Logit(y, X_both).fit(disp=0)
+        results['total_logistic_r2'] = (1 - (full_model.llf / null_model.llf)) * 100
         
         # Generate report
         self._generate_variance_prediction_report(results, output_folder)
         
         return results
-       
+                
     def _analyze_bigram_choices(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
         Analyze bigram choice patterns for below-chance participants.
@@ -1007,6 +1019,53 @@ class BigramAnalysis:
         scores = cross_val_score(model, X, y, cv=n_folds, scoring='roc_auc')
         return np.mean(scores) * 100
 
+    def _calculate_logistic_variance_explained(
+        self,
+        data: pd.DataFrame
+    ) -> Dict[str, float]:
+        """
+        Calculate variance explained in binary choices using logistic regression.
+        Returns McFadden's pseudo-R² for each predictor.
+        """
+        from sklearn.preprocessing import StandardScaler
+        from statsmodels.discrete.discrete_model import Logit
+        import statsmodels.api as sm
+
+        # Prepare target: whether they chose the right bigram
+        y = (data['sliderValue'] > 0).astype(int)
+        
+        # Standardize predictors for comparable coefficients
+        scaler = StandardScaler()
+        speed_diff_std = scaler.fit_transform(data['speed_diff'].values.reshape(-1, 1))
+        freq_diff_std = scaler.fit_transform(data['freq_diff'].values.reshape(-1, 1))
+        
+        # Add constant for intercept
+        X_speed = sm.add_constant(speed_diff_std)
+        X_freq = sm.add_constant(freq_diff_std)
+        X_both = sm.add_constant(np.column_stack([speed_diff_std, freq_diff_std]))
+        
+        # Fit models
+        null_model = Logit(y, np.ones_like(y)).fit(disp=0)
+        speed_model = Logit(y, X_speed).fit(disp=0)
+        freq_model = Logit(y, X_freq).fit(disp=0)
+        full_model = Logit(y, X_both).fit(disp=0)
+        
+        # Calculate McFadden's R² for each model
+        # R² = 1 - (log likelihood of model / log likelihood of null model)
+        r2_speed = 1 - (speed_model.llf / null_model.llf)
+        r2_freq = 1 - (freq_model.llf / null_model.llf)
+        r2_full = 1 - (full_model.llf / null_model.llf)
+        
+        return {
+            'speed_logistic_r2': r2_speed * 100,
+            'freq_logistic_r2': r2_freq * 100,
+            'total_logistic_r2': r2_full * 100,
+            'speed_odds_ratio': np.exp(speed_model.params[1]),
+            'freq_odds_ratio': np.exp(freq_model.params[1]),
+            'speed_p_value': speed_model.pvalues[1],
+            'freq_p_value': freq_model.pvalues[1]
+        }
+
     # Report Generation Methods
 
     def _save_frequency_group_timing_analysis(
@@ -1410,7 +1469,7 @@ class BigramAnalysis:
         output_folder: str,
         filename: str = 'variance_prediction_analysis.txt'
     ) -> None:
-        """Generate streamlined report focusing on key findings."""
+        """Generate comprehensive report of all analyses."""
         
         report_lines = [
             "Variance and Prediction Analysis Results",
@@ -1422,21 +1481,17 @@ class BigramAnalysis:
             "Choice Prediction Analysis:",
             f"- Speed-based prediction: {results['speed_predictive']:.1f}% of the time, participants chose the faster bigram",
             f"- Frequency-based prediction: {results['frequency_predictive']:.1f}% of the time, participants chose the more frequent bigram\n",
-            "Key Findings:",
-            "1. Choice Patterns:",
-            "   - Participants had a moderate tendency to choose the faster-to-type bigram (60.3%)",
-            "   - They showed a weaker tendency to choose the more frequent bigram (55.0%)",
-            "   - These biases were reliable but not deterministic\n",
-            "2. Confidence Analysis:",
-            "   - Neither the magnitude of speed differences nor frequency differences",
-            "     strongly predicted how confident participants were in their choices",
-            "   - This suggests participants' confidence levels were based on other factors",
-            "     beyond just how much faster or more frequent one bigram was than the other"
+            "Logistic Regression Analysis:",
+            f"- Speed alone explains {results['speed_logistic_r2']:.1f}% of choice variance",
+            f"  (odds ratio: {results['speed_odds_ratio']:.2f}, p = {results['speed_p_value']:.3e})",
+            f"- Frequency alone explains {results['freq_logistic_r2']:.1f}% of choice variance",
+            f"  (odds ratio: {results['freq_odds_ratio']:.2f}, p = {results['freq_p_value']:.3e})",
+            f"- Together they explain {results['total_logistic_r2']:.1f}% of choice variance\n",
         ]
         
         with open(os.path.join(output_folder, filename), 'w') as f:
             f.write('\n'.join(report_lines))
-                                                
+                                                            
     # Plotting Methods
 
     def _plot_typing_times(
