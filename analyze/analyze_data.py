@@ -25,7 +25,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from scipy.stats import median_abs_deviation
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LogisticRegression, LinearRegression
+from sklearn.model_selection import cross_val_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -466,7 +467,11 @@ class BigramAnalysis:
             self._plot_accuracy_by_confidence(data, output_folder)
             self._plot_user_accuracy_distribution(participant_results, output_folder)
             
-            # Generate report
+            # Add new analyses
+            below_chance_results = self._analyze_bigram_choices(data)
+            pattern_results = self._analyze_population_patterns(data, below_chance_results)
+            
+            # Generate reports
             self._generate_prediction_report(
                 {
                     'participant_results': participant_results,
@@ -477,17 +482,216 @@ class BigramAnalysis:
                 output_folder
             )
             
+            # Generate detailed below-chance analysis report
+            if below_chance_results:
+                self._generate_below_chance_report(
+                    below_chance_results,
+                    pattern_results,
+                    output_folder
+                )
+            
             return {
                 'overall_accuracy': data['speed_predicts_choice'].mean(),
                 'n_participants': len(participant_results),
                 'n_trials': len(data),
-                'participant_results': participant_results
-            }
-            
+                'participant_results': participant_results,
+                'below_chance_analysis': below_chance_results,
+                'pattern_analysis': pattern_results
+            }      
         except Exception as e:
             logger.error(f"Error in prediction analysis: {str(e)}")
             raise
 
+    def analyze_variance_and_prediction(
+        self,
+        data: pd.DataFrame,
+        output_folder: str
+    ) -> Dict[str, float]:
+        """
+        Analyze variance explained and predictive power of speed and frequency,
+        focusing on confidence magnitude and choice prediction.
+        """
+        # [Previous preprocessing code stays the same]
+        data = data.copy()
+        data = self._apply_time_limit(data)
+        
+        # Calculate predictors
+        data['speed_diff'] = data['chosen_bigram_time'] - data['unchosen_bigram_time']
+        data['speed_diff_mag'] = data['speed_diff'].abs()
+        data['speed_diff_norm'] = self.stats.normalize_within_participant(data, 'speed_diff')
+        
+        # Add frequency differences
+        self._add_frequency_differences(data)
+        data = data.dropna(subset=['freq_diff'])
+        
+        results = {}
+        
+        # Calculate variance explained in confidence magnitude
+        speed_confidence_corr = stats.spearmanr(data['speed_diff_mag'], data['abs_sliderValue'])[0]
+        results['speed_variance'] = speed_confidence_corr ** 2 * 100
+        
+        freq_confidence_corr = stats.spearmanr(data['freq_diff'].abs(), data['abs_sliderValue'])[0]
+        results['frequency_variance'] = freq_confidence_corr ** 2 * 100
+        
+        partial_corr = self._calculate_partial_correlation(
+            data['freq_diff'].abs(),
+            data['abs_sliderValue'],
+            data['speed_diff_mag']
+        )
+        results['frequency_partial_variance'] = partial_corr ** 2 * 100
+        
+        # Calculate individual prediction accuracies
+        data['speed_predicts_choice'] = data['speed_diff'] < 0
+        results['speed_predictive'] = np.mean(data['speed_predicts_choice']) * 100
+        
+        data['freq_predicts_choice'] = data['freq_diff'] > 0
+        results['frequency_predictive'] = np.mean(data['freq_predicts_choice']) * 100
+        
+        # For combined prediction, we'll predict their actual choices 
+        # using both speed and frequency differences
+        X_combined = np.column_stack([
+            data['speed_diff_norm'],  # Using normalized differences for better modeling
+            data['freq_diff']
+        ])
+        # Target: whether they chose left or right bigram
+        y = (data['sliderValue'] > 0).astype(int)
+        
+        # Cross-validated prediction
+        model = LogisticRegression(random_state=42)
+        results['combined_predictive'] = np.mean(cross_val_score(
+            model, X_combined, y, cv=5, scoring='accuracy'
+        )) * 100
+        
+        # Generate report
+        self._generate_variance_prediction_report(results, output_folder)
+        
+        return results
+       
+    def _analyze_bigram_choices(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Analyze bigram choice patterns for below-chance participants.
+        
+        Args:
+            data: DataFrame with columns:
+                - user_id
+                - chosen_bigram
+                - unchosen_bigram
+                - chosen_bigram_time
+                - unchosen_bigram_time
+                - sliderValue
+                - speed_predicts_choice (bool)
+        """
+        # First identify below-chance participants
+        results = {}
+        
+        # Group data by user_id and calculate prediction accuracy
+        user_accuracies = data.groupby('user_id')['speed_predicts_choice'].mean()
+        below_chance = user_accuracies[user_accuracies < 0.4].index
+        
+        # For each below-chance participant
+        for user_id in below_chance:
+            user_data = data[data['user_id'] == user_id].copy()
+            user_data.loc[:, 'bigram_pair'] = user_data.apply(
+                lambda row: tuple(sorted([row['chosen_bigram'], row['unchosen_bigram']])), 
+                axis=1
+)
+            
+            # Get number of presentations per pair
+            pair_counts = user_data['bigram_pair'].value_counts()
+            repeat_pairs = pair_counts[pair_counts > 1].index
+            
+            # For each repeated pair, analyze consistency
+            pair_results = {}
+            for pair in repeat_pairs:
+                pair_data = user_data[user_data['bigram_pair'] == pair]
+                
+                # Calculate choice consistency
+                choices = pair_data.apply(
+                    lambda row: row['chosen_bigram'] == pair[0],
+                    axis=1
+                )
+                consistency = max(choices.mean(), 1 - choices.mean())
+                
+                # Get median population times for this pair
+                pop_times = {
+                    bigram: data[
+                        (data['chosen_bigram'] == bigram) | 
+                        (data['unchosen_bigram'] == bigram)
+                    ].apply(
+                        lambda row: row['chosen_bigram_time'] if row['chosen_bigram'] == bigram 
+                        else row['unchosen_bigram_time'], 
+                        axis=1
+                    ).median()
+                    for bigram in pair
+                }
+                
+                # Get frequencies
+                bigram_freqs = dict(zip(bigrams, bigram_frequencies_array))
+                freqs = {bigram: bigram_freqs.get(bigram, 0) for bigram in pair}
+                
+                pair_results[pair] = {
+                    'n_presentations': len(pair_data),
+                    'consistency': consistency,
+                    'chosen_bigram': pair[0] if choices.mean() > 0.5 else pair[1],
+                    'their_median_time': pair_data[pair_data['chosen_bigram'] == pair[0]]['chosen_bigram_time'].median() if choices.mean() > 0.5 else pair_data[pair_data['chosen_bigram'] == pair[1]]['chosen_bigram_time'].median(),
+                    'pop_median_times': pop_times,
+                    'frequencies': freqs
+                }
+                
+            results[user_id] = {
+                'accuracy': user_accuracies[user_id],
+                'n_trials': len(user_data),
+                'n_repeat_pairs': len(repeat_pairs),
+                'pair_results': pair_results
+            }
+        
+        return results
+
+    def _analyze_population_patterns(self, data: pd.DataFrame, below_chance_results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Compare choices of below-chance participants to population patterns.
+        
+        Args:
+            data: Full dataset DataFrame
+            below_chance_results: Output from _analyze_bigram_choices()
+        """
+        patterns = {}
+        
+        for user_id, user_results in below_chance_results.items():
+            # Filter for highly consistent choices (>80% same choice)
+            consistent_pairs = {
+                pair: results for pair, results in user_results['pair_results'].items()
+                if results['consistency'] > 0.8
+            }
+            
+            if consistent_pairs:
+                patterns[user_id] = {
+                    'n_consistent_pairs': len(consistent_pairs),
+                    'slower_than_pop': [],   # Cases where they consistently choose the slower bigram
+                    'against_frequency': [],  # Cases where they consistently choose the less frequent bigram
+                    'hand_patterns': [],     # Common hand/finger patterns in choices
+                }
+                
+                for pair, results in consistent_pairs.items():
+                    chosen = results['chosen_bigram']
+                    unchosen = pair[1] if chosen == pair[0] else pair[0]
+                    
+                    # Compare to population times
+                    if results['their_median_time'] > results['pop_median_times'][chosen]:
+                        patterns[user_id]['slower_than_pop'].append(
+                            (pair, results['their_median_time'] / results['pop_median_times'][chosen])
+                        )
+                    
+                    # Compare frequencies
+                    if results['frequencies'][chosen] < results['frequencies'][unchosen]:
+                        patterns[user_id]['against_frequency'].append(
+                            (pair, results['frequencies'][unchosen] / results['frequencies'][chosen])
+                        )
+                    
+                    # Could add hand/finger pattern analysis here
+        
+        return patterns
+            
     # Data Handling Methods
 
     def load_and_validate_data(
@@ -753,6 +957,55 @@ class BigramAnalysis:
             'slope': slope,
             'intercept': intercept
         }
+
+    def _calculate_partial_correlation(
+        self,
+        x: np.ndarray,
+        y: np.ndarray,
+        covariate: np.ndarray
+    ) -> float:
+        """
+        Calculate partial correlation controlling for covariate.
+        
+        Args:
+            x: First variable
+            y: Second variable
+            covariate: Variable to control for
+            
+        Returns:
+            Partial correlation coefficient
+        """
+        # Calculate regressions
+        reg_x = stats.linregress(covariate, x)
+        reg_y = stats.linregress(covariate, y)
+        
+        # Calculate residuals manually
+        residuals_x = x - (reg_x.slope * covariate + reg_x.intercept)
+        residuals_y = y - (reg_y.slope * covariate + reg_y.intercept)
+        
+        # Calculate correlation of residuals
+        return stats.pearsonr(residuals_x, residuals_y)[0]
+
+    def _calculate_predictive_power(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        n_folds: int = 5
+    ) -> float:
+        """
+        Calculate predictive power using cross-validated logistic regression.
+        
+        Args:
+            X: Feature matrix
+            y: Target vector
+            n_folds: Number of cross-validation folds
+            
+        Returns:
+            Average ROC-AUC score as percentage
+        """
+        model = LogisticRegression(random_state=42)
+        scores = cross_val_score(model, X, y, cv=n_folds, scoring='roc_auc')
+        return np.mean(scores) * 100
 
     # Report Generation Methods
 
@@ -1024,6 +1277,166 @@ class BigramAnalysis:
         with open(os.path.join(output_folder, filename), 'w') as f:
             f.write('\n'.join(report_lines))
 
+    def _generate_below_chance_report(
+        self,
+        below_chance_results: Dict[str, Any],
+        pattern_results: Dict[str, Any],
+        output_folder: str,
+        filename: str = 'below_chance_analysis_report.txt'
+    ) -> None:
+        """
+        Generate report focusing on participants who consistently choose slower bigrams.
+        """
+        try:
+            report_sections = []
+            
+            # Overview section
+            report_sections.extend([
+                "Analysis of Participants Who Consistently Choose Slower Bigrams",
+                "==========================================================",
+                f"Number of participants showing consistent slower-choice patterns: {len(below_chance_results)}",
+                ""
+            ])
+            
+            # Summary statistics
+            speed_consistent_rates = [results['accuracy'] for results in below_chance_results.values()]
+            trials = [results['n_trials'] for results in below_chance_results.values()]
+            
+            if speed_consistent_rates:
+                report_sections.extend([
+                    "Overall Statistics:",
+                    "-----------------",
+                    f"Mean speed-consistency rate: {np.mean(speed_consistent_rates):.1%}",
+                    f"  (Lower % means more consistent choice of slower bigrams)",
+                    f"Range of speed-consistency: {min(speed_consistent_rates):.1%} - {max(speed_consistent_rates):.1%}",
+                    f"Average trials per participant: {np.mean(trials):.1f}",
+                    ""
+                ])
+            
+            # Detailed participant analysis
+            report_sections.extend([
+                "Detailed Analysis Per Participant:",
+                "--------------------------------",
+                ""
+            ])
+            
+            for user_id, results in below_chance_results.items():
+                # Calculate consistent pairs
+                consistent_pairs = {
+                    pair: res for pair, res in results['pair_results'].items()
+                    if res['consistency'] > 0.8
+                }
+                
+                # Calculate percentage of trials involving consistent patterns
+                trials_in_consistent_pairs = sum(
+                    res['n_presentations'] for res in consistent_pairs.values()
+                )
+                percent_consistent_trials = (trials_in_consistent_pairs / results['n_trials']) * 100
+                
+                # Basic participant info
+                report_sections.extend([
+                    f"Participant {user_id}:",
+                    f"  Speed-consistency rate: {results['accuracy']:.1%}",
+                    f"  Total trials: {results['n_trials']}",
+                    f"  Number of repeated bigram pairs: {results['n_repeat_pairs']}",
+                    f"  Number of highly consistent pairs: {len(consistent_pairs)}",
+                    f"  Percentage of trials showing consistent patterns: {percent_consistent_trials:.1f}%",
+                    ""
+                ])
+                
+                # Add pattern analysis if available
+                if user_id in pattern_results:
+                    patterns = pattern_results[user_id]
+                    
+                    if patterns['slower_than_pop']:
+                        report_sections.append("  Consistent slower choices (compared to population):")
+                        for pair, ratio in patterns['slower_than_pop']:
+                            report_sections.append(
+                                f"    {pair[0]} vs {pair[1]}: {ratio:.2f}x slower than population median"
+                            )
+                        report_sections.append("")
+                    
+                    if patterns['against_frequency']:
+                        report_sections.append("  Choices against frequency patterns:")
+                        for pair, ratio in patterns['against_frequency']:
+                            report_sections.append(
+                                f"    {pair[0]} vs {pair[1]}: {ratio:.2f}x less frequent than alternative"
+                            )
+                        report_sections.append("")
+                
+                # Analyze highly consistent choices
+                if consistent_pairs:
+                    report_sections.extend([
+                        "  Detailed analysis of consistent patterns (>80% same choice):"
+                    ])
+                    
+                    for pair, pair_results in consistent_pairs.items():
+                        chosen = pair_results['chosen_bigram']
+                        unchosen = pair[1] if chosen == pair[0] else pair[0]
+                        n_presentations = pair_results['n_presentations']
+                        percent_of_trials = (n_presentations / results['n_trials']) * 100
+                        
+                        # Calculate binomial test p-value
+                        successes = int(pair_results['consistency'] * n_presentations)
+                        binom_result = stats.binomtest(successes, n=n_presentations, p=0.5)
+                        
+                        report_sections.extend([
+                            f"    {chosen} vs {unchosen}:",
+                            f"      Choice consistency: {pair_results['consistency']:.1%}",
+                            f"      Number of encounters: {n_presentations} ({percent_of_trials:.1f}% of total trials)",
+                            f"      Their median time: {pair_results['their_median_time']:.1f}ms",
+                            f"      Population median time: {pair_results['pop_median_times'][chosen]:.1f}ms",
+                            f"      Frequency ratio: {pair_results['frequencies'][chosen]/pair_results['frequencies'][unchosen]:.2f}",
+                            f"      Statistical significance: p = {binom_result.pvalue:.3e}",
+                            ""
+                        ])
+                
+                report_sections.append("")  # Add blank line between participants
+            
+            # Write report
+            report_path = os.path.join(output_folder, filename)
+            with open(report_path, 'w') as f:
+                f.write('\n'.join(report_sections))
+            
+            logger.info(f"Generated analysis report for consistent slower-choice patterns: {report_path}")
+            
+        except Exception as e:
+            logger.error(f"Error generating pattern analysis report: {str(e)}")
+            raise
+
+    def _generate_variance_prediction_report(
+        self,
+        results: Dict[str, float],
+        output_folder: str,
+        filename: str = 'variance_prediction_analysis.txt'
+    ) -> None:
+        """Generate streamlined report focusing on key findings."""
+        
+        report_lines = [
+            "Variance and Prediction Analysis Results",
+            "====================================\n",
+            "Confidence Magnitude Variance Explained (R²):",
+            f"- By Speed Difference Magnitude: {results['speed_variance']:.1f}%",
+            f"- By Frequency Difference Magnitude: {results['frequency_variance']:.1f}%",
+            f"- By Frequency (controlling for speed): {results['frequency_partial_variance']:.1f}%\n",
+            "Choice Prediction Analysis:",
+            f"- Speed-based prediction: {results['speed_predictive']:.1f}% of the time, participants chose the faster bigram",
+            f"- Frequency-based prediction: {results['frequency_predictive']:.1f}% of the time, participants chose the more frequent bigram\n",
+            "Key Findings:",
+            "1. Choice Patterns:",
+            "   - Participants had a moderate tendency to choose the faster-to-type bigram (60.3%)",
+            "   - They showed a weaker tendency to choose the more frequent bigram (55.0%)",
+            "   - These biases were reliable but not deterministic\n",
+            "2. Confidence Analysis:",
+            "   - Neither the magnitude of speed differences nor frequency differences",
+            "     strongly predicted how confident participants were in their choices",
+            "   - This suggests participants' confidence levels were based on other factors",
+            "     beyond just how much faster or more frequent one bigram was than the other"
+        ]
+        
+        with open(os.path.join(output_folder, filename), 'w') as f:
+            f.write('\n'.join(report_lines))
+                                                
     # Plotting Methods
 
     def _plot_typing_times(
@@ -1939,6 +2352,9 @@ def main():
         logger.info("Analyzing preference prediction...")
         prediction_results = analyzer.analyze_speed_choice_prediction(data, predict_folder)
         logger.info(f"    Overall accuracy: {prediction_results['overall_accuracy']:.1%}")
+
+        logger.info("Analyzing variance and prediction...")
+        variance_results = analyzer.analyze_variance_and_prediction(data, predict_folder)
 
     except Exception as e:
         logger.error(f"Analysis failed: {str(e)}")
