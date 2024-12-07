@@ -561,14 +561,14 @@ class BigramAnalysis:
         X_speed = sm.add_constant(speed_diff_std)
         speed_model = Logit(y, X_speed).fit(disp=0)
         results['speed_logistic_r2'] = (1 - (speed_model.llf / null_model.llf)) * 100
-        results['speed_odds_ratio'] = np.exp(speed_model.params[1])
-        results['speed_p_value'] = speed_model.pvalues[1]
+        results['speed_odds_ratio'] = np.exp(speed_model.params.iloc[1])
+        results['speed_p_value'] = speed_model.pvalues.iloc[1]
         
         X_freq = sm.add_constant(freq_diff_std)
         freq_model = Logit(y, X_freq).fit(disp=0)
         results['freq_logistic_r2'] = (1 - (freq_model.llf / null_model.llf)) * 100
-        results['freq_odds_ratio'] = np.exp(freq_model.params[1])
-        results['freq_p_value'] = freq_model.pvalues[1]
+        results['freq_odds_ratio'] = np.exp(freq_model.params.iloc[1])
+        results['freq_p_value'] = freq_model.pvalues.iloc[1]
         
         X_both = sm.add_constant(np.column_stack([speed_diff_std, freq_diff_std]))
         full_model = Logit(y, X_both).fit(disp=0)
@@ -578,6 +578,102 @@ class BigramAnalysis:
         self._generate_variance_prediction_report(results, output_folder)
         
         return results
+
+    def analyze_bigram_pair_choices(self, data: pd.DataFrame, output_path: Optional[str] = None) -> pd.DataFrame:
+            """
+            Analyze statistics for each unique bigram pair in the dataset and optionally save to CSV.
+            
+            Args:
+                data: DataFrame containing columns:
+                    - chosen_bigram
+                    - unchosen_bigram
+                    - sliderValue
+                output_path: Optional path to save CSV file. If None, no file is saved.
+                    
+            Returns:
+                DataFrame with columns for each bigram pair's statistics
+            """
+            # Create copy of data and calculate absolute slider values
+            data = data.copy()
+            data['abs_slider_value'] = data['sliderValue'].abs()
+            
+            # Get all unique bigram pairs (order doesn't matter)
+            def get_sorted_pair(row):
+                return tuple(sorted([row['chosen_bigram'], row['unchosen_bigram']]))
+            
+            data['bigram_pair'] = data.apply(get_sorted_pair, axis=1)
+            unique_pairs = sorted(data['bigram_pair'].unique())
+            
+            pair_stats = []
+            
+            for pair in unique_pairs:
+                # Get all trials involving this bigram pair
+                pair_data = data[data['bigram_pair'] == pair]
+                
+                # For each bigram in the pair
+                for i, bigram in enumerate(pair):
+                    # Calculate how often this bigram was chosen
+                    chosen_data = pair_data[pair_data['chosen_bigram'] == bigram]
+                    n_chosen = len(chosen_data)
+                    
+                    # Calculate median and MAD of absolute slider values when chosen
+                    if n_chosen > 0:
+                        median_value = chosen_data['abs_slider_value'].median()
+                        mad_value = median_abs_deviation(chosen_data['abs_slider_value'].values, nan_policy='omit')
+                    else:
+                        median_value = np.nan
+                        mad_value = np.nan
+                    
+                    # Calculate score (could be implementation specific)
+                    score = n_chosen / len(pair_data) if len(pair_data) > 0 else np.nan
+                    
+                    other_bigram = pair[1 - i]  # Get the other bigram in the pair
+                    
+                    # Only add the pair once (when processing first bigram)
+                    if i == 0:
+                        # Get stats for second bigram
+                        other_chosen_data = pair_data[pair_data['chosen_bigram'] == other_bigram]
+                        other_n_chosen = len(other_chosen_data)
+                        
+                        if other_n_chosen > 0:
+                            other_median_value = other_chosen_data['abs_slider_value'].median()
+                            other_mad_value = median_abs_deviation(other_chosen_data['abs_slider_value'].values, nan_policy='omit')
+                        else:
+                            other_median_value = np.nan
+                            other_mad_value = np.nan
+                            
+                        other_score = other_n_chosen / len(pair_data) if len(pair_data) > 0 else np.nan
+                        
+                        pair_stats.append({
+                            'bigram1': bigram,
+                            'bigram1_score': score,
+                            'N_chose_bigram1': n_chosen,
+                            'median_value_of_bigram1': median_value,
+                            'MAD_value_of_bigram1': mad_value,
+                            'bigram2': other_bigram,
+                            'bigram2_score': other_score,
+                            'N_chose_bigram2': other_n_chosen,
+                            'median_value_of_bigram2': other_median_value,
+                            'MAD_value_of_bigram2': other_mad_value
+                        })
+            
+            # Create DataFrame from collected statistics
+            results_df = pd.DataFrame(pair_stats)
+            
+            # Save to CSV if output path is provided
+            if output_path is not None:
+                try:
+                    # Create directory if it doesn't exist
+                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                    
+                    # Save to CSV
+                    results_df.to_csv(output_path, index=False)
+                    logger.info(f"Saved bigram pair analysis to {output_path}")
+                except Exception as e:
+                    logger.error(f"Error saving CSV file: {str(e)}")
+                    raise
+            
+            return results_df
                 
     def _analyze_bigram_choices(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
@@ -1056,14 +1152,15 @@ class BigramAnalysis:
         r2_freq = 1 - (freq_model.llf / null_model.llf)
         r2_full = 1 - (full_model.llf / null_model.llf)
         
+        # Use .iloc[] for accessing parameters and p-values by position
         return {
             'speed_logistic_r2': r2_speed * 100,
             'freq_logistic_r2': r2_freq * 100,
             'total_logistic_r2': r2_full * 100,
-            'speed_odds_ratio': np.exp(speed_model.params[1]),
-            'freq_odds_ratio': np.exp(freq_model.params[1]),
-            'speed_p_value': speed_model.pvalues[1],
-            'freq_p_value': freq_model.pvalues[1]
+            'speed_odds_ratio': np.exp(speed_model.params.iloc[1]),  # Changed from [1] to .iloc[1]
+            'freq_odds_ratio': np.exp(freq_model.params.iloc[1]),    # Changed from [1] to .iloc[1]
+            'speed_p_value': speed_model.pvalues.iloc[1],           # Changed from [1] to .iloc[1]
+            'freq_p_value': freq_model.pvalues.iloc[1]              # Changed from [1] to .iloc[1]
         }
 
     # Report Generation Methods
@@ -1491,7 +1588,7 @@ class BigramAnalysis:
         
         with open(os.path.join(output_folder, filename), 'w') as f:
             f.write('\n'.join(report_lines))
-                                                            
+                                                           
     # Plotting Methods
 
     def _plot_typing_times(
@@ -2410,6 +2507,10 @@ def main():
 
         logger.info("Analyzing variance and prediction...")
         variance_results = analyzer.analyze_variance_and_prediction(data, predict_folder)
+
+        logger.info("Analyzing bigram pair choices...")
+        output_path = os.path.join(config['output']['base_dir'], 'bigram_pair_choices.csv')
+        pair_stats_df = analyzer.analyze_bigram_pair_choices(data, output_path)
 
     except Exception as e:
         logger.error(f"Analysis failed: {str(e)}")
