@@ -1,6 +1,12 @@
 # README for analyze_data.py
 Bigram Typing Analysis Pipeline Documentation
 
+Author: Arno Klein (binarybottle.com)
+
+GitHub repository: binarybottle/bigram-typing-comfort-experiment
+
+License: Apache v2.0 
+
 ## Overview
 
 This pipeline analyzes relationships between bigram typing times, user preferences, 
@@ -12,25 +18,28 @@ and consists of three main components:
 3. Preference Prediction Analysis
 
 .
-├── typing_time_vs_preference
-│   ├── typing_time_vs_preference_scatter.png
-│   ├── typing_time_difference_histogram.png
-│   ├── typing_time_vs_preference_summary_stats.txt
-│   └── typing_time_vs_preference_confidence_intervals.txt
-├── typing_time_vs_frequency
-│   ├── frequency_vs_typing_time_scatter.png
-│   ├── frequency_bins_typing_time_bar.png
-│   ├── typing_time_vs_frequency_summary_stats.txt
-│   ├── typing_time_vs_frequency_confidence_intervals.txt
-│   ├── typing_time_vs_frequency_regression_stats.txt
-│   ├── typing_time_vs_frequency_distribution_plot.png
-│   ├── frequency_vs_typing_time_group_stats.txt
-│   └── frequency_vs_typing_time_relationship_plot.png
-└── preference_prediction
-    ├── prediction_accuracy_by_confidence.png
-    ├── user_accuracy_distribution_histogram.png
-    ├── preference_prediction_summary_stats.txt
-    └── preference_prediction_accuracy_report.txt
+├── typing_time_vs_preference/
+│   ├── raw_typing_time_diff_vs_slider_value.png
+│   ├── normalized_typing_time_diff_vs_slider_value.png
+│   ├── raw_typing_time_diff_vs_slider_value_histograms.png
+│   ├── normalized_typing_time_diff_vs_slider_value_histograms.png
+│   ├── raw_overlaid_typing_times_by_slider_value_histograms.png
+│   └── normalized_overlaid_typing_times_by_slider_value_histograms.png
+├── typing_time_vs_frequency/
+│   ├── frequency_and_timing_distribution.png
+│   ├── frequency_and_timing_median.png
+│   ├── frequency_and_timing_minimum.png
+│   ├── freq_vs_time_raw.png
+│   ├── freq_vs_time_normalized.png
+│   └── frequency_timing_analysis_results.txt
+└── preference_prediction/
+    ├── speed_accuracy_by_magnitude.png
+    ├── speed_accuracy_by_confidence.png
+    ├── user_accuracy_distribution.png
+    ├── preference_prediction_report.txt
+    ├── below_chance_analysis_report.txt
+    ├── variance_prediction_analysis.txt
+    └── bigram_pair_choices.csv
 
 ## Analysis Components
 
@@ -144,7 +153,7 @@ output:
   subdirs: Subdirectories for different analysis types
 ```
 
-## Data Format
+## Input Data
 
 ### Required Input Columns
 - `user_id`: Unique participant identifier
@@ -154,28 +163,108 @@ output:
 - `unchosen_bigram_time`: Typing time for unchosen bigram (ms)
 - `sliderValue`: User preference rating (-100 to 100)
 
-## Statistical Methods
+## Output Data
 
-### Normalization
-- Per-participant normalization using median and median absolute deviation (MAD)
-- Formula: `(x - median(x)) / (MAD(x) + 1e-10)`
+### Generated Files Structure
 
-### Confidence Intervals
-- Bootstrap method with 1000 resamples
-- Default confidence level: 95%
+The pipeline generates the following files in the configured output directories:
 
-### Outlier Handling
-- Time limit clipping at configurable threshold (default: 3000ms)
-- Robust statistics to minimize outlier impact
+1. Typing Time vs. Preference Analysis (`typing_time_vs_preference/`)
+   - `raw_typing_time_diff_vs_slider_value.png`
+     * Scatter plot of raw time differences vs. slider values
+     * Shows relationship between typing speed differences and preference strength
+   - `normalized_typing_time_diff_vs_slider_value.png`
+     * Normalized version of the time difference plot
+     * Controls for individual typing speed variations
+   - `raw_typing_time_diff_vs_slider_value_histograms.png`
+     * Distribution of typing time differences across preference ranges
+   - `normalized_typing_time_diff_vs_slider_value_histograms.png`
+     * Distribution of normalized time differences
+   - `raw_overlaid_typing_times_by_slider_value_histograms.png`
+     * Comparison of chosen vs. unchosen typing time distributions
+   - `normalized_overlaid_typing_times_by_slider_value_histograms.png`
+     * Normalized version of overlaid distributions
 
-## Error Handling and Validation
+2. Frequency Analysis (`typing_time_vs_frequency/`)
+   - `frequency_and_timing_distribution.png`
+     * Main distribution plot with error bars and sample sizes
+     * Shows relationship between frequency and typing speed
+   - `frequency_and_timing_median.png`
+     * Median typing times with bigram labels
+   - `frequency_and_timing_minimum.png`
+     * Fastest typing times for each bigram
+   - `frequency_timing_analysis_results.txt`
+     * Detailed statistical analysis results
+     * Includes correlations, ANOVA results, and group statistics
 
-The pipeline includes comprehensive error checking:
-- Data validation for required columns
-- Range checking for slider values (-100 to 100)
-- Handling of missing or invalid numeric values
-- Participant exclusion based on minimum trial counts
-- Detailed logging of data quality issues
+3. Prediction Analysis (`preference_prediction/`)
+   - `speed_accuracy_by_magnitude.png`
+     * Prediction accuracy across speed difference magnitudes
+   - `speed_accuracy_by_confidence.png`
+     * Accuracy levels for different confidence ranges
+   - `user_accuracy_distribution.png`
+     * Distribution of per-participant prediction accuracy
+   - `preference_prediction_report.txt`
+     * Comprehensive prediction analysis results
+   - `below_chance_analysis_report.txt`
+     * Detailed analysis of unexpected patterns
+   - `variance_prediction_analysis.txt`
+     * Variance explained by different factors
+
+### Statistical Measures and Interpretations
+
+1. Normalization Metrics
+   - **Within-participant Z-scores**: (x - median) / MAD
+     * MAD (Median Absolute Deviation) provides robust scale estimate
+     * Controls for individual typing speed differences
+     * Allows comparison across participants
+
+2. Correlation Measures
+   - **Spearman's Rank Correlation**: Used for frequency-time relationships
+     * Non-parametric measure robust to outliers
+     * Captures monotonic relationships
+     * Range: [-1, 1], where:
+       * 1 indicates perfect positive correlation
+       * -1 indicates perfect negative correlation
+       * 0 indicates no correlation
+   
+3. Regression Statistics
+   - **R-squared**: Variance explained by the model
+     * Range: [0, 1], higher values indicate better fit
+   - **Slope**: Rate of change in typing time with log-frequency
+   - **McFadden's Pseudo-R²**: For logistic regression models
+     * Interpretation differs from linear R²
+     * Values above 0.2 considered good fit
+
+4. Confidence Intervals
+   - **Bootstrap CI**: Non-parametric 95% confidence intervals
+     * Based on 1000 resamples
+     * Robust to non-normal distributions
+   - **Standard Error**: Uncertainty in mean estimates
+     * Calculated using bootstrap for robustness
+
+5. Group Comparisons
+   - **ANOVA F-statistic**: Tests for differences between frequency groups
+     * Larger F-values indicate stronger group differences
+   - **Post-hoc Tests**: Bonferroni-corrected pairwise comparisons
+     * Controls family-wise error rate
+     * Reports adjusted p-values
+
+6. Prediction Metrics
+   - **Accuracy**: Percentage of correct predictions
+   - **ROC-AUC**: Area under ROC curve
+     * Range: [0.5, 1.0]
+     * 0.5 indicates chance-level prediction
+     * Above 0.7 considered good discrimination
+   - **Odds Ratios**: Effect size for logistic regression
+     * Values > 1 indicate positive association
+     * Values < 1 indicate negative association
+
+7. Robust Statistics
+   - **Median**: Central tendency resistant to outliers
+   - **MAD**: Scale measure resistant to outliers
+   - **Winsorization**: Extreme value handling at 3000ms
+   - **Quantile-based Analysis**: Distribution-free comparisons
 
 ## Known Limitations
 
