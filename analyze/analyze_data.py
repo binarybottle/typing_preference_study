@@ -579,19 +579,19 @@ class BigramAnalysis:
         
         return results
 
-    def analyze_bigram_pair_choices(self, data: pd.DataFrame, output_path: Optional[str] = None) -> pd.DataFrame:
+    def analyze_bigram_pair_choices(self, data: pd.DataFrame, output_folder: str, 
+                                    output_csv: str) -> pd.DataFrame:
             """
-            Analyze statistics for each unique bigram pair in the dataset and optionally save to CSV.
+            Analyze statistics for each unique bigram pair and generate visualizations.
             
             Args:
-                data: DataFrame containing columns:
-                    - chosen_bigram
-                    - unchosen_bigram
-                    - sliderValue
-                output_path: Optional path to save CSV file. If None, no file is saved.
-                    
+                data: DataFrame containing trial data
+                output_folder: output folder
+                output_csv: filename to save CSV file
+                output_plot: filename to save plot file
+                
             Returns:
-                DataFrame with columns for each bigram pair's statistics
+                DataFrame with bigram pair statistics
             """
             # Create copy of data and calculate absolute slider values
             data = data.copy()
@@ -659,22 +659,27 @@ class BigramAnalysis:
             
             # Create DataFrame from collected statistics
             results_df = pd.DataFrame(pair_stats)
-            
-            # Save to CSV if output path is provided
-            if output_path is not None:
-                try:
-                    # Create directory if it doesn't exist
-                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(output_folder), exist_ok=True)
                     
-                    # Save to CSV
-                    results_df.to_csv(output_path, index=False)
-                    logger.info(f"Saved bigram pair analysis to {output_path}")
-                except Exception as e:
-                    logger.error(f"Error saving CSV file: {str(e)}")
-                    raise
+            # Generate visualizations
+            try:
+                self._plot_bigram_pair_analysis(results_df, output_folder)
+                logger.info(f"Generated bigram pair analysis plots in {output_folder}")
+            except Exception as e:
+                logger.error(f"Error generating bigram pair plots: {str(e)}")
+
+            # Save to CSV
+            try:
+                results_df.to_csv(os.path.join(output_folder, output_csv), index=False)
+                logger.info(f"Saved bigram pair analysis to {output_folder}")
+            except Exception as e:
+                logger.error(f"Error saving CSV file: {str(e)}")
+                raise
             
             return results_df
-                
+
     def _analyze_bigram_choices(self, data: pd.DataFrame) -> Dict[str, Any]:
         """
         Analyze bigram choice patterns for below-chance participants.
@@ -2429,6 +2434,125 @@ class BigramAnalysis:
         )
         plt.close()
 
+    def _plot_bigram_pair_analysis(
+        self,
+        pair_stats_df: pd.DataFrame,
+        output_folder: str,
+        filename_prefix: str = 'bigram_pair'
+    ) -> None:
+        """
+        Create line plots visualizing bigram pair analysis results.
+        
+        Args:
+            pair_stats_df: DataFrame containing bigram pair statistics
+            output_folder: Directory to save plots
+            filename_prefix: Prefix for output filenames
+        """
+        # Add pair index for x-axis
+        pair_stats_df = pair_stats_df.copy()
+        pair_stats_df['pair_index'] = range(1, len(pair_stats_df) + 1)
+        
+        # Sort by bigram1_score and reset index for plotting
+        pair_stats_df = pair_stats_df.sort_values('bigram1_score', ascending=False).reset_index(drop=True)
+        pair_stats_df['pair_index'] = range(1, len(pair_stats_df) + 1)
+
+        # Create score comparison plot
+        fig, ax = self.plotter.create_figure('distribution')
+        
+        # Plot scores
+        ax.plot(
+            pair_stats_df['pair_index'],
+            pair_stats_df['bigram1_score'],
+            'o-',
+            color=self.config['visualization']['colors']['primary'],
+            label='Bigram 1',
+            alpha=0.7
+        )
+        ax.plot(
+            pair_stats_df['pair_index'],
+            pair_stats_df['bigram2_score'],
+            'o-',
+            color=self.config['visualization']['colors']['secondary'],
+            label='Bigram 2',
+            alpha=0.7
+        )
+        
+        # Customize score plot
+        ax.set_xlabel('Bigram Pair Index')
+        ax.set_ylabel('Score')
+        ax.set_title('Bigram Pair Scores')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        
+        # Add bigram pair labels to selected points
+        step = max(1, len(pair_stats_df) // 10)  # Show ~10 labels
+        for idx in range(0, len(pair_stats_df), step):
+            row = pair_stats_df.iloc[idx]
+            ax.annotate(
+                f"{row['bigram1']}-{row['bigram2']}",
+                (row['pair_index'], row['bigram1_score']),
+                xytext=(0, 10),
+                textcoords='offset points',
+                ha='center',
+                fontsize=8
+            )
+        
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(output_folder, f'{filename_prefix}_scores.png'),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+        
+        # Create choice count comparison plot
+        fig, ax = self.plotter.create_figure('distribution')
+        
+        # Plot choice counts
+        ax.plot(
+            pair_stats_df['pair_index'],
+            pair_stats_df['N_chose_bigram1'],
+            'o-',
+            color=self.config['visualization']['colors']['primary'],
+            label='Chose Bigram 1',
+            alpha=0.7
+        )
+        ax.plot(
+            pair_stats_df['pair_index'],
+            pair_stats_df['N_chose_bigram2'],
+            'o-',
+            color=self.config['visualization']['colors']['secondary'],
+            label='Chose Bigram 2',
+            alpha=0.7
+        )
+        
+        # Customize choice count plot
+        ax.set_xlabel('Bigram Pair Index')
+        ax.set_ylabel('Number of Choices')
+        ax.set_title('Bigram Choice Counts')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+        
+        # Add bigram pair labels to selected points
+        for idx in range(0, len(pair_stats_df), step):
+            row = pair_stats_df.iloc[idx]
+            ax.annotate(
+                f"{row['bigram1']}-{row['bigram2']}",
+                (row['pair_index'], row['N_chose_bigram1']),
+                xytext=(0, 10),
+                textcoords='offset points',
+                ha='center',
+                fontsize=8
+            )
+        
+        plt.tight_layout()
+        plt.savefig(
+            os.path.join(output_folder, f'{filename_prefix}_choice_counts.png'),
+            dpi=self.config['visualization']['dpi'],
+            bbox_inches='tight'
+        )
+        plt.close()
+
 def load_config(config_path: str) -> Dict[str, Any]:
     """Load configuration from YAML file."""
     try:
@@ -2509,8 +2633,8 @@ def main():
         variance_results = analyzer.analyze_variance_and_prediction(data, predict_folder)
 
         logger.info("Analyzing bigram pair choices...")
-        output_path = os.path.join(config['output']['base_dir'], 'bigram_pair_choices.csv')
-        pair_stats_df = analyzer.analyze_bigram_pair_choices(data, output_path)
+        pair_stats_df = analyzer.analyze_bigram_pair_choices(data, config['output']['base_dir'],
+                                                             'bigram_pair_choices.csv')
 
     except Exception as e:
         logger.error(f"Analysis failed: {str(e)}")
