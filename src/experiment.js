@@ -9,7 +9,7 @@ const jsPsych = initJsPsych();
 
 // Global variables and configuration
 let experimentConfig = {
-  practiceOnly: false,  // If true, only run the practice set
+  practiceOnly: true,  // If true, only run the practice set
   //study1: nbigramRepetitions: 3,  // number of repetitions of each bigram
   nbigramRepetitions: 2,  // number of repetitions of each bigram
   //study1: ncharacters: 5,  // number of random characters (from character_list) preceding each block of bigrams 
@@ -706,7 +706,7 @@ async function runExperiment(options = {}) {
         type: htmlButtonResponse,
         stimulus: `<p>Great job! You've completed the practice session.<br>
                     Now we'll move on to the main part of the experiment,<br>
-                    with a series of 70 such trials.<br><br>
+                    with a series of 100 such trials.<br><br>
                     Please give your best estimate about how much easier<br>
                     one letter pair is to type than the other.</p>`,
         choices: ['Continue'],
