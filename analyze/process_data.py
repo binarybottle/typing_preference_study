@@ -752,7 +752,7 @@ if __name__ == "__main__":
     # Load, combine, and filter data
     ################################
     # Set the paths for input and output
-    input_folder = '/Users/arno.klein/Documents/osf/summary_data'
+    input_folder = '/Users/arno/Documents/osf/summary_data'
     output_folder = os.path.join(os.path.dirname(input_folder), 'output')
     output_tables_folder = os.path.join(output_folder, 'tables', 'processed_data')
     output_plots_folder = os.path.join(output_folder, 'plots', 'processed_data')
