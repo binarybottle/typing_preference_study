@@ -954,7 +954,7 @@ if __name__ == "__main__":
     # and can be used as an option to filter users that may have chosen slider values randomly.
     current_dir = os.getcwd()  # Get the current working directory
     parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_easy_choice_pairs_LH_noheader.csv')
+    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_easy_choice_pairs_LH_nocomments.csv')
     easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
     # Step 1: Load and combine the data
