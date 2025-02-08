@@ -908,6 +908,13 @@ if __name__ == "__main__":
     # Filter parameters
     ###################
     # Filter participants by inconsistent or improbable choice thresholds:
+    # Improbable choices (left) in the easy_choice_pairs_file
+    # fr,vr  # same finger 1 vs. 2 off home row (studies 1-5)
+    # aq,zq  # same finger 1 vs. 2 off home row (study 2A)
+    # sx,xw  # same finger 1 vs. 2 off home row (study 2A)
+    # dc,ce  # same finger 1 vs. 2 off home row (study 2A)
+    # fd,ce  # home row vs. same finger 2 rows (study 1)
+    # ef,vr  # 2 fingers 1 off home row vs. same finger both off home row (study 5)
     filter_participants_by_num_improbable_choices = True
     filter_participants_by_num_inconsistencies = False
 
@@ -947,7 +954,7 @@ if __name__ == "__main__":
     # and can be used as an option to filter users that may have chosen slider values randomly.
     current_dir = os.getcwd()  # Get the current working directory
     parent_dir = os.path.dirname(current_dir)  # Get the parent directory
-    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_1_easy_choice_pair_LH.csv')
+    easy_choice_pairs_file = os.path.join(parent_dir, 'bigram_tables', 'bigram_easy_choice_pairs_LH_noheader.csv')
     easy_choice_pairs = load_easy_choice_pairs(easy_choice_pairs_file)
 
     # Step 1: Load and combine the data
