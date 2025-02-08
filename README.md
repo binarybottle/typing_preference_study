@@ -39,10 +39,10 @@ The purpose of the scripts in this repository is to determine which bigram in ea
   The "improbable" choice is choosing the bigram "vr" as easier to type than "fr", and can be used as an option to filter users that may have chosen slider values randomly.
   
    - 3. Score choices by slider values
-  For this study, each user makes a choice between two bigrams, two times, by using a slider each time -- but the score_user_choices_by_slider_values function generalizes to many pairwise choices. If a user chooses the same bigram every time, we take their median slider value. If a user chooses different bigrams, we subtract the sums of the absolute values for each choice. In both cases, the score is the absolute value of the result.
+  For this study, each user makes a choice between two bigrams, two times, by using a slider each time -- but the score_user_choices_by_slider_values function generalizes to many pairwise choices. If a user chooses the same bigram every time, we take their median absolute slider value. If a user chooses different bigrams, we subtract the sums of the absolute values for each choice. In both cases, the score is the absolute value of the result.
 
    - 4. Choose winning bigrams
-  Here we determine a winning bigram for each bigram pair across all users and all trials. If the winning bigram for every user is the same, the winning score is the median score. If the winning bigram differs across users, the winning score is calculated as follows: we subtract the sum of the absolute values of the scores for one bigram from the other, and divide by the number of choices the made for that bigram pair across the dataset.
+  Here we determine a winning bigram for each bigram pair across all users and all trials. If the winning bigram for every user is the same, the winning score is the median absolute score. If the winning bigram differs across users, the winning score is calculated as follows: we subtract the sum of the absolute values of the scores for one bigram from the other, and divide by the number of choices made for that bigram pair across the dataset.
 
   ### analyze_data.py notes:
   This analysis of bigram typing times was intended to determine whether there is a correlation between typing speed and typing preference, in case we could use speed as a proxy for comfort in future work.

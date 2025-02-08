@@ -464,7 +464,7 @@ def score_user_choices_by_slider_values(filtered_users_data, output_tables_folde
     
     For this study, each user makes a choice between two bigrams, two times, 
     by using a slider each time -- but this function generalizes to many pairwise choices.
-    If a user chooses the same bigram every time, we take their median slider value.
+    If a user chooses the same bigram every time, we take their median absolute slider value.
     If a user chooses different bigrams, we subtract the sums of the absolute values for each choice,
     and divide by the number of choices made for that bigram pair.
     In both cases, the score is the absolute value of the result divided by 100 (the maximum slider value).
