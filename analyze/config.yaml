@@ -2,7 +2,7 @@
 
 # Data settings
 data:
-  input_dir: "/Users/arno/Documents/osf"
+  input_dir: "/Users/arno/Downloads/osf"
   filtered_data_file: "tables/processed_data/processed_bigram_data.csv"
   
 # Analysis parameters
@@ -26,7 +26,7 @@ analysis:
   
 # Output settings
 output:
-  base_dir: "/Users/arno/Documents/osf/plots"
+  base_dir: "/Users/arno/Downloads/osf/plots"
   subdirs:
     typing_time_vs_preference: "typing_time_vs_preference"
     typing_time_vs_frequency: "typing_time_vs_frequency"
