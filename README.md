@@ -25,7 +25,7 @@ The purpose of the scripts in this repository is to determine which bigram in ea
     - Input: csv tables of summary data, easy choice (improbable) bigram pairs
     - Output: csv tables and plots
     - Step 1. Load and combine the data collected from the study above.
-    - Step 2. Filter users by improbable or inconsistent choice thresholds.
+    - Step 2. Filter users by improbable or inconsistent choices, or outlier slider behavior.
     - Step 3. Score choices by slider values.
     - Step 4. Choose winning bigrams for bigram pairs.
 
@@ -35,8 +35,11 @@ The purpose of the scripts in this repository is to determine which bigram in ea
     - See analyze/README_analyze_data.txt 
 
   ### process_data.py notes:
-   - 2. Filter users by inconsistent or improbable choice thresholds
+   - 2. Filter users by inconsistent or improbable choice thresholds, or outlier slider behavior
   The "improbable" choice is choosing the bigram "vr" as easier to type than "fr", and can be used as an option to filter users that may have chosen slider values randomly.
+  Inconsistent choices are when a user doesn't choose the same bigram in a pair both times.
+  Outlier slider behavior is when a user selects streaks of left or right sides, 
+  or chooses values close to zero many times.
   
    - 3. Score choices by slider values
   For this study, each user makes a choice between two bigrams, two times, by using a slider each time -- but the score_user_choices_by_slider_values function generalizes to many pairwise choices. If a user chooses the same bigram every time, we take their median absolute slider value. If a user chooses different bigrams, we subtract the sums of the absolute values for each choice. In both cases, the score is the absolute value of the result.
