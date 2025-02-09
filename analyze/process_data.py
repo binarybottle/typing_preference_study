@@ -512,7 +512,7 @@ def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
     - raw_data: Original raw DataFrame before processing
     - output_tables_folder: String path to the folder where filtered data should be saved
     - improbable_threshold: Maximum number of improbable choices allowed
-    - inconsistent_threshold: Maximum number of inconsistent choices allowed
+    - inconsistent_threshold: Maximum percentage of inconsistent choices allowed
     - n_repeat_sides: Number of consecutive same-side selections to flag a user
     - percent_close_to_zero: Percentage of total trials that are within d_from_zero of zero to flag a user
     - d_from_zero: Distance from zero to consider as "close to zero"
@@ -558,13 +558,15 @@ def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
     # 3. Inconsistent Choices
     if inconsistent_threshold != np.inf:
         print("\n____ Inconsistent Choices Filtering (if applied alone) ____")
-        problematic_users = set(user_stats[user_stats['inconsistent_choices'] > inconsistent_threshold]['user_id'])
+        # Calculate percentage of inconsistent choices for each user
+        user_inconsistency_pcts = (user_stats['inconsistent_choices'] / user_stats['total_consistency_choices'] * 100)
+        problematic_users = set(user_stats[user_inconsistency_pcts > inconsistent_threshold]['user_id'])
         filtered = raw_data[~raw_data['user_id'].isin(problematic_users)]
         filter_impacts['inconsistent'] = {
             'users': len(problematic_users),
             'rows': len(raw_data) - len(filtered)
         }
-        print(f"Threshold: > {inconsistent_threshold} inconsistent choices of {user_stats['total_consistency_choices'].max()}")
+        print(f"Threshold: > {inconsistent_threshold}% inconsistent choices")
         print(f"Would remove {filter_impacts['inconsistent']['users']} users and {filter_impacts['inconsistent']['rows']} rows")
     
     # 4. Slider Behavior
@@ -916,14 +918,14 @@ if __name__ == "__main__":
     # fd,ce  # home row vs. same finger 2 rows (study 1)
     # ef,vr  # 2 fingers 1 off home row vs. same finger both off home row (study 5)
     filter_participants_by_num_improbable_choices = True
-    filter_participants_by_num_inconsistencies = False
+    filter_participants_by_percent_inconsistencies = False
 
     if filter_participants_by_num_improbable_choices:
         improbable_threshold = 0 # at least one improbable choice
     else:
         improbable_threshold = np.Inf
-    if filter_participants_by_num_inconsistencies:
-        inconsistent_threshold = 10
+    if filter_participants_by_percent_inconsistencies:
+        inconsistent_threshold = 50
     else:
         inconsistent_threshold = np.Inf
 
@@ -976,7 +978,7 @@ if __name__ == "__main__":
 
     # Step 3: Filter users based on thresholds
     # Step 4: Process the user-filtered data to remove single presentations and inconsistent choices
-    if filter_participants_by_num_inconsistencies or \
+    if filter_participants_by_percent_inconsistencies or \
         filter_participants_by_num_improbable_choices or \
         filter_single_or_inconsistent_presentations or \
         filter_letters:
@@ -990,7 +992,7 @@ if __name__ == "__main__":
             n_repeat_sides=n_repeat_sides,
             percent_close_to_zero=percent_close_to_zero,
             d_from_zero=d_from_zero,
-            filter_letters=filter_letters  # Add this parameter
+            filter_letters=filter_letters
         )
                 
         # Calculate additional statistics that were in the original code
