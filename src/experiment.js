@@ -306,7 +306,7 @@ function createTypingTrial(bigram1, bigram2, trialId) {
     stimulus: `
       <div class="jspsych-content-wrapper">
         <div class="jspsych-content">
-          <p>Type the following text (with spaces!):</p>
+          <p>Type the following text <br><i>with spaces!</i>:</p>
           <p id="text-to-type" style="font-size: 24px; letter-spacing: 2px; white-space: pre-wrap;"></p>
         </div>
       </div>`,
