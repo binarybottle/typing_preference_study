@@ -30,6 +30,7 @@
     "@jspsych-contrib/plugin-pipe": "^0.3.0",
     "@jspsych/plugin-survey-likert": "^1.1.2",
     "js-yaml": "^4.1.0",
-    "jspsych": "^7.3.4"
+    "jspsych": "^7.3.4",
+    "papaparse": "^5.5.2"
   }
 }

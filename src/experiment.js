@@ -291,9 +291,9 @@ function createTypingTrial(bigram1, bigram2, trialId) {
       
       if (isTyped) {
         if (isBigram) {
-          style.push('color: #606060');  // Darker gray for typed bigrams
+          style.push('color: #8B0000');  // Darker gray for typed bigrams
         } else {
-          style.push('color: #A0A0A0');  // Lighter gray for other typed text
+          style.push('color: #A52A2A');  // Lighter gray for other typed text
         }
       }
       
