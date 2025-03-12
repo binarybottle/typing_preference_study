@@ -275,7 +275,16 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
     user_stats['inconsistent_choices'] = inconsistent_choices['user_id'].value_counts()
     user_stats['probable_choices'] = probable_choices['user_id'].value_counts()
     user_stats['improbable_choices'] = improbable_choices['user_id'].value_counts()
-    
+
+    # Calculate unique pairs for probable and improbable choices
+    probable_choices_2x = probable_choices.groupby('user_id')['bigram_pair'].nunique()
+    improbable_choices_2x = improbable_choices.groupby('user_id')['bigram_pair'].nunique()
+    user_stats['probable_choices_2x'] = probable_choices_2x
+    user_stats['improbable_choices_2x'] = improbable_choices_2x
+    # Make sure to handle users who don't have any im/probable choices
+    user_stats['probable_choices_2x'] = user_stats['probable_choices_2x'].fillna(0).astype(int)
+    user_stats['improbable_choices_2x'] = user_stats['improbable_choices_2x'].fillna(0).astype(int)
+
     # Calculate total choices that could be consistent/inconsistent
     user_stats['total_consistency_choices'] = bigram_data[bigram_data['group_size'] > 1]['user_id'].value_counts()
     user_stats['num_easy_choice_pairs'] = len(easy_choice_pairs)
@@ -312,6 +321,10 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
         print(probable_choices.describe())
         display_information(improbable_choices, "improbable choices", print_headers + ['is_improbable'], nlines)
         print(improbable_choices.describe())
+        display_information(probable_choices_2x, "probable choices 2x", print_headers + ['is_probable_2x'], nlines)
+        print(probable_choices_2x.describe())
+        display_information(improbable_choices_2x, "improbable choices 2x", print_headers + ['is_improbable_2x'], nlines)
+        print(improbable_choices_2x.describe())
         display_information(user_stats, "user statistics", print_user_headers, nlines) 
         print(user_stats.describe())
     
@@ -321,6 +334,8 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
     inconsistent_choices.to_csv(f"{output_tables_folder}/processed_inconsistent_choices.csv", index=False)
     probable_choices.to_csv(f"{output_tables_folder}/processed_probable_choices.csv", index=False)
     improbable_choices.to_csv(f"{output_tables_folder}/processed_improbable_choices.csv", index=False)
+    probable_choices_2x.to_csv(f"{output_tables_folder}/processed_probable_choices_2x.csv", index=False)
+    improbable_choices_2x.to_csv(f"{output_tables_folder}/processed_improbable_choices_2x.csv", index=False)
     user_stats.to_csv(f"{output_tables_folder}/processed_user_statistics.csv", index=False)
     
     print(f"Processed data saved to {output_tables_folder}")
@@ -406,17 +421,17 @@ def visualize_user_choices(user_stats, output_plots_folder, plot_label=""):
 
     print(f"Visualization plots saved to {output_plots_folder}")
 
-def identify_problematic_slider_behavior(raw_data, n_repeat_sides=10, percent_close_to_zero=50, d_from_zero=10):
+def identify_problematic_slider_behavior(raw_data, n_repeat_sides=10, percent_close_to_zero=50, distance_close_to_zero=10):
     """
     Identify users with problematic slider behavior:
-    1. Users who repeatedly select the same side (all positive or all negative)
+    1. Users who repeatedly select the same side (all positive or all negative, and abs value greater than distance_close_to_zero)
     2. Users who frequently select values very close to zero
     
     Parameters:
     - raw_data: DataFrame containing the original data with slider values
     - n_repeat_sides: Number of consecutive same-side selections to flag a user
-    - percent_close_to_zero: Percentage of total trials that are within d_from_zero of zero to flag a user
-    - d_from_zero: Distance from zero to consider as "close to zero"
+    - percent_close_to_zero: Percentage of total trials that are within distance_close_to_zero of zero to flag a user
+    - distance_close_to_zero: Distance from zero to consider as "close to zero"
     
     Returns:
     - problematic_users: Set of user IDs that exhibit problematic behavior
@@ -435,15 +450,15 @@ def identify_problematic_slider_behavior(raw_data, n_repeat_sides=10, percent_cl
         user_data = user_data.sort_values('trialId')
         slider_values = user_data['sliderValue'].values
         
-        # Check for repeated same-side selections
+        # Check for repeated same-side selections (greater than distance_close_to_zero)
         pos_streak = 0
         neg_streak = 0
         
         for value in slider_values:
-            if value > 0:
+            if value > distance_close_to_zero:
                 pos_streak += 1
                 neg_streak = 0
-            elif value < 0:
+            elif value < -distance_close_to_zero:
                 neg_streak += 1
                 pos_streak = 0
             else:
@@ -457,7 +472,7 @@ def identify_problematic_slider_behavior(raw_data, n_repeat_sides=10, percent_cl
         
         # Check for frequent near-zero selections (percentage-based)
         total_trials = len(user_data)
-        close_to_zero_count = sum(abs(value) <= d_from_zero for value in slider_values)
+        close_to_zero_count = sum(abs(value) <= distance_close_to_zero for value in slider_values)
         if (close_to_zero_count / total_trials * 100) >= percent_close_to_zero:
             stats['close_to_zero_users'].add(user_id)
             problematic_users.add(user_id)
@@ -500,7 +515,7 @@ def filter_bigrams_with_letters(data, filter_letters):
 
 def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
                          improbable_threshold=np.inf, inconsistent_threshold=np.inf,
-                         n_repeat_sides=10, percent_close_to_zero=25, d_from_zero=10,
+                         n_repeat_sides=10, percent_close_to_zero=25, distance_close_to_zero=10,
                          filter_letters=None):
     """
     Filter users based on their number of inconsistent and improbable choices,
@@ -514,8 +529,8 @@ def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
     - improbable_threshold: Maximum number of improbable choices allowed
     - inconsistent_threshold: Maximum percentage of inconsistent choices allowed
     - n_repeat_sides: Number of consecutive same-side selections to flag a user
-    - percent_close_to_zero: Percentage of total trials that are within d_from_zero of zero to flag a user
-    - d_from_zero: Distance from zero to consider as "close to zero"
+    - percent_close_to_zero: Percentage of total trials that are within distance_close_to_zero of zero to flag a user
+    - distance_close_to_zero: Distance from zero to consider as "close to zero"
     - filter_letters: Set of letters to filter out from bigrams, or None to skip letter filtering
 
     Returns:
@@ -542,19 +557,21 @@ def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
         }
         print(f"Filtering out bigrams containing: {', '.join(sorted(filter_letters))}")
         print(f"Would remove {filter_impacts['letters']['users']} users and {filter_impacts['letters']['rows']} rows")
+        print(f"Would remove users: {removed_users}")
     
     # 2. Improbable Choices
     if improbable_threshold != np.inf:
         print("\n____ Improbable Choices Filtering (if applied alone) ____")
-        problematic_users = set(user_stats[user_stats['improbable_choices'] > improbable_threshold]['user_id'])
+        problematic_users = set(user_stats[user_stats['improbable_choices_2x'] > improbable_threshold]['user_id'])
         filtered = raw_data[~raw_data['user_id'].isin(problematic_users)]
         filter_impacts['improbable'] = {
             'users': len(problematic_users),
             'rows': len(raw_data) - len(filtered)
         }
-        print(f"Threshold: > {improbable_threshold} improbable choices of {user_stats['num_easy_choice_pairs'].max()} pairs")
+        print(f"Threshold: > {improbable_threshold} unique improbable bigram pairs of {user_stats['num_easy_choice_pairs'].max()} pairs")
         print(f"Would remove {filter_impacts['improbable']['users']} users and {filter_impacts['improbable']['rows']} rows")
-    
+        print(f"Would remove users: {problematic_users}")
+
     # 3. Inconsistent Choices
     if inconsistent_threshold != np.inf:
         print("\n____ Inconsistent Choices Filtering (if applied alone) ____")
@@ -568,11 +585,12 @@ def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
         }
         print(f"Threshold: > {inconsistent_threshold}% inconsistent choices")
         print(f"Would remove {filter_impacts['inconsistent']['users']} users and {filter_impacts['inconsistent']['rows']} rows")
+        print(f"Would remove users: {problematic_users}")
     
     # 4. Slider Behavior
     print("\n____ Slider Behavior Filtering (if applied alone) ____")
     problematic_users, slider_stats = identify_problematic_slider_behavior(
-        raw_data, n_repeat_sides, percent_close_to_zero, d_from_zero
+        raw_data, n_repeat_sides, percent_close_to_zero, distance_close_to_zero
     )
     filtered = raw_data[~raw_data['user_id'].isin(problematic_users)]
     filter_impacts['slider'] = {
@@ -582,10 +600,11 @@ def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
         'zero_value_users': len(slider_stats['close_to_zero_users'])
     }
     print(f"Same-side threshold: {n_repeat_sides}+ consecutive selections")
-    print(f"Zero-value threshold: {percent_close_to_zero}%+ selections within ±{d_from_zero}")
+    print(f"Zero-value threshold: {percent_close_to_zero}%+ selections within ±{distance_close_to_zero}")
     print(f"Would remove {filter_impacts['slider']['same_side_users']} users due to consecutive same-side")
     print(f"Would remove {filter_impacts['slider']['zero_value_users']} users due to frequent zero-values")
     print(f"Would remove {filter_impacts['slider']['users']} total users and {filter_impacts['slider']['rows']} rows")
+    print(f"Would remove users: {problematic_users}")
 
     # Now apply all filters sequentially for the actual filtering
     filtered_data = raw_data.copy()
@@ -594,7 +613,7 @@ def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
     valid_users = set(filtered_data['user_id'].unique())
     
     if improbable_threshold != np.inf:
-        problematic_users = set(user_stats[user_stats['improbable_choices'] > improbable_threshold]['user_id'])
+        problematic_users = set(user_stats[user_stats['improbable_choices_2x'] > improbable_threshold]['user_id'])    
         valid_users -= problematic_users
     
     if inconsistent_threshold != np.inf:
@@ -602,7 +621,7 @@ def filter_users_or_rows(processed_data, raw_data, output_tables_folder,
         valid_users -= problematic_users
     
     problematic_users, _ = identify_problematic_slider_behavior(
-        filtered_data, n_repeat_sides, percent_close_to_zero, d_from_zero
+        filtered_data, n_repeat_sides, percent_close_to_zero, distance_close_to_zero
     )
     valid_users -= problematic_users
     
@@ -911,12 +930,16 @@ if __name__ == "__main__":
     ###################
     # Filter participants by inconsistent or improbable choice thresholds:
     # Improbable choices (left) in the easy_choice_pairs_file
-    # fr,vr  # same finger 1 vs. 2 off home row (studies 1-5)
+    # fr,vr  # same finger 1 vs. 2 off home row (studies 1-6)
     # aq,zq  # same finger 1 vs. 2 off home row (study 2A)
     # sx,xw  # same finger 1 vs. 2 off home row (study 2A)
     # dc,ce  # same finger 1 vs. 2 off home row (study 2A)
     # fd,ce  # home row vs. same finger 2 rows (study 1)
     # ef,vr  # 2 fingers 1 off home row vs. same finger both off home row (study 5)
+    # cd,ec  # same finger 1 vs. 2 off home row (study 6)
+    # df,qz  # 2 strongest fingers vs. weakest finger skip home row (study 6)
+    # df,ex  # 2 strongest fingers vs. skip home row (study 6)
+    # fd,ez  # 2 strongest fingers vs. skip home row (study 6)
     filter_participants_by_num_improbable_choices = True
     filter_participants_by_percent_inconsistencies = False
 
@@ -930,9 +953,9 @@ if __name__ == "__main__":
         inconsistent_threshold = np.Inf
 
     # Filter participants by improbable slider behavior (streaks or close-to-zeros):
-    n_repeat_sides = 10  # Flag users with consecutive same-side selections ((1/2)^10 ~= 0.0977%)
-    percent_close_to_zero = 25  # Flag users with this percent of selections close to zero
-    d_from_zero = 10  # Consider values within this distance of zero as "close to zero" (max 100)
+    n_repeat_sides = 20  # Flag users with consecutive same-side selections ((1/2)^10 ~= 0.0977%; (1/2)^20 = 1/1,048,576)
+    percent_close_to_zero = 90  # Flag users with this percent of selections close to zero
+    distance_close_to_zero = 10  # Consider values within this distance of zero as "close to zero" (max 100)
 
     # Filter rows with inconsistent bigram pair choices or single-presentation bigram pairs PER USER:
     filter_single_or_inconsistent_presentations = True
@@ -991,7 +1014,7 @@ if __name__ == "__main__":
             inconsistent_threshold=inconsistent_threshold,
             n_repeat_sides=n_repeat_sides,
             percent_close_to_zero=percent_close_to_zero,
-            d_from_zero=d_from_zero,
+            distance_close_to_zero=distance_close_to_zero,
             filter_letters=filter_letters
         )
                 
