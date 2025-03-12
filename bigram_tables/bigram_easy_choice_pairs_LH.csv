@@ -1,7 +1,7 @@
 good_choice,bad_choice
-fr,vr  # same finger 1 vs. 2 off home row (studies 1-5)
-aq,zq  # same finger 1 vs. 2 off home row (study 2A)
-sx,xw  # same finger 1 vs. 2 off home row (study 2A)
-dc,ce  # same finger 1 vs. 2 off home row (study 2A)
-fd,ce  # home row vs. same finger 2 rows (study 1)
-ef,vr  # 2 fingers 1 off home row vs. same finger both off home row (study 5)
+fr,vr  # same finger same direction 1 vs. 2 off home row (studies 1-6)
+aq,zq  # same finger same direction 1 vs. 2 off home row (study 2A)
+fd,ce  # 2 strongest fingers home row vs. same finger skip home row (study 1)
+df,qz  # 2 strongest fingers home row vs. weakest finger skip home row (study 6)
+df,ex  # 2 strongest fingers home row vs. skip home row (study 6)
+fd,ez  # 2 strongest fingers home row vs. skip home row (study 6)

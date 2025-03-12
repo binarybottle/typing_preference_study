@@ -276,13 +276,12 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
     user_stats['probable_choices'] = probable_choices['user_id'].value_counts()
     user_stats['improbable_choices'] = improbable_choices['user_id'].value_counts()
 
-    # Calculate unique pairs for probable and improbable choices
-    probable_choices_2x = probable_choices.groupby('user_id')['bigram_pair'].nunique()
-    improbable_choices_2x = improbable_choices.groupby('user_id')['bigram_pair'].nunique()
-    user_stats['probable_choices_2x'] = probable_choices_2x
+    # First, count how many times each user made an improbable choice for each bigram pair
+    pair_counts = improbable_choices.groupby(['user_id', 'bigram_pair']).size().reset_index(name='count')
+    # Then, count how many bigram pairs had a count of 2 (consistently improbable)
+    improbable_choices_2x = pair_counts[pair_counts['count'] == 2].groupby('user_id').size()
     user_stats['improbable_choices_2x'] = improbable_choices_2x
-    # Make sure to handle users who don't have any im/probable choices
-    user_stats['probable_choices_2x'] = user_stats['probable_choices_2x'].fillna(0).astype(int)
+    # Make sure to handle users who don't have any consistent improbable choices
     user_stats['improbable_choices_2x'] = user_stats['improbable_choices_2x'].fillna(0).astype(int)
 
     # Calculate total choices that could be consistent/inconsistent
@@ -321,12 +320,12 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
         print(probable_choices.describe())
         display_information(improbable_choices, "improbable choices", print_headers + ['is_improbable'], nlines)
         print(improbable_choices.describe())
-        display_information(probable_choices_2x, "probable choices 2x", print_headers + ['is_probable_2x'], nlines)
-        print(probable_choices_2x.describe())
-        display_information(improbable_choices_2x, "improbable choices 2x", print_headers + ['is_improbable_2x'], nlines)
+
+        # For improbable_choices_2x
+        print("\nConsistently chosen improbable bigrams per user:")
+        print(improbable_choices_2x.sort_values(ascending=False).head(nlines))
+        print("\nSummary statistics for consistently chosen improbable bigrams:")
         print(improbable_choices_2x.describe())
-        display_information(user_stats, "user statistics", print_user_headers, nlines) 
-        print(user_stats.describe())
     
     # Save the DataFrames to CSV files
     bigram_data.to_csv(f"{output_tables_folder}/processed_bigram_data.csv", index=False)
@@ -334,8 +333,7 @@ def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder,
     inconsistent_choices.to_csv(f"{output_tables_folder}/processed_inconsistent_choices.csv", index=False)
     probable_choices.to_csv(f"{output_tables_folder}/processed_probable_choices.csv", index=False)
     improbable_choices.to_csv(f"{output_tables_folder}/processed_improbable_choices.csv", index=False)
-    probable_choices_2x.to_csv(f"{output_tables_folder}/processed_probable_choices_2x.csv", index=False)
-    improbable_choices_2x.to_csv(f"{output_tables_folder}/processed_improbable_choices_2x.csv", index=False)
+    improbable_choices_2x.to_csv(f"{output_tables_folder}/processed_improbable_choices_2x.csv")
     user_stats.to_csv(f"{output_tables_folder}/processed_user_statistics.csv", index=False)
     
     print(f"Processed data saved to {output_tables_folder}")
@@ -929,17 +927,13 @@ if __name__ == "__main__":
     # Filter parameters
     ###################
     # Filter participants by inconsistent or improbable choice thresholds:
-    # Improbable choices (left) in the easy_choice_pairs_file
-    # fr,vr  # same finger 1 vs. 2 off home row (studies 1-6)
-    # aq,zq  # same finger 1 vs. 2 off home row (study 2A)
-    # sx,xw  # same finger 1 vs. 2 off home row (study 2A)
-    # dc,ce  # same finger 1 vs. 2 off home row (study 2A)
-    # fd,ce  # home row vs. same finger 2 rows (study 1)
-    # ef,vr  # 2 fingers 1 off home row vs. same finger both off home row (study 5)
-    # cd,ec  # same finger 1 vs. 2 off home row (study 6)
-    # df,qz  # 2 strongest fingers vs. weakest finger skip home row (study 6)
-    # df,ex  # 2 strongest fingers vs. skip home row (study 6)
-    # fd,ez  # 2 strongest fingers vs. skip home row (study 6)
+    # Improbable choices (left typing hand) in the easy_choice_pairs_file
+    # fr,vr  # same finger same direction 1 vs. 2 off home row (studies 1-6)
+    # aq,zq  # same finger same direction 1 vs. 2 off home row (study 2A)
+    # fd,ce  # 2 strongest fingers home row vs. same finger skip home row (study 1)
+    # df,qz  # 2 strongest fingers home row vs. weakest finger skip home row (study 6)
+    # df,ex  # 2 strongest fingers home row vs. skip home row (study 6)
+    # fd,ez  # 2 strongest fingers home row vs. skip home row (study 6)
     filter_participants_by_num_improbable_choices = True
     filter_participants_by_percent_inconsistencies = False
 
@@ -958,7 +952,7 @@ if __name__ == "__main__":
     distance_close_to_zero = 10  # Consider values within this distance of zero as "close to zero" (max 100)
 
     # Filter rows with inconsistent bigram pair choices or single-presentation bigram pairs PER USER:
-    filter_single_or_inconsistent_presentations = True
+    filter_single_or_inconsistent_presentations = False
 
     # Filter rows with bigrams containing any of the following letters:
     filter_letters = {'t', 'g', 'b'}
