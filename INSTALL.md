@@ -10,7 +10,7 @@ presents each bigram in a web browser and instructs the user to type the
 bigram three times in a row. Once both bigrams are typed three times in a row
 correctly, the user is asked to choose which is easier (more comfortable) to type.
 All timing and selection data are saved to OSF.io and return codes sent to Prolific.
-
+er
 ## Build 
 
 Installation steps for either local/remote hosting:
