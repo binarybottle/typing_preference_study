@@ -146,6 +146,141 @@ def display_information(dframe, title, print_headers, nlines):
 # Functions to filter users by inconsistent or improbable choice thresholds,
 # consecutive same-side selections, and number of near-zero selections
 ###########################################################################
+def filter_users(data, user_stats, improbable_threshold=np.inf, inconsistent_threshold=np.inf,
+                 n_repeat_sides=10, percent_close_to_zero=25, distance_close_to_zero=10,
+                 filter_by_strong_inconsistencies=False, zero_threshold=20):
+    """
+    Filter out users based on various criteria.
+    
+    Parameters:
+    - data: DataFrame to filter
+    - user_stats: DataFrame containing user statistics
+    - improbable_threshold: Maximum number of improbable choices allowed
+    - inconsistent_threshold: Maximum percentage of inconsistent choices allowed
+    - n_repeat_sides: Number of consecutive same-side selections to flag a user
+    - percent_close_to_zero: Percentage of total trials that are within distance_close_to_zero of zero to flag a user
+    - distance_close_to_zero: Distance from zero to consider as "close to zero"
+    - filter_by_strong_inconsistencies: If True, only consider inconsistent choices that are greater than zero_threshold from zero
+    - zero_threshold: Distance from zero to consider as "strong" inconsistency
+    
+    Returns:
+    - Filtered DataFrame and set of valid user IDs
+    """
+    print("\n____ Filtering users ____\n")
+    initial_users = len(data['user_id'].unique())
+    initial_rows = len(data)
+    
+    all_users = set(data['user_id'].unique())
+    valid_users = all_users.copy()
+    
+    # Track separate impacts for each filter
+    user_impacts = {
+        'improbable': set(),
+        'inconsistent': set(),
+        'slider': set(),
+    }
+    
+    # Filter by improbable choices
+    if improbable_threshold != np.inf:
+        problematic_users = set(user_stats[user_stats['improbable_choices_2x'] > improbable_threshold]['user_id'])
+        user_impacts['improbable'] = problematic_users
+        valid_users -= problematic_users
+        
+        print(f"Users removed due to improbable choices > {improbable_threshold}: {len(problematic_users)}")
+        if len(problematic_users) > 0 and len(problematic_users) <= 10:
+            print(f"Removed users: {problematic_users}")
+    
+    # Filter by inconsistent choices
+    if inconsistent_threshold != np.inf:
+        if filter_by_strong_inconsistencies:
+            print(f"Filtering by strong inconsistencies (|sliderValue| > {zero_threshold})")
+            
+            # We need to calculate this per user
+            problematic_users = set()
+            
+            # Create standardized bigram pair representation as tuples if not already present
+            if 'std_bigram_pair' not in data.columns:
+                data_with_pairs = data.copy()
+                data_with_pairs['std_bigram_pair'] = data_with_pairs.apply(
+                    lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
+            else:
+                data_with_pairs = data
+            
+            # Process each user
+            for user_id, user_data in data_with_pairs.groupby('user_id'):
+                # Group by bigram pairs
+                grouped = user_data.groupby('std_bigram_pair')
+                
+                # Count total multi-presentation pairs
+                total_multi_pairs = 0
+                strong_inconsistent_pairs = 0
+                
+                for _, group in grouped:
+                    # Skip if only one presentation
+                    if len(group) <= 1:
+                        continue
+                    
+                    total_multi_pairs += 1
+                    
+                    # Check if inconsistent
+                    is_consistent = len(set(group['chosenBigram'])) == 1
+                    
+                    if not is_consistent:
+                        # Check if any inconsistent choice has abs(sliderValue) > zero_threshold
+                        has_strong_inconsistency = any(abs(val) > zero_threshold for val in group['sliderValue'])
+                        if has_strong_inconsistency:
+                            strong_inconsistent_pairs += 1
+                
+                # Calculate percentage of strong inconsistent pairs
+                if total_multi_pairs > 0:
+                    inconsistency_pct = (strong_inconsistent_pairs / total_multi_pairs) * 100
+                    if inconsistency_pct > inconsistent_threshold:
+                        problematic_users.add(user_id)
+            
+            user_impacts['inconsistent'] = problematic_users
+            valid_users -= problematic_users
+            
+            print(f"\nUsers removed due to strong inconsistent choices > {inconsistent_threshold}%: {len(problematic_users)}")
+            if len(problematic_users) > 0 and len(problematic_users) <= 10:
+                print(f"Removed users: {problematic_users}")
+        else:
+            # Original method using user_stats
+            user_inconsistency_pcts = (user_stats['inconsistent_choices'] / user_stats['total_consistency_choices'] * 100)
+            problematic_users = set(user_stats[user_inconsistency_pcts > inconsistent_threshold]['user_id'])
+            user_impacts['inconsistent'] = problematic_users
+            valid_users -= problematic_users
+            
+            print(f"\nUsers removed due to inconsistent choices > {inconsistent_threshold}%: {len(problematic_users)}")
+            if len(problematic_users) > 0 and len(problematic_users) <= 10:
+                print(f"Removed users: {problematic_users}")
+    
+    # Filter by problematic slider behavior
+    problematic_users, slider_stats = identify_problematic_slider_behavior(
+        data, n_repeat_sides, percent_close_to_zero, distance_close_to_zero
+    )
+    user_impacts['slider'] = problematic_users
+    valid_users -= problematic_users
+    
+    print(f"\nUsers removed due to problematic slider behavior: {len(problematic_users)}")
+    print(f"  - Same side consecutive selections ({n_repeat_sides}+): {len(slider_stats['repeated_side_users'])}")
+    print(f"  - Frequent zero values ({percent_close_to_zero}%+): {len(slider_stats['close_to_zero_users'])}")
+    if len(problematic_users) > 0 and len(problematic_users) <= 10:
+        print(f"Removed users: {problematic_users}")
+    
+    # Filter data to keep only valid users
+    filtered_data = data[data['user_id'].isin(valid_users)]
+    
+    # Print summary
+    removed_users = initial_users - len(valid_users)
+    removed_rows = initial_rows - len(filtered_data)
+    
+    print(f"\nFiltering summary:")
+    print(f"Initial users: {initial_users}, Remaining users: {len(valid_users)}")
+    print(f"Users removed: {removed_users} ({removed_users/initial_users:.1%})")
+    print(f"Rows removed: {removed_rows} ({removed_rows/initial_rows:.1%})")
+    
+    return filtered_data, valid_users
+
 def filter_data_rows(data, filter_letters=None, filter_single_presentations=False, 
                      filter_inconsistent_choices_away_from_zero=False, zero_threshold=20):
     """
@@ -155,7 +290,7 @@ def filter_data_rows(data, filter_letters=None, filter_single_presentations=Fals
     - data: DataFrame to filter
     - filter_letters: Set of letters to filter out from bigrams, or None to skip letter filtering
     - filter_single_presentations: If True, filter out bigram pairs that appear only once per user
-    - filter_inconsistent_choices_away_from_zero: If True, filter out inconsistent choices where slider values are close to zero
+    - filter_inconsistent_choices_away_from_zero: If True, filter out inconsistent choices where slider values are away from zero
     - zero_threshold: Distance from zero to consider as "close to zero"
     
     Returns:
@@ -240,9 +375,8 @@ def filter_data_rows(data, filter_letters=None, filter_single_presentations=Fals
                 # Keep all consistent choices
                 valid_groups.append((user_id, std_bigram_pair))
             else:
-                # For inconsistent choices, check if slider values are close to zero
-                # If all slider values have absolute value greater than threshold, keep this group
-                if all(abs(val) > zero_threshold for val in group['sliderValue']):
+                # For inconsistent choices, if all slider values have absolute value less than threshold, keep this group
+                if all(abs(val) <= zero_threshold for val in group['sliderValue']):
                     valid_groups.append((user_id, std_bigram_pair))
         
         # Convert valid groups to DataFrame for filtering
@@ -267,86 +401,6 @@ def filter_data_rows(data, filter_letters=None, filter_single_presentations=Fals
     print(f"\nTotal rows removed by all filters: {total_removed} ({total_removed/initial_rows:.1%})")
     
     return data_filtered
-
-def filter_users(data, user_stats, improbable_threshold=np.inf, inconsistent_threshold=np.inf,
-                 n_repeat_sides=10, percent_close_to_zero=25, distance_close_to_zero=10):
-    """
-    Filter out users based on various criteria.
-    
-    Parameters:
-    - data: DataFrame to filter
-    - user_stats: DataFrame containing user statistics
-    - improbable_threshold: Maximum number of improbable choices allowed
-    - inconsistent_threshold: Maximum percentage of inconsistent choices allowed
-    - n_repeat_sides: Number of consecutive same-side selections to flag a user
-    - percent_close_to_zero: Percentage of total trials that are within distance_close_to_zero of zero to flag a user
-    - distance_close_to_zero: Distance from zero to consider as "close to zero"
-    
-    Returns:
-    - Filtered DataFrame and set of valid user IDs
-    """
-    print("\n____ Filtering users ____\n")
-    initial_users = len(data['user_id'].unique())
-    initial_rows = len(data)
-    
-    all_users = set(data['user_id'].unique())
-    valid_users = all_users.copy()
-    
-    # Track separate impacts for each filter
-    user_impacts = {
-        'improbable': set(),
-        'inconsistent': set(),
-        'slider': set(),
-    }
-    
-    # Filter by improbable choices
-    if improbable_threshold != np.inf:
-        problematic_users = set(user_stats[user_stats['improbable_choices_2x'] > improbable_threshold]['user_id'])
-        user_impacts['improbable'] = problematic_users
-        valid_users -= problematic_users
-        
-        print(f"Users removed due to improbable choices > {improbable_threshold}: {len(problematic_users)}")
-        if len(problematic_users) > 0 and len(problematic_users) <= 10:
-            print(f"Removed users: {problematic_users}")
-    
-    # Filter by inconsistent choices
-    if inconsistent_threshold != np.inf:
-        # Calculate percentage of inconsistent choices for each user
-        user_inconsistency_pcts = (user_stats['inconsistent_choices'] / user_stats['total_consistency_choices'] * 100)
-        problematic_users = set(user_stats[user_inconsistency_pcts > inconsistent_threshold]['user_id'])
-        user_impacts['inconsistent'] = problematic_users
-        valid_users -= problematic_users
-        
-        print(f"Users removed due to inconsistent choices > {inconsistent_threshold}%: {len(problematic_users)}")
-        if len(problematic_users) > 0 and len(problematic_users) <= 10:
-            print(f"Removed users: {problematic_users}")
-    
-    # Filter by problematic slider behavior
-    problematic_users, slider_stats = identify_problematic_slider_behavior(
-        data, n_repeat_sides, percent_close_to_zero, distance_close_to_zero
-    )
-    user_impacts['slider'] = problematic_users
-    valid_users -= problematic_users
-    
-    print(f"Users removed due to problematic slider behavior: {len(problematic_users)}")
-    print(f"  - Same side consecutive selections ({n_repeat_sides}+): {len(slider_stats['repeated_side_users'])}")
-    print(f"  - Frequent zero values ({percent_close_to_zero}%+): {len(slider_stats['close_to_zero_users'])}")
-    if len(problematic_users) > 0 and len(problematic_users) <= 10:
-        print(f"Removed users: {problematic_users}")
-    
-    # Filter data to keep only valid users
-    filtered_data = data[data['user_id'].isin(valid_users)]
-    
-    # Print summary
-    removed_users = initial_users - len(valid_users)
-    removed_rows = initial_rows - len(filtered_data)
-    
-    print(f"\nFiltering summary:")
-    print(f"Initial users: {initial_users}, Remaining users: {len(valid_users)}")
-    print(f"Users removed: {removed_users} ({removed_users/initial_users:.1%})")
-    print(f"Rows removed: {removed_rows} ({removed_rows/initial_rows:.1%})")
-    
-    return filtered_data, valid_users
 
 def process_data(data, easy_choice_pairs, remove_pairs, output_tables_folder, verbose=True):
     """
@@ -913,13 +967,14 @@ if __name__ == "__main__":
     # fd,qz  # 2 strongest fingers home row vs. skip home row with weakest finger (study 7)
     # df,wz  # 2 strongest fingers home row vs. skip home row with weakest fingers (study 7)
     filter_users_by_num_improbable_choices = True
-    filter_users_by_percent_inconsistencies = False
+    filter_users_by_percent_inconsistencies = False 
+    filter_by_strong_inconsistencies = False # only works if filter_users_by_percent_inconsistencies is True
     if filter_users_by_num_improbable_choices:
         improbable_threshold = 0 # at least one improbable choice
     else:
         improbable_threshold = np.Inf
     if filter_users_by_percent_inconsistencies:
-        inconsistent_threshold = 50
+        inconsistent_threshold = 75  # Flag users with at least this percent of inconsistent choices
     else:
         inconsistent_threshold = np.Inf
 
@@ -931,7 +986,7 @@ if __name__ == "__main__":
     # Filter rows with *per user* single-presentation bigram pairs or inconsistent bigram pair choices away from zero:
     filter_single_presentations = False
     filter_inconsistent_choices_away_from_zero = True
-    zero_threshold = 20
+    zero_threshold = 50  # Consider values within this distance of zero as "close to zero" (max 100)
 
     # Filter rows with bigrams containing any of the following letters:
     filter_letters = {'t', 'g', 'b'}
@@ -972,24 +1027,26 @@ if __name__ == "__main__":
     # Initial visualizations
     visualize_user_choices(processed_data['user_stats'], output_plots_folder, plot_label="initial_")
 
-    # Step 3: Filter rows
-    filtered_rows = filter_data_rows(
+    # Step 3: FIRST Filter USERS
+    filtered_users_data, valid_users = filter_users(
         raw_data,
-        filter_letters=filter_letters,
-        filter_single_presentations=filter_single_presentations,
-        filter_inconsistent_choices_away_from_zero=filter_inconsistent_choices_away_from_zero,
-        zero_threshold=zero_threshold  # Define what "close to zero" means
-    )
-    
-    # Step 4: Filter users
-    filtered_data, valid_users = filter_users(
-        filtered_rows,
         processed_data['user_stats'],
         improbable_threshold=improbable_threshold if filter_users_by_num_improbable_choices else np.inf,
         inconsistent_threshold=inconsistent_threshold if filter_users_by_percent_inconsistencies else np.inf,
         n_repeat_sides=n_repeat_sides,
         percent_close_to_zero=percent_close_to_zero,
-        distance_close_to_zero=distance_close_to_zero
+        distance_close_to_zero=distance_close_to_zero,
+        filter_by_strong_inconsistencies=filter_by_strong_inconsistencies,
+        zero_threshold=zero_threshold
+    )
+    
+    # Step 4: THEN Filter ROWS on the already user-filtered data
+    filtered_data = filter_data_rows(
+        filtered_users_data,
+        filter_letters=filter_letters,
+        filter_single_presentations=filter_single_presentations,
+        filter_inconsistent_choices_away_from_zero=filter_inconsistent_choices_away_from_zero,
+        zero_threshold=zero_threshold
     )
 
     # Step 5: Process the filtered data to create analysis-ready dataframes
@@ -997,7 +1054,8 @@ if __name__ == "__main__":
 
     final_trials = len(final_processed_data['bigram_data'])
     final_pairs = len(final_processed_data['bigram_data']['bigram_pair'].unique())
-    print(f"\nAfter filtering:")
+    print(f"\nFinal data after all filtering:")
+    print(f"Users: {len(final_processed_data['bigram_data']['user_id'].unique())}")
     print(f"Trials remaining: {final_trials}")
     print(f"Trials removed: {initial_trials - final_trials}")
     print(f"Unique bigram pairs remaining: {final_pairs}")
