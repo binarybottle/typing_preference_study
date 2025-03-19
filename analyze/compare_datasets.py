@@ -11,6 +11,10 @@ It analyzes various aspects including:
 
 Usage:
     python compare_datasets.py --dataset1 path/to/dataset1.csv --dataset2 path/to/dataset2.csv --output path/to/output/folder
+    
+Example:
+    poetry run python3 compare_datasets.py --dataset1 /Users/arno.klein/Downloads/studies_nonprolific/output/tables/processed_bigram_data.csv --dataset2 /Users/arno.klein/Downloads/studies_prolific/output/tables/processed_bigram_data.csv --output /Users/arno/Downloads/compare/compare
+
 """
 
 import os

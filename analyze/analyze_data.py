@@ -2597,14 +2597,20 @@ def main():
     try:
         # Load configuration
         config = load_config(args.config)
-        
+        input_folder = os.path.join(config['data']['input_dir'])
+        output_folder = os.path.join(input_folder, 'output')
+        #output_tables_folder = os.path.join(output_folder, 'tables')
+        output_plots_folder = os.path.join(output_folder, 'plots')
+        #os.makedirs(output_tables_folder, exist_ok=True)
+        os.makedirs(output_plots_folder, exist_ok=True)
+
         # Create output directories
-        choice_folder = os.path.join(config['output']['base_dir'], 
-                                     config['output']['subdirs']['typing_time_vs_preference'])
-        freq_folder = os.path.join(config['output']['base_dir'], 
-                                   config['output']['subdirs']['typing_time_vs_frequency'])
-        predict_folder = os.path.join(config['output']['base_dir'], 
-                                      config['output']['subdirs']['preference_prediction'])
+        choice_folder = os.path.join(output_plots_folder, 
+                                     config['analysis']['subdirs']['typing_time_vs_preference'])
+        freq_folder = os.path.join(output_plots_folder, 
+                                   config['analysis']['subdirs']['typing_time_vs_frequency'])
+        predict_folder = os.path.join(output_plots_folder, 
+                                      config['analysis']['subdirs']['preference_prediction'])
         os.makedirs(choice_folder, exist_ok=True)
         os.makedirs(freq_folder, exist_ok=True)
         os.makedirs(predict_folder, exist_ok=True)
@@ -2633,7 +2639,7 @@ def main():
         variance_results = analyzer.analyze_variance_and_prediction(data, predict_folder)
 
         logger.info("Analyzing bigram pair choices...")
-        pair_stats_df = analyzer.analyze_bigram_pair_choices(data, config['output']['base_dir'],
+        pair_stats_df = analyzer.analyze_bigram_pair_choices(data, output_folder,
                                                              'bigram_pair_choices.csv')
 
     except Exception as e:

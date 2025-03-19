@@ -2,10 +2,25 @@
 """ Process experiment data -- See README.md """
 
 import os
+import yaml
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import median_abs_deviation
+from typing import Dict, Any
+import logging
+import argparse
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Load configuration
+with open('config.yaml', 'r') as config_file:
+    config = yaml.safe_load(config_file)  
 
 #######################################
 # Functions to load and preprocess data
@@ -288,7 +303,7 @@ def filter_data_rows(data, filter_letters=None, filter_single_presentations=Fals
     
     Parameters:
     - data: DataFrame to filter
-    - filter_letters: Set of letters to filter out from bigrams, or None to skip letter filtering
+    - filter_letters: List of letters to filter out from bigrams, or None to skip letter filtering
     - filter_single_presentations: If True, filter out bigram pairs that appear only once per user
     - filter_inconsistent_choices_away_from_zero: If True, filter out inconsistent choices where slider values are away from zero
     - zero_threshold: Distance from zero to consider as "close to zero"
@@ -307,7 +322,7 @@ def filter_data_rows(data, filter_letters=None, filter_single_presentations=Fals
     
     # Filter by letters
     if filter_letters:
-        print(f"Filtering out bigrams containing: {', '.join(sorted(filter_letters))}")
+        print(f"Filtering out bigrams containing: {filter_letters}")
         initial_letter_rows = len(data_filtered)
         
         # Create a filter condition for both chosen and unchosen bigrams
@@ -949,8 +964,51 @@ def determine_winner(group):
         'text': tuple(group['text'].unique())
     })    
 
+def load_config(config_path: str) -> Dict[str, Any]:
+    """Load configuration from YAML file."""
+    try:
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+            
+        # Add default values if not specified
+        defaults = {
+            'visualization': {
+                'style': 'default',
+                'figsize': (10, 6),
+                'dpi': 300,
+                'colors': {
+                    'primary': '#1f77b4',
+                    'secondary': '#ff7f0e'
+                }
+            }
+        }
+        
+        # Update config with defaults for missing values
+        for section, values in defaults.items():
+            if section not in config:
+                config[section] = values
+            elif isinstance(values, dict):
+                for key, value in values.items():
+                    if key not in config[section]:
+                        config[section][key] = value
+        
+        return config
+            
+    except Exception as e:
+        logger.error(f"Error loading config from {config_path}: {str(e)}")
+        raise
+
 # Main execution
 if __name__ == "__main__":
+
+    # Parse arguments
+    parser = argparse.ArgumentParser(description='Process bigram typing data')
+    parser.add_argument('--config', default='config.yaml', help='Path to configuration file')
+    args = parser.parse_args()
+    
+    # Load configuration
+    config = load_config(args.config)
+    input_folder = os.path.join(config['data']['input_dir'])
 
     ###################
     # Filter parameters
@@ -966,39 +1024,38 @@ if __name__ == "__main__":
     # fd,ez  # 2 strongest fingers home row vs. skip home row (study 6)
     # fd,qz  # 2 strongest fingers home row vs. skip home row with weakest finger (study 7)
     # df,wz  # 2 strongest fingers home row vs. skip home row with weakest fingers (study 7)
-    filter_users_by_num_improbable_choices = True
-    filter_users_by_percent_inconsistencies = False 
-    filter_by_strong_inconsistencies = False # only works if filter_users_by_percent_inconsistencies is True
+    filter_users_by_num_improbable_choices = config['process']['filter_users_by_num_improbable_choices']
+    filter_users_by_percent_inconsistencies = config['process']['filter_users_by_percent_inconsistencies'] 
+    filter_by_strong_inconsistencies = config['process']['filter_by_strong_inconsistencies'] # only works if filter_users_by_percent_inconsistencies is True
     if filter_users_by_num_improbable_choices:
-        improbable_threshold = 0 # at least one improbable choice
+        improbable_threshold = config['process']['improbable_threshold'] # at least one improbable choice
     else:
         improbable_threshold = np.Inf
     if filter_users_by_percent_inconsistencies:
-        inconsistent_threshold = 75  # Flag users with at least this percent of inconsistent choices
+        inconsistent_threshold = config['process']['inconsistent_threshold']  # Flag users with at least this percent of inconsistent choices
     else:
         inconsistent_threshold = np.Inf
 
     # Filter users by improbable slider behavior (streaks or close-to-zeros):
-    n_repeat_sides = 20  # Flag users with consecutive same-side selections ((1/2)^10 ~= 0.0977%; (1/2)^20 = 1/1,048,576)
-    percent_close_to_zero = 90  # Flag users with this percent of selections close to zero
-    distance_close_to_zero = 10  # Consider values within this distance of zero as "close to zero" (max 100)
+    n_repeat_sides = config['process']['n_repeat_sides']  # Flag users with consecutive same-side selections ((1/2)^10 ~= 0.0977%; (1/2)^20 = 1/1,048,576)
+    percent_close_to_zero = config['process']['percent_close_to_zero']  # Flag users with this percent of selections close to zero
+    distance_close_to_zero = config['process']['distance_close_to_zero']  # Consider values within this distance of zero as "close to zero" (max 100)
 
     # Filter rows with *per user* single-presentation bigram pairs or inconsistent bigram pair choices away from zero:
-    filter_single_presentations = False
-    filter_inconsistent_choices_away_from_zero = True
-    zero_threshold = 50  # Consider values within this distance of zero as "close to zero" (max 100)
+    filter_single_presentations = config['process']['filter_single_presentations']
+    filter_inconsistent_choices_away_from_zero = config['process']['filter_inconsistent_choices_away_from_zero']
+    zero_threshold = config['process']['zero_threshold']  # Consider values within this distance of zero as "close to zero" (max 100)
 
     # Filter rows with bigrams containing any of the following letters:
-    filter_letters = {'t', 'g', 'b'}
-    
+    filter_letters = config['process']['filter_letters'] #{'t', 'g', 'b'}
+
     ################################
     # Load, combine, and filter data
     ################################
     # Set the paths for input and output
-    input_folder = '/Users/arno/Downloads/osf/summary_data'
-    output_folder = os.path.join(os.path.dirname(input_folder), 'output')
-    output_tables_folder = os.path.join(output_folder, 'tables', 'processed_data')
-    output_plots_folder = os.path.join(output_folder, 'plots', 'processed_data')
+    output_folder = os.path.join(input_folder, 'output')
+    output_tables_folder = os.path.join(output_folder, 'tables')
+    output_plots_folder = os.path.join(output_folder, 'plots')
     os.makedirs(output_tables_folder, exist_ok=True)
     os.makedirs(output_plots_folder, exist_ok=True)
 

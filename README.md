@@ -20,7 +20,7 @@ The purpose of the scripts in this repository is to determine which bigram in ea
     - Step 5. Store data in OSF.io data repository.
     - Step 6. Send participant back to the Prolific crowdsourcing platform.
 
-  - analyze/process_data.py: script to process/filter experiment's bigram typing data
+  - analyze/process_data.py: script to process/filter experiment's bigram typing data (python process_data.py --config config.yaml)
 
     - Input: csv tables of summary data, easy choice (improbable) bigram pairs
     - Output: csv tables and plots
