@@ -2,7 +2,7 @@
  
 -- jspsych website to collect study data via Prolific and python analysis code --
 
-Author: Arno Klein (binarybottle.com)
+Author: Arno Klein (arnoklein.info)
 
 GitHub repository: binarybottle/bigram-typing-preference-study
 

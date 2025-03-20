@@ -1,7 +1,7 @@
 # README for analyze_data.py
 Bigram Typing Analysis Pipeline Documentation
 
-Author: Arno Klein (binarybottle.com)
+Author: Arno Klein (arnoklein.info)
 
 GitHub repository: binarybottle/bigram-typing-comfort-experiment
 
