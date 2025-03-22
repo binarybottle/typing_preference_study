@@ -98,43 +98,6 @@ async function loadBigramPairs(trainingFile, mainFile) {
   return { introductoryPairs, mainPairs };
 }
 
-// global styles for the experiment
-function setGlobalStyles() {
-  const style = document.createElement('style');
-  style.textContent = `
-    .jspsych-content {
-      max-width: 90% !important;
-      font-size: 24px !important;
-    }
-    .jspsych-btn {
-      font-size: 20px !important;
-      padding: 15px 25px !important;
-      margin: 10px !important;
-    }
-    #timer {
-      position: fixed;
-      top: 10px;
-      right: 20px;
-      font-size: 20px;
-      color: #000;
-    }
-    .slider-container {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 20px 0;
-    }
-    .slider {
-      width: 300px;
-      margin: 0 10px;
-    }
-    .slider.inactive {
-      opacity: 0.5;
-    }
-  `;
-  document.head.appendChild(style);
-}
-
 // Function to create and update a progress bar
 function createProgressBar() {
   const progressContainer = document.createElement('div');
@@ -204,7 +167,7 @@ function showProgressBar() {
   }
 }
 
-// Update setGlobalStyles function to include progress bar styles
+// global styles for the experiment
 function setGlobalStyles() {
   const style = document.createElement('style');
   style.textContent = `
@@ -300,6 +263,117 @@ function setGlobalStyles() {
     }
   `;
   document.head.appendChild(style);
+}
+
+// Consent trial
+const consentTrial = {
+  type: htmlButtonResponse,
+  stimulus: `
+    <div class='instruction' style='text-align: left; max-width: 800px; margin: 0 auto;'> 
+      <h2 style='text-align: center;'>Welcome</h2>
+      <dl>
+          <dt>Purpose</dt>
+          <dd>The purpose of this study is to determine how comfortable different letter pairs 
+          are to type on a computer keyboard to inform the design of future keyboard layouts.</dd>
+
+          <dt>Expectations</dt>
+          <dd>It is expected that you will be <b>touch typing</b> on a <b>QWERTY desktop computer keyboard</b>.</dd>
+
+          <dt>Procedures</dt>
+          <dd>If you choose to participate, you will be repeatedly asked to type two new pairs 
+          of letters and report which pair is easier (more comfortable) to type. </dd>
+
+          <dt>Risks</dt>
+          <dd>There are no anticipated risks or discomforts from this research that 
+          you would not normally have when typing on your own keyboard.</dd>
+
+          <dt>Benefits</dt>
+          <dd>There are no anticipated benefits to you from this research.</dd>
+
+          <dt>Compensation</dt>
+          <dd>If you decide to participate, you will be compensated for your participation.</dd>
+
+          <dt>Participation</dt>
+          <dd>Taking part or not in this research study is your decision. 
+          You can decide to participate and then change your mind at any point.</dd>
+
+          <dt>Contact Information</dt>
+          <dd>If you have any questions about the purpose, procedures, or any other issues 
+          related to this research study you may contact the Principal Investigator, 
+          Dr. Arno Klein, at arno.klein@childmind.org. </dd>
+      </dl>
+      <p style='text-align: center; font-weight: bold; margin-top: 20px;'>
+        Do you consent to participate in this study? <br> You must be 18 years of age or older to participate.
+      </p>
+    </div>
+  `,
+  choices: ["I consent", "I do not consent"],
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
+  on_finish: function(data) {
+    if (data.response === 1) {  // "I do not consent" is selected
+      redirectToProlific(NO_CONSENT_CODE);
+    }
+  }
+};
+
+// First informational page
+const keyboardLayoutInfo = {
+  type: htmlButtonResponse,
+  stimulus: `
+    <div class='instruction'> 
+      <p>It is expected that your keyboard has the following character layout:</p>
+      <div style="display: flex; justify-content: center; margin: 20px 0;">
+        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/qwerty-layout.jpg" width="500" style="max-width: 100%;">
+      </div>
+    </div>
+  `,
+  choices: ["Next >"],
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
+};
+
+// Second informational page
+const typingInstructionsInfo = {
+  type: htmlButtonResponse,
+  stimulus: `
+    <div class='instruction'> 
+      <p>You wil be asked to <strong>touch type</strong> text containing pairs of letters.
+         Touch type as you normally would, with left fingers above the home row letters 
+         <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
+         and right fingers above the home row letters 
+         <span style="white-space: nowrap;"><span id=keystroke>J</span><span id=keystroke>K</span><span id=keystroke>L</span><span id=keystroke>;</span></span>
+         </p>
+      <div style="display: flex; justify-content: center; margin: 20px 0;">
+        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
+      </div>
+      <p>After typing the text, you will slide a slider bar <b>closer to the letter pair that felt easier for you to type</b>.</p>
+    </div>
+  `,
+  choices: ["Next >"],
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
+};
+
+// Function to generate random text with spaces
+function generateRandomText(ncharacters, character_list) {
+  let text = '';
+  let nextSpace = 5 + Math.floor(Math.random() * 4); // 5-8 characters
+  for (let i = 0; i < ncharacters; i++) {
+    if (i === nextSpace) {
+      text += ' ';
+      nextSpace = i + 5 + Math.floor(Math.random() * 4);
+    } else {
+      text += character_list[Math.floor(Math.random() * character_list.length)];
+    }
+  }
+  return text.replace(/\s+/g, ' ').trim(); // Ensure only single spaces and trim any leading/trailing spaces
+}
+
+// Add a function to track trial progress and update the progress bar
+let completedTrials = 0;
+let totalTrials = 0;
+
+function updateTrialProgress() {
+  completedTrials++;
+  updateProgressBar(completedTrials, totalTrials);
 }
 
 // createTypingTrial function tracks progress
@@ -464,263 +538,6 @@ function showSlider(bigram1, bigram2, trialId, fullText, keyData) {
   });
 }
 
-// Add a function to track trial progress and update the progress bar
-let completedTrials = 0;
-let totalTrials = 0;
-
-function updateTrialProgress() {
-  completedTrials++;
-  updateProgressBar(completedTrials, totalTrials);
-}
-
-// thankYouTrial
-const thankYouTrial = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class="thank-you-container">
-      <div class="checkmark"></div>
-      <h2 class="thank-you-title">Thank You!</h2>
-      <p class="thank-you-message">
-        Your participation in this study is greatly appreciated.<br>
-        Your responses will help us improve keyboard layouts for better typing experiences.<br><br>
-        All of your data has been successfully recorded.
-      </p>
-    </div>
-  `,
-  choices: ["Complete Study"],
-  button_html: '<button class="thank-you-button">%choice%</button>',
-  on_load: function() {
-    console.log("Thank you trial loaded");
-    hideProgressBar(); // Hide progress bar on the thank you screen
-  },
-  on_finish: function () {
-    console.log("Thank you trial finished, calling endExperiment function now...");
-    endExperiment();
-  }
-};
-
-// runExperiment function
-async function runExperiment(options = {}) {
-  // Update experimentConfig with provided options
-  Object.assign(experimentConfig, options);
-
-  setGlobalStyles();
-  
-  const osfToken = await loadOSFToken();
-  const { introductoryPairs, mainPairs } = await loadBigramPairs(
-    experimentConfig.trainingBigramFile,
-    experimentConfig.mainBigramFile
-  );
-  
-  if (introductoryPairs.length === 0 || (mainPairs.length === 0 && !experimentConfig.practiceOnly)) {
-    jsPsych.endExperiment('Error loading bigram pairs');
-    return;
-  }
-
-  // Apply randomization based on configuration
-  let processedMainPairs = mainPairs;
-  if (experimentConfig.randomizePairOrder) {
-    processedMainPairs = jsPsych.randomization.shuffle(processedMainPairs);
-  }
-  if (experimentConfig.randomizeBigramsWithinPairs) {
-    processedMainPairs = processedMainPairs.map(pair => jsPsych.randomization.shuffle(pair));
-  }
-
-  // Calculate total number of trials for progress tracking
-  totalTrials = introductoryPairs.length;
-  if (!experimentConfig.practiceOnly) {
-    totalTrials += processedMainPairs.length;
-  }
-  
-  // Create progress bar
-  createProgressBar();
-
-  const timeline = [];
-
-  // Add consent trial to timeline
-  timeline.push(consentTrial);
-
-  // Create the experiment timeline
-  const experimentTimeline = {
-    timeline: [
-      {
-        type: htmlButtonResponse,
-        stimulus: keyboardLayoutInfo.stimulus,
-        choices: keyboardLayoutInfo.choices,
-        button_html: keyboardLayoutInfo.button_html,
-        on_load: function() {
-          hideProgressBar(); // Hide progress bar on instruction screens
-        }
-      },
-      {
-        type: htmlButtonResponse,
-        stimulus: typingInstructionsInfo.stimulus,
-        choices: typingInstructionsInfo.choices,
-        button_html: typingInstructionsInfo.button_html,
-        on_load: function() {
-          hideProgressBar(); // Hide progress bar on instruction screens
-        }
-      },
-      {
-        type: htmlButtonResponse,
-        stimulus: startExperiment.stimulus,
-        choices: startExperiment.choices,
-        button_html: startExperiment.button_html,
-        on_load: function() {
-          // Initialize progress bar at 0%
-          updateProgressBar(0, totalTrials);
-          showProgressBar();
-        },
-        on_finish: () => {
-          experimentStartTime = performance.now();
-          if (experimentConfig.useTimer) {
-            startExperimentTimer();
-          }
-        }
-      },
-      ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`)
-      ]),
-    ],
-    conditional_function: function() {
-      // Only run this timeline if consent was given (i.e., the first option was selected)
-      return jsPsych.data.get().last(1).values()[0].response === 0;
-    }
-  };
-
-  // Add transition screen and main pairs if not practiceOnly
-  if (!experimentConfig.practiceOnly) {
-    experimentTimeline.timeline.push(
-      {
-        type: htmlButtonResponse,
-        stimulus: `<p>Great job! You've completed the practice session.<br>
-                    Now we'll move on to the main part of the experiment,<br>
-                    with a series of tens of such trials.<br><br>
-                    Please give your best estimate about how much easier<br>
-                    one letter pair is to type than the other.</p>`,
-        choices: ['Continue'],
-        on_load: function() {
-          hideProgressBar(); // Hide progress bar on transition screen
-        }
-      },
-      ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`)
-      ])
-    );
-  }
-
-  // Add thank you trial at the end
-  experimentTimeline.timeline.push(thankYouTrial);
-
-  timeline.push(experimentTimeline);
-
-  // Run the timeline
-  console.log("Running experiment timeline...");
-  jsPsych.run(timeline);
-}
-
-// Consent trial
-const consentTrial = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class='instruction' style='text-align: left; max-width: 800px; margin: 0 auto;'> 
-      <h2 style='text-align: center;'>Welcome</h2>
-      <dl>
-          <dt>Purpose</dt>
-          <dd>The purpose of this study is to determine how comfortable different letter pairs 
-          are to type on a computer keyboard to inform the design of future keyboard layouts.</dd>
-
-          <dt>Expectations</dt>
-          <dd>It is expected that you will be <b>touch typing</b> on a <b>QWERTY desktop computer keyboard</b>.</dd>
-
-          <dt>Procedures</dt>
-          <dd>If you choose to participate, you will be repeatedly asked to type two new pairs 
-          of letters and report which pair is easier (more comfortable) to type. </dd>
-
-          <dt>Risks</dt>
-          <dd>There are no anticipated risks or discomforts from this research that 
-          you would not normally have when typing on your own keyboard.</dd>
-
-          <dt>Benefits</dt>
-          <dd>There are no anticipated benefits to you from this research.</dd>
-
-          <dt>Compensation</dt>
-          <dd>If you decide to participate, you will be compensated for your participation.</dd>
-
-          <dt>Participation</dt>
-          <dd>Taking part or not in this research study is your decision. 
-          You can decide to participate and then change your mind at any point.</dd>
-
-          <dt>Contact Information</dt>
-          <dd>If you have any questions about the purpose, procedures, or any other issues 
-          related to this research study you may contact the Principal Investigator, 
-          Dr. Arno Klein, at arno.klein@childmind.org. </dd>
-      </dl>
-      <p style='text-align: center; font-weight: bold; margin-top: 20px;'>
-        Do you consent to participate in this study? <br> You must be 18 years of age or older to participate.
-      </p>
-    </div>
-  `,
-  choices: ["I consent", "I do not consent"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
-  on_finish: function(data) {
-    if (data.response === 1) {  // "I do not consent" is selected
-      redirectToProlific(NO_CONSENT_CODE);
-    }
-  }
-};
-
-// First informational page
-const keyboardLayoutInfo = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class='instruction'> 
-      <p>It is expected that your keyboard has the following character layout:</p>
-      <div style="display: flex; justify-content: center; margin: 20px 0;">
-        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/qwerty-layout.jpg" width="500" style="max-width: 100%;">
-      </div>
-    </div>
-  `,
-  choices: ["Next >"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
-};
-
-// Second informational page
-const typingInstructionsInfo = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class='instruction'> 
-      <p>You wil be asked to <strong>touch type</strong> text containing pairs of letters.
-         Touch type as you normally would, with left fingers above the home row letters 
-         <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
-         and right fingers above the home row letters 
-         <span style="white-space: nowrap;"><span id=keystroke>J</span><span id=keystroke>K</span><span id=keystroke>L</span><span id=keystroke>;</span></span>
-         </p>
-      <div style="display: flex; justify-content: center; margin: 20px 0;">
-        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
-      </div>
-      <p>After typing the text, you will slide a slider bar <b>closer to the letter pair that felt easier for you to type</b>.</p>
-    </div>
-  `,
-  choices: ["Next >"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
-};
-
-// Function to generate random text with spaces
-function generateRandomText(ncharacters, character_list) {
-  let text = '';
-  let nextSpace = 5 + Math.floor(Math.random() * 4); // 5-8 characters
-  for (let i = 0; i < ncharacters; i++) {
-    if (i === nextSpace) {
-      text += ' ';
-      nextSpace = i + 5 + Math.floor(Math.random() * 4);
-    } else {
-      text += character_list[Math.floor(Math.random() * character_list.length)];
-    }
-  }
-  return text.replace(/\s+/g, ' ').trim(); // Ensure only single spaces and trim any leading/trailing spaces
-}
-
 function calculateBigramTimes(keyData, bigram1, bigram2) {
   const bigramTimes = {
     [bigram1]: [],
@@ -882,183 +699,254 @@ async function storeDataOnOSF(data) {
   const { rawContent, summaryContent } = convertToCSV(data);
 
   // Define URLs after prolificID is assigned
-  const rawDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=raw_data_${prolificID}_${Date.now()}.csv`;
-  const summaryDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=summary_data_${prolificID}_${Date.now()}.csv`;
+// Define URLs after prolificID is assigned
+const rawDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=raw_data_${prolificID}_${Date.now()}.csv`;
+const summaryDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=summary_data_${prolificID}_${Date.now()}.csv`;
 
-  // Store data on OSF
-  try {
-    console.log("Attempting to upload raw data to OSF...");
-    await uploadWithRetry(rawDataUrl, rawContent, osfToken);
+// Store data on OSF
+try {
+  console.log("Attempting to upload raw data to OSF...");
+  await uploadWithRetry(rawDataUrl, rawContent, osfToken);
 
-    console.log("Attempting to upload summary data to OSF...");
-    await uploadWithRetry(summaryDataUrl, summaryContent, osfToken);
+  console.log("Attempting to upload summary data to OSF...");
+  await uploadWithRetry(summaryDataUrl, summaryContent, osfToken);
 
-    // Store data locally on the server, passing the Prolific ID
-    console.log("Storing data locally on the server...");
-    storeDataLocally(rawContent, summaryContent, prolificID);
+  // Store data locally on the server, passing the Prolific ID
+  console.log("Storing data locally on the server...");
+  storeDataLocally(rawContent, summaryContent, prolificID);
 
-    console.log('Data successfully stored on OSF and locally on the server');
-  } catch (error) {
-    console.error('Error storing data:', error);
-    throw error;
-  }
+  console.log('Data successfully stored on OSF and locally on the server');
+} catch (error) {
+  console.error('Error storing data:', error);
+  throw error;
+}
 }
 
 // Timer function for the entire experiment
 function startExperimentTimer() {
-  if (!experimentConfig.useTimer) {
-    console.log("Timer is disabled.");
-    return;
+if (!experimentConfig.useTimer) {
+  console.log("Timer is disabled.");
+  return;
+}
+
+let timeRemaining = experimentConfig.timeLimit;
+const timerElement = document.createElement('div');
+timerElement.id = 'timer';
+document.body.appendChild(timerElement);
+
+timerInterval = setInterval(() => {
+  timeRemaining--;
+  timerElement.textContent = `Time left: ${timeRemaining} s`;
+
+  if (timeRemaining <= 0) {
+    clearInterval(timerInterval);
+    console.log("Time is up, ending experiment...");
+    endExperiment();
   }
-
-  let timeRemaining = experimentConfig.timeLimit;
-  const timerElement = document.createElement('div');
-  timerElement.id = 'timer';
-  document.body.appendChild(timerElement);
-
-  timerInterval = setInterval(() => {
-    timeRemaining--;
-    timerElement.textContent = `Time left: ${timeRemaining} s`;
-
-    if (timeRemaining <= 0) {
-      clearInterval(timerInterval);
-      console.log("Time is up, ending experiment...");
-      endExperiment();
-    }
-  }, 1000);
+}, 1000);
 }
 
 // Start button screen
 const startExperiment = {
-  type: htmlButtonResponse,
-  stimulus: function() {
-    let stimulusText = `<p style="font-size: 28px;">Ready to start?</p>`;
-    if (experimentConfig.useTimer) {
-      stimulusText += `<p style="font-size: 24px;">You will have ${experimentConfig.timeLimit} seconds to complete the experiment.</p>`;
-    }
-    stimulusText += `<p style="font-size: 24px;">Press the button when you're ready to begin!</p>`;
-    return stimulusText;
-  },
-  choices: ["Start"],
-  button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
-  on_finish: () => {
-    experimentStartTime = performance.now();
-    if (experimentConfig.useTimer) {
-      startExperimentTimer();
-    }
+type: htmlButtonResponse,
+stimulus: function() {
+  let stimulusText = `<p style="font-size: 28px;">Ready to start?</p>`;
+  if (experimentConfig.useTimer) {
+    stimulusText += `<p style="font-size: 24px;">You will have ${experimentConfig.timeLimit} seconds to complete the experiment.</p>`;
   }
+  stimulusText += `<p style="font-size: 24px;">Press the button when you're ready to begin!</p>`;
+  return stimulusText;
+},
+choices: ["Start"],
+button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
+on_finish: () => {
+  experimentStartTime = performance.now();
+  if (experimentConfig.useTimer) {
+    startExperimentTimer();
+  }
+}
+};
+
+// thankYouTrial
+const thankYouTrial = {
+type: htmlButtonResponse,
+stimulus: `
+  <div class="thank-you-container">
+    <div class="checkmark"></div>
+    <h2 class="thank-you-title">Thank You!</h2>
+    <p class="thank-you-message">
+      Your participation in this study is greatly appreciated.<br>
+      Your responses will help us improve keyboard layouts for better typing experiences.<br><br>
+      All of your data has been successfully recorded.
+    </p>
+  </div>
+`,
+choices: ["Complete Study"],
+button_html: '<button class="thank-you-button">%choice%</button>',
+on_load: function() {
+  console.log("Thank you trial loaded");
+  hideProgressBar(); // Hide progress bar on the thank you screen
+},
+on_finish: function () {
+  console.log("Thank you trial finished, calling endExperiment function now...");
+  endExperiment();
+}
 };
 
 // End the experiment and upload data to OSF
 function endExperiment() {
-  const experimentData = jsPsych.data.get().values();
-  console.log("All experiment data:", experimentData);
+const experimentData = jsPsych.data.get().values();
+console.log("All experiment data:", experimentData);
 
-  // Filter out any empty or invalid data
-  const validData = experimentData.filter(trial => trial.task === 'typing_and_choice' && trial.keyData && trial.keyData.length > 0);
-  console.log("Valid data for CSV:", validData);
+// Filter out any empty or invalid data
+const validData = experimentData.filter(trial => trial.task === 'typing_and_choice' && trial.keyData && trial.keyData.length > 0);
+console.log("Valid data for CSV:", validData);
 
-  // Try storing data on OSF, but redirect to Prolific regardless of success or failure
-  storeDataOnOSF(validData)
-    .then(() => {
-      console.log('Data stored successfully on OSF.');
-    })
-    .catch((error) => {
-      console.error('Error storing data on OSF:', error);
-    })
-    .finally(() => {
-      // Ensure redirection to Prolific regardless of data storage success or failure
-      console.log('Redirecting to Prolific after experiment ends.');
-      redirectToProlific(COMPLETION_CODE);
-    });
+// Try storing data on OSF, but redirect to Prolific regardless of success or failure
+storeDataOnOSF(validData)
+  .then(() => {
+    console.log('Data stored successfully on OSF.');
+  })
+  .catch((error) => {
+    console.error('Error storing data on OSF:', error);
+  })
+  .finally(() => {
+    // Ensure redirection to Prolific regardless of data storage success or failure
+    console.log('Redirecting to Prolific after experiment ends.');
+    redirectToProlific(COMPLETION_CODE);
+  });
 }
 
-// Run the experiment
+// runExperiment function
 async function runExperiment(options = {}) {
-  // Update experimentConfig with provided options
-  Object.assign(experimentConfig, options);
+// Update experimentConfig with provided options
+Object.assign(experimentConfig, options);
 
-  setGlobalStyles();
+setGlobalStyles();
 
-  const osfToken = await loadOSFToken();
-  const { introductoryPairs, mainPairs } = await loadBigramPairs(
-    experimentConfig.trainingBigramFile,
-    experimentConfig.mainBigramFile
-  );
-  
-  if (introductoryPairs.length === 0 || (mainPairs.length === 0 && !experimentConfig.practiceOnly)) {
-    jsPsych.endExperiment('Error loading bigram pairs');
-    return;
-  }
+const osfToken = await loadOSFToken();
+const { introductoryPairs, mainPairs } = await loadBigramPairs(
+  experimentConfig.trainingBigramFile,
+  experimentConfig.mainBigramFile
+);
 
-  // Apply randomization based on configuration
-  let processedMainPairs = mainPairs;
-  if (experimentConfig.randomizePairOrder) {
-    processedMainPairs = jsPsych.randomization.shuffle(processedMainPairs);
-  }
-  if (experimentConfig.randomizeBigramsWithinPairs) {
-    processedMainPairs = processedMainPairs.map(pair => jsPsych.randomization.shuffle(pair));
-  }
+if (introductoryPairs.length === 0 || (mainPairs.length === 0 && !experimentConfig.practiceOnly)) {
+  jsPsych.endExperiment('Error loading bigram pairs');
+  return;
+}
 
-  const timeline = [];
+// Apply randomization based on configuration
+let processedMainPairs = mainPairs;
+if (experimentConfig.randomizePairOrder) {
+  processedMainPairs = jsPsych.randomization.shuffle(processedMainPairs);
+}
+if (experimentConfig.randomizeBigramsWithinPairs) {
+  processedMainPairs = processedMainPairs.map(pair => jsPsych.randomization.shuffle(pair));
+}
 
-  // Add consent trial to timeline
-  timeline.push(consentTrial);
+// Calculate total number of trials for progress tracking
+totalTrials = introductoryPairs.length;
+if (!experimentConfig.practiceOnly) {
+  totalTrials += processedMainPairs.length;
+}
 
-  // Create the experiment timeline
-  const experimentTimeline = {
-    timeline: [
-      keyboardLayoutInfo,
-      typingInstructionsInfo,
-      startExperiment,
-      ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`)
-      ]),
-    ],
-    conditional_function: function() {
-      // Only run this timeline if consent was given (i.e., the first option was selected)
-      return jsPsych.data.get().last(1).values()[0].response === 0;
-    }
-  };
+// Create progress bar
+createProgressBar();
 
-  // Add transition screen and main pairs if not practiceOnly
-  if (!experimentConfig.practiceOnly) {
-    experimentTimeline.timeline.push(
-      {
-        type: htmlButtonResponse,
-        stimulus: `<p>Great job! You've completed the practice session.<br>
-                    Now we'll move on to the main part of the experiment,<br>
-                    with a series of tens of such trials.<br><br>
-                    Please give your best estimate about how much easier<br>
-                    one letter pair is to type than the other.</p>`,
-        choices: ['Continue'],
+const timeline = [];
+
+// Add consent trial to timeline
+timeline.push(consentTrial);
+
+// Create the experiment timeline
+const experimentTimeline = {
+  timeline: [
+    {
+      type: htmlButtonResponse,
+      stimulus: keyboardLayoutInfo.stimulus,
+      choices: keyboardLayoutInfo.choices,
+      button_html: keyboardLayoutInfo.button_html,
+      on_load: function() {
+        hideProgressBar(); // Hide progress bar on instruction screens
+      }
+    },
+    {
+      type: htmlButtonResponse,
+      stimulus: typingInstructionsInfo.stimulus,
+      choices: typingInstructionsInfo.choices,
+      button_html: typingInstructionsInfo.button_html,
+      on_load: function() {
+        hideProgressBar(); // Hide progress bar on instruction screens
+      }
+    },
+    {
+      type: htmlButtonResponse,
+      stimulus: startExperiment.stimulus,
+      choices: startExperiment.choices,
+      button_html: startExperiment.button_html,
+      on_load: function() {
+        // Initialize progress bar at 0%
+        updateProgressBar(0, totalTrials);
+        showProgressBar();
       },
-      ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`)
-      ])
-    );
+      on_finish: () => {
+        experimentStartTime = performance.now();
+        if (experimentConfig.useTimer) {
+          startExperimentTimer();
+        }
+      }
+    },
+    ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
+      createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`)
+    ]),
+  ],
+  conditional_function: function() {
+    // Only run this timeline if consent was given (i.e., the first option was selected)
+    return jsPsych.data.get().last(1).values()[0].response === 0;
   }
+};
 
-  // Add thank you trial at the end
-  experimentTimeline.timeline.push(thankYouTrial);
+// Add transition screen and main pairs if not practiceOnly
+if (!experimentConfig.practiceOnly) {
+  experimentTimeline.timeline.push(
+    {
+      type: htmlButtonResponse,
+      stimulus: `<p>Great job! You've completed the practice session.<br>
+                  Now we'll move on to the main part of the experiment,<br>
+                  with a series of tens of such trials.<br><br>
+                  Please give your best estimate about how much easier<br>
+                  one letter pair is to type than the other.</p>`,
+      choices: ['Continue'],
+      on_load: function() {
+        hideProgressBar(); // Hide progress bar on transition screen
+      }
+    },
+    ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
+      createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`)
+    ])
+  );
+}
 
-  timeline.push(experimentTimeline);
+// Add thank you trial at the end
+experimentTimeline.timeline.push(thankYouTrial);
 
-  // Run the timeline
-  console.log("Running experiment timeline...");
-  jsPsych.run(timeline);
+timeline.push(experimentTimeline);
+
+// Run the timeline
+console.log("Running experiment timeline...");
+jsPsych.run(timeline);
 }
 
 // Start the experiment with options
 runExperiment({
-  practiceOnly: experimentConfig.practiceOnly,
-  useTimer: experimentConfig.useTimer,
-  timeLimit: experimentConfig.timeLimit,
-  nbigramRepetitions: experimentConfig.nbigramRepetitions,
-  randomizePairOrder: experimentConfig.randomizePairOrder,
-  randomizeBigramsWithinPairs: experimentConfig.randomizeBigramsWithinPairs,
-  trainingBigramFile: experimentConfig.trainingBigramFile,
-  mainBigramFile: experimentConfig.mainBigramFile,
-  character_list: experimentConfig.character_list,
-  ncharacters: experimentConfig.ncharacters
+practiceOnly: experimentConfig.practiceOnly,
+useTimer: experimentConfig.useTimer,
+timeLimit: experimentConfig.timeLimit,
+nbigramRepetitions: experimentConfig.nbigramRepetitions,
+randomizePairOrder: experimentConfig.randomizePairOrder,
+randomizeBigramsWithinPairs: experimentConfig.randomizeBigramsWithinPairs,
+trainingBigramFile: experimentConfig.trainingBigramFile,
+mainBigramFile: experimentConfig.mainBigramFile,
+character_list: experimentConfig.character_list,
+ncharacters: experimentConfig.ncharacters
 });
