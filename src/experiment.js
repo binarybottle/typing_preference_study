@@ -112,8 +112,8 @@ function createProgressCounter() {
     position: fixed;
     top: 20px;
     right: 20px;
-    background-color: rgba(65, 105, 225, 0.9);
-    color: white;
+    background-color: rgba(240, 240, 240, 0.9);
+    color: #333;
     border-radius: 8px;
     padding: 8px 15px;
     font-size: 16px;
@@ -123,7 +123,6 @@ function createProgressCounter() {
     display: block;
   `;
   document.body.appendChild(counterContainer);
-  console.log("Progress counter created");
 }
 
 // Function to update the progress counter
@@ -131,9 +130,7 @@ function updateProgressCounter(currentTrial, totalTrials) {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
     counterContainer.textContent = `Trial ${currentTrial} of ${totalTrials}`;
-    console.log(`Updated progress counter: ${currentTrial} of ${totalTrials}`);
   } else {
-    console.warn("Progress counter not found when updating");
     // Recreate if missing
     createProgressCounter();
     const newCounter = document.getElementById('progress-counter');
@@ -148,7 +145,6 @@ function hideProgressCounter() {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
     counterContainer.style.display = 'none';
-    console.log("Progress counter hidden");
   }
 }
 
@@ -157,9 +153,7 @@ function showProgressCounter() {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
     counterContainer.style.display = 'block';
-    console.log("Progress counter shown");
   } else {
-    console.warn("Progress counter not found when showing");
     // Recreate if missing
     createProgressCounter();
   }
@@ -380,7 +374,7 @@ let totalTrials = 0;
 
 function updateTrialProgress() {
   completedTrials++;
-  updateProgressCounter(completedTrials, totalTrials);
+  updateProgressCounter(completedTrials, 76);
 }
 
 // createTypingTrial function tracks progress
@@ -526,10 +520,9 @@ function showSlider(bigram1, bigram2, trialId, fullText, keyData) {
 
     const bigramData = calculateBigramTimes(keyData, bigram1, bigram2);
     
-    // Update progress counter
+    // Update progress counter with hardcoded value
     completedTrials++;
-    console.log(`Completed trial #${completedTrials} of ${totalTrials}`);
-    updateProgressCounter(completedTrials, totalTrials);
+    updateProgressCounter(completedTrials, 76);
     
     jsPsych.finishTrial({
       task: 'typing_and_choice',
@@ -768,7 +761,7 @@ const startExperiment = {
   choices: ["Start"],
   button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
   on_load: function() {
-    updateProgressCounter(0, totalTrials);
+    updateProgressCounter(0, 76);
     showProgressCounter();
   },
   on_finish: () => {
@@ -856,18 +849,13 @@ async function runExperiment(options = {}) {
     processedMainPairs = processedMainPairs.map(pair => jsPsych.randomization.shuffle(pair));
   }
 
-  // Calculate total number of trials for progress tracking
-  totalTrials = introductoryPairs.length;
-  if (!experimentConfig.practiceOnly) {
-    totalTrials += processedMainPairs.length;
-  }
-  
-  console.log(`Total trials: ${totalTrials}`);
+  // Hardcode total number of trials for progress tracking
+  totalTrials = 76;  // Hardcoded to 76 screens
   
   // Create progress counter immediately and make sure it's initialized
   createProgressCounter();
   completedTrials = 0;
-  updateProgressCounter(0, totalTrials);
+  updateProgressCounter(1, 76);  // Start at 1 of 76
   
   // Initially hide it until needed
   hideProgressCounter();
@@ -905,7 +893,7 @@ async function runExperiment(options = {}) {
         button_html: startExperiment.button_html,
         on_load: function() {
           // Initialize progress counter at 0%
-          updateProgressCounter(0, totalTrials);
+          updateProgressCounter(1, 76);
           showProgressCounter();
         },
         on_finish: () => {
@@ -968,4 +956,4 @@ runExperiment({
   mainBigramFile: experimentConfig.mainBigramFile,
   character_list: experimentConfig.character_list,
   ncharacters: experimentConfig.ncharacters
-});
+});    
