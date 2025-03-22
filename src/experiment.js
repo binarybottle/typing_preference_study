@@ -25,7 +25,8 @@ let experimentConfig = {
   //study5: mainBigramFile: 'bigram_tables/study5/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
   //study6: mainBigramFile: 'bigram_tables/study6/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
   //study7:   mainBigramFile: 'bigram_tables/study7/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
-  mainBigramFile: 'bigram_tables/study8/bigram_2x38pairs_LH.csv',  // Default filename for main bigram pairs
+  mainBigramFile: 'bigram_tables/study2/bigram_1pair_easy_choice_LH_noheader.csv',  // Default filename for training bigram pairs
+  //mainBigramFile: 'bigram_tables/study8/bigram_2x38pairs_LH.csv',  // Default filename for main bigram pairs
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
   useTimer: false,  // If true, use a timer (untested)
@@ -97,72 +98,46 @@ async function loadBigramPairs(trainingFile, mainFile) {
   return { introductoryPairs, mainPairs };
 }
 
-// Function to create and update a progress bar
-function createProgressBar() {
-  const progressContainer = document.createElement('div');
-  progressContainer.id = 'progress-container';
-  progressContainer.style = `
+// Function to create and update a progress counter
+function createProgressCounter() {
+  const counterContainer = document.createElement('div');
+  counterContainer.id = 'progress-counter';
+  counterContainer.style = `
     position: fixed;
-    bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 80%;
-    max-width: 600px;
-    background-color: #f3f3f3;
-    border-radius: 10px;
-    padding: 5px;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-  `;
-
-  const progressBar = document.createElement('div');
-  progressBar.id = 'progress-bar';
-  progressBar.style = `
-    height: 20px;
-    width: 0%;
-    background-color: #4CAF50;
-    border-radius: 8px;
-    transition: width 0.5s;
-  `;
-
-  const progressText = document.createElement('div');
-  progressText.id = 'progress-text';
-  progressText.style = `
-    text-align: center;
+    top: 15px;
+    right: 20px;
+    background-color: rgba(240, 240, 240, 0.8);
+    border-radius: 5px;
+    padding: 5px 10px;
     font-size: 14px;
-    margin-top: 5px;
     color: #333;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    z-index: 1000;
   `;
-  
-  progressContainer.appendChild(progressBar);
-  progressContainer.appendChild(progressText);
-  document.body.appendChild(progressContainer);
+  document.body.appendChild(counterContainer);
 }
 
-// Function to update the progress bar
-function updateProgressBar(currentTrial, totalTrials) {
-  const progressBar = document.getElementById('progress-bar');
-  const progressText = document.getElementById('progress-text');
-  
-  if (progressBar && progressText) {
-    const percentage = Math.round((currentTrial / totalTrials) * 100);
-    progressBar.style.width = `${percentage}%`;
-    progressText.textContent = `Progress: ${currentTrial} of ${totalTrials} (${percentage}%)`;
+// Function to update the progress counter
+function updateProgressCounter(currentTrial, totalTrials) {
+  const counterContainer = document.getElementById('progress-counter');
+  if (counterContainer) {
+    counterContainer.textContent = `Trial ${currentTrial} of ${totalTrials}`;
   }
 }
 
-// Function to hide the progress bar (for screens where it shouldn't appear)
-function hideProgressBar() {
-  const progressContainer = document.getElementById('progress-container');
-  if (progressContainer) {
-    progressContainer.style.display = 'none';
+// Function to hide the progress counter
+function hideProgressCounter() {
+  const counterContainer = document.getElementById('progress-counter');
+  if (counterContainer) {
+    counterContainer.style.display = 'none';
   }
 }
 
-// Function to show the progress bar
-function showProgressBar() {
-  const progressContainer = document.getElementById('progress-container');
-  if (progressContainer) {
-    progressContainer.style.display = 'block';
+// Function to show the progress counter
+function showProgressCounter() {
+  const counterContainer = document.getElementById('progress-counter');
+  if (counterContainer) {
+    counterContainer.style.display = 'block';
   }
 }
 
@@ -308,6 +283,9 @@ const consentTrial = {
   `,
   choices: ["I consent", "I do not consent"],
   button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
+  on_load: function() {
+    hideProgressCounter();
+  },
   on_finish: function(data) {
     if (data.response === 1) {  // "I do not consent" is selected
       redirectToProlific(NO_CONSENT_CODE);
@@ -327,7 +305,10 @@ const keyboardLayoutInfo = {
     </div>
   `,
   choices: ["Next >"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
+  on_load: function() {
+    hideProgressCounter();
+  }
 };
 
 // Second informational page
@@ -348,7 +329,10 @@ const typingInstructionsInfo = {
     </div>
   `,
   choices: ["Next >"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>'
+  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
+  on_load: function() {
+    hideProgressCounter();
+  }
 };
 
 // Function to generate random text with spaces
@@ -366,13 +350,13 @@ function generateRandomText(ncharacters, character_list) {
   return text.replace(/\s+/g, ' ').trim(); // Ensure only single spaces and trim any leading/trailing spaces
 }
 
-// Add a function to track trial progress and update the progress bar
+// Add a function to track trial progress and update the progress counter
 let completedTrials = 0;
 let totalTrials = 0;
 
 function updateTrialProgress() {
   completedTrials++;
-  updateProgressBar(completedTrials, totalTrials);
+  updateProgressCounter(completedTrials, totalTrials);
 }
 
 // createTypingTrial function tracks progress
@@ -456,7 +440,7 @@ function createTypingTrial(bigram1, bigram2, trialId) {
     on_load: function() {
       document.addEventListener('keydown', handleKeyPress);
       updateDisplay();
-      showProgressBar(); // Show progress bar for typing trials
+      showProgressCounter(); // Show progress counter for typing trials
     },
     on_finish: function(data) {
       document.removeEventListener('keydown', handleKeyPress);
@@ -698,254 +682,258 @@ async function storeDataOnOSF(data) {
   const { rawContent, summaryContent } = convertToCSV(data);
 
   // Define URLs after prolificID is assigned
-// Define URLs after prolificID is assigned
-const rawDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=raw_data_${prolificID}_${Date.now()}.csv`;
-const summaryDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=summary_data_${prolificID}_${Date.now()}.csv`;
+  const rawDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=raw_data_${prolificID}_${Date.now()}.csv`;
+  const summaryDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=summary_data_${prolificID}_${Date.now()}.csv`;
 
-// Store data on OSF
-try {
-  console.log("Attempting to upload raw data to OSF...");
-  await uploadWithRetry(rawDataUrl, rawContent, osfToken);
+  // Store data on OSF
+  try {
+    console.log("Attempting to upload raw data to OSF...");
+    await uploadWithRetry(rawDataUrl, rawContent, osfToken);
 
-  console.log("Attempting to upload summary data to OSF...");
-  await uploadWithRetry(summaryDataUrl, summaryContent, osfToken);
+    console.log("Attempting to upload summary data to OSF...");
+    await uploadWithRetry(summaryDataUrl, summaryContent, osfToken);
 
-  // Store data locally on the server, passing the Prolific ID
-  console.log("Storing data locally on the server...");
-  storeDataLocally(rawContent, summaryContent, prolificID);
+    // Store data locally on the server, passing the Prolific ID
+    console.log("Storing data locally on the server...");
+    storeDataLocally(rawContent, summaryContent, prolificID);
 
-  console.log('Data successfully stored on OSF and locally on the server');
-} catch (error) {
-  console.error('Error storing data:', error);
-  throw error;
-}
+    console.log('Data successfully stored on OSF and locally on the server');
+  } catch (error) {
+    console.error('Error storing data:', error);
+    throw error;
+  }
 }
 
 // Timer function for the entire experiment
 function startExperimentTimer() {
-if (!experimentConfig.useTimer) {
-  console.log("Timer is disabled.");
-  return;
-}
-
-let timeRemaining = experimentConfig.timeLimit;
-const timerElement = document.createElement('div');
-timerElement.id = 'timer';
-document.body.appendChild(timerElement);
-
-timerInterval = setInterval(() => {
-  timeRemaining--;
-  timerElement.textContent = `Time left: ${timeRemaining} s`;
-
-  if (timeRemaining <= 0) {
-    clearInterval(timerInterval);
-    console.log("Time is up, ending experiment...");
-    endExperiment();
+  if (!experimentConfig.useTimer) {
+    console.log("Timer is disabled.");
+    return;
   }
-}, 1000);
+
+  let timeRemaining = experimentConfig.timeLimit;
+  const timerElement = document.createElement('div');
+  timerElement.id = 'timer';
+  document.body.appendChild(timerElement);
+
+  timerInterval = setInterval(() => {
+    timeRemaining--;
+    timerElement.textContent = `Time left: ${timeRemaining} s`;
+
+    if (timeRemaining <= 0) {
+      clearInterval(timerInterval);
+      console.log("Time is up, ending experiment...");
+      endExperiment();
+    }
+  }, 1000);
 }
 
 // Start button screen
 const startExperiment = {
-type: htmlButtonResponse,
-stimulus: function() {
-  let stimulusText = `<p style="font-size: 28px;">Ready to start?</p>`;
-  if (experimentConfig.useTimer) {
-    stimulusText += `<p style="font-size: 24px;">You will have ${experimentConfig.timeLimit} seconds to complete the experiment.</p>`;
+  type: htmlButtonResponse,
+  stimulus: function() {
+    let stimulusText = `<p style="font-size: 28px;">Ready to start?</p>`;
+    if (experimentConfig.useTimer) {
+      stimulusText += `<p style="font-size: 24px;">You will have ${experimentConfig.timeLimit} seconds to complete the experiment.</p>`;
+    }
+    stimulusText += `<p style="font-size: 24px;">Press the button when you're ready to begin!</p>`;
+    return stimulusText;
+  },
+  choices: ["Start"],
+  button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
+  on_load: function() {
+    updateProgressCounter(0, totalTrials);
+    showProgressCounter();
+  },
+  on_finish: () => {
+    experimentStartTime = performance.now();
+    if (experimentConfig.useTimer) {
+      startExperimentTimer();
+    }
   }
-  stimulusText += `<p style="font-size: 24px;">Press the button when you're ready to begin!</p>`;
-  return stimulusText;
-},
-choices: ["Start"],
-button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
-on_finish: () => {
-  experimentStartTime = performance.now();
-  if (experimentConfig.useTimer) {
-    startExperimentTimer();
-  }
-}
 };
 
 // thankYouTrial
 const thankYouTrial = {
-type: htmlButtonResponse,
-stimulus: `
-  <div class="thank-you-container">
-    <div class="checkmark"></div>
-    <h2 class="thank-you-title">Thank You!</h2>
-    <p class="thank-you-message">
-      Your participation in this study is greatly appreciated.<br>
-      Your responses will help us improve keyboard layouts for better typing experiences.<br><br>
-      All of your data has been successfully recorded.
-    </p>
-  </div>
-`,
-choices: ["Complete Study"],
-button_html: '<button class="thank-you-button">%choice%</button>',
-on_load: function() {
-  console.log("Thank you trial loaded");
-  hideProgressBar(); // Hide progress bar on the thank you screen
-},
-on_finish: function () {
-  console.log("Thank you trial finished, calling endExperiment function now...");
-  endExperiment();
-}
+  type: htmlButtonResponse,
+  stimulus: `
+    <div class="thank-you-container">
+      <div class="checkmark"></div>
+      <h2 class="thank-you-title">Thank You!</h2>
+      <p class="thank-you-message">
+        Your participation in this study is greatly appreciated.<br>
+        Your responses will help us improve keyboard layouts for better typing experiences.<br><br>
+        All of your data has been successfully recorded.
+      </p>
+    </div>
+  `,
+  choices: ["Complete Study"],
+  button_html: '<button class="thank-you-button">%choice%</button>',
+  on_load: function() {
+    console.log("Thank you trial loaded");
+    hideProgressCounter(); // Hide progress counter on the thank you screen
+  },
+  on_finish: function () {
+    console.log("Thank you trial finished, calling endExperiment function now...");
+    endExperiment();
+  }
 };
 
 // End the experiment and upload data to OSF
 function endExperiment() {
-const experimentData = jsPsych.data.get().values();
-console.log("All experiment data:", experimentData);
+  const experimentData = jsPsych.data.get().values();
+  console.log("All experiment data:", experimentData);
 
-// Filter out any empty or invalid data
-const validData = experimentData.filter(trial => trial.task === 'typing_and_choice' && trial.keyData && trial.keyData.length > 0);
-console.log("Valid data for CSV:", validData);
+  // Filter out any empty or invalid data
+  const validData = experimentData.filter(trial => trial.task === 'typing_and_choice' && trial.keyData && trial.keyData.length > 0);
+  console.log("Valid data for CSV:", validData);
 
-// Try storing data on OSF, but redirect to Prolific regardless of success or failure
-storeDataOnOSF(validData)
-  .then(() => {
-    console.log('Data stored successfully on OSF.');
-  })
-  .catch((error) => {
-    console.error('Error storing data on OSF:', error);
-  })
-  .finally(() => {
-    // Ensure redirection to Prolific regardless of data storage success or failure
-    console.log('Redirecting to Prolific after experiment ends.');
-    redirectToProlific(COMPLETION_CODE);
-  });
+  // Try storing data on OSF, but redirect to Prolific regardless of success or failure
+  storeDataOnOSF(validData)
+    .then(() => {
+      console.log('Data stored successfully on OSF.');
+    })
+    .catch((error) => {
+      console.error('Error storing data on OSF:', error);
+    })
+    .finally(() => {
+      // Ensure redirection to Prolific regardless of data storage success or failure
+      console.log('Redirecting to Prolific after experiment ends.');
+      redirectToProlific(COMPLETION_CODE);
+    });
 }
 
 // runExperiment function
 async function runExperiment(options = {}) {
-// Update experimentConfig with provided options
-Object.assign(experimentConfig, options);
+  // Update experimentConfig with provided options
+  Object.assign(experimentConfig, options);
 
-setGlobalStyles();
-
-const osfToken = await loadOSFToken();
-const { introductoryPairs, mainPairs } = await loadBigramPairs(
-  experimentConfig.trainingBigramFile,
-  experimentConfig.mainBigramFile
-);
-
-if (introductoryPairs.length === 0 || (mainPairs.length === 0 && !experimentConfig.practiceOnly)) {
-  jsPsych.endExperiment('Error loading bigram pairs');
-  return;
-}
-
-// Apply randomization based on configuration
-let processedMainPairs = mainPairs;
-if (experimentConfig.randomizePairOrder) {
-  processedMainPairs = jsPsych.randomization.shuffle(processedMainPairs);
-}
-if (experimentConfig.randomizeBigramsWithinPairs) {
-  processedMainPairs = processedMainPairs.map(pair => jsPsych.randomization.shuffle(pair));
-}
-
-// Calculate total number of trials for progress tracking
-totalTrials = introductoryPairs.length;
-if (!experimentConfig.practiceOnly) {
-  totalTrials += processedMainPairs.length;
-}
-
-// Create progress bar
-createProgressBar();
-
-const timeline = [];
-
-// Add consent trial to timeline
-timeline.push(consentTrial);
-
-// Create the experiment timeline
-const experimentTimeline = {
-  timeline: [
-    {
-      type: htmlButtonResponse,
-      stimulus: keyboardLayoutInfo.stimulus,
-      choices: keyboardLayoutInfo.choices,
-      button_html: keyboardLayoutInfo.button_html,
-      on_load: function() {
-        hideProgressBar(); // Hide progress bar on instruction screens
-      }
-    },
-    {
-      type: htmlButtonResponse,
-      stimulus: typingInstructionsInfo.stimulus,
-      choices: typingInstructionsInfo.choices,
-      button_html: typingInstructionsInfo.button_html,
-      on_load: function() {
-        hideProgressBar(); // Hide progress bar on instruction screens
-      }
-    },
-    {
-      type: htmlButtonResponse,
-      stimulus: startExperiment.stimulus,
-      choices: startExperiment.choices,
-      button_html: startExperiment.button_html,
-      on_load: function() {
-        // Initialize progress bar at 0%
-        updateProgressBar(0, totalTrials);
-        showProgressBar();
-      },
-      on_finish: () => {
-        experimentStartTime = performance.now();
-        if (experimentConfig.useTimer) {
-          startExperimentTimer();
-        }
-      }
-    },
-    ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
-      createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`)
-    ]),
-  ],
-  conditional_function: function() {
-    // Only run this timeline if consent was given (i.e., the first option was selected)
-    return jsPsych.data.get().last(1).values()[0].response === 0;
-  }
-};
-
-// Add transition screen and main pairs if not practiceOnly
-if (!experimentConfig.practiceOnly) {
-  experimentTimeline.timeline.push(
-    {
-      type: htmlButtonResponse,
-      stimulus: `<p>Great job! You've completed the practice session.<br>
-                  Now we'll move on to the main part of the experiment,<br>
-                  with a series of tens of such trials.<br><br>
-                  Please give your best estimate about how much easier<br>
-                  one letter pair is to type than the other.</p>`,
-      choices: ['Continue'],
-      on_load: function() {
-        hideProgressBar(); // Hide progress bar on transition screen
-      }
-    },
-    ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
-      createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`)
-    ])
+  setGlobalStyles();
+  
+  const osfToken = await loadOSFToken();
+  const { introductoryPairs, mainPairs } = await loadBigramPairs(
+    experimentConfig.trainingBigramFile,
+    experimentConfig.mainBigramFile
   );
-}
+  
+  if (introductoryPairs.length === 0 || (mainPairs.length === 0 && !experimentConfig.practiceOnly)) {
+    jsPsych.endExperiment('Error loading bigram pairs');
+    return;
+  }
 
-// Add thank you trial at the end
-experimentTimeline.timeline.push(thankYouTrial);
+  // Apply randomization based on configuration
+  let processedMainPairs = mainPairs;
+  if (experimentConfig.randomizePairOrder) {
+    processedMainPairs = jsPsych.randomization.shuffle(processedMainPairs);
+  }
+  if (experimentConfig.randomizeBigramsWithinPairs) {
+    processedMainPairs = processedMainPairs.map(pair => jsPsych.randomization.shuffle(pair));
+  }
 
-timeline.push(experimentTimeline);
+  // Calculate total number of trials for progress tracking
+  totalTrials = introductoryPairs.length;
+  if (!experimentConfig.practiceOnly) {
+    totalTrials += processedMainPairs.length;
+  }
+  
+  // Create progress counter
+  createProgressCounter();
+  completedTrials = 0; // Reset counter
 
-// Run the timeline
-console.log("Running experiment timeline...");
-jsPsych.run(timeline);
+  const timeline = [];
+
+  // Add consent trial to timeline
+  timeline.push(consentTrial);
+
+  // Create the experiment timeline
+  const experimentTimeline = {
+    timeline: [
+      {
+        type: htmlButtonResponse,
+        stimulus: keyboardLayoutInfo.stimulus,
+        choices: keyboardLayoutInfo.choices,
+        button_html: keyboardLayoutInfo.button_html,
+        on_load: function() {
+          hideProgressCounter(); // Hide progress counter on instruction screens
+        }
+      },
+      {
+        type: htmlButtonResponse,
+        stimulus: typingInstructionsInfo.stimulus,
+        choices: typingInstructionsInfo.choices,
+        button_html: typingInstructionsInfo.button_html,
+        on_load: function() {
+          hideProgressCounter(); // Hide progress counter on instruction screens
+        }
+      },
+      {
+        type: htmlButtonResponse,
+        stimulus: startExperiment.stimulus,
+        choices: startExperiment.choices,
+        button_html: startExperiment.button_html,
+        on_load: function() {
+          // Initialize progress counter at 0%
+          updateProgressCounter(0, totalTrials);
+          showProgressCounter();
+        },
+        on_finish: () => {
+          experimentStartTime = performance.now();
+          if (experimentConfig.useTimer) {
+            startExperimentTimer();
+          }
+        }
+      },
+      ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
+        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`)
+      ]),
+    ],
+    conditional_function: function() {
+      // Only run this timeline if consent was given (i.e., the first option was selected)
+      return jsPsych.data.get().last(1).values()[0].response === 0;
+    }
+  };
+
+  // Add transition screen and main pairs if not practiceOnly
+  if (!experimentConfig.practiceOnly) {
+    experimentTimeline.timeline.push(
+      {
+        type: htmlButtonResponse,
+        stimulus: `<p>Great job! You've completed the practice session.<br>
+                    Now we'll move on to the main part of the experiment,<br>
+                    with a series of tens of such trials.<br><br>
+                    Please give your best estimate about how much easier<br>
+                    one letter pair is to type than the other.</p>`,
+        choices: ['Continue'],
+        on_load: function() {
+          hideProgressCounter(); // Hide progress counter on transition screen
+        }
+      },
+      ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
+        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`)
+      ])
+    );
+  }
+
+  // Add thank you trial at the end
+  experimentTimeline.timeline.push(thankYouTrial);
+
+  timeline.push(experimentTimeline);
+
+  // Run the timeline
+  console.log("Running experiment timeline...");
+  jsPsych.run(timeline);
 }
 
 // Start the experiment with options
 runExperiment({
-practiceOnly: experimentConfig.practiceOnly,
-useTimer: experimentConfig.useTimer,
-timeLimit: experimentConfig.timeLimit,
-nbigramRepetitions: experimentConfig.nbigramRepetitions,
-randomizePairOrder: experimentConfig.randomizePairOrder,
-randomizeBigramsWithinPairs: experimentConfig.randomizeBigramsWithinPairs,
-trainingBigramFile: experimentConfig.trainingBigramFile,
-mainBigramFile: experimentConfig.mainBigramFile,
-character_list: experimentConfig.character_list,
-ncharacters: experimentConfig.ncharacters
+  practiceOnly: experimentConfig.practiceOnly,
+  useTimer: experimentConfig.useTimer,
+  timeLimit: experimentConfig.timeLimit,
+  nbigramRepetitions: experimentConfig.nbigramRepetitions,
+  randomizePairOrder: experimentConfig.randomizePairOrder,
+  randomizeBigramsWithinPairs: experimentConfig.randomizeBigramsWithinPairs,
+  trainingBigramFile: experimentConfig.trainingBigramFile,
+  mainBigramFile: experimentConfig.mainBigramFile,
+  character_list: experimentConfig.character_list,
+  ncharacters: experimentConfig.ncharacters
 });
