@@ -23,6 +23,7 @@ process:
   # fd,ez  # 2 strongest fingers home row vs. skip home row (study 6)
   # fd,qz  # 2 strongest fingers home row vs. skip home row with weakest finger (study 7)
   # df,wz  # 2 strongest fingers home row vs. skip home row with weakest fingers (study 7)
+  # aa,ff  # strongest vs. weakest finger (study 8)
   filter_users_by_num_improbable_choices: True
   filter_users_by_percent_inconsistencies: True 
   filter_by_strong_inconsistencies: False # only works if filter_users_by_percent_inconsistencies is True
