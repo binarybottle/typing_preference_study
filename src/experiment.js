@@ -11,7 +11,7 @@ const jsPsych = initJsPsych();
 let experimentConfig = {
   practiceOnly: false,  // If true, only run the practice set
   nbigramRepetitions: 2,  // number of repetitions of each bigram
-  ncharacters: 2,  // 3 in studies 1-6, 2 in studies 7-8: number of random characters (from character_list) preceding each block of bigrams 
+  ncharacters: 1,  // 3 in studies 1-6, 2 in study 7, 1 in study 8: number of random characters (from character_list) preceding each block of bigrams 
   character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./', // Default list of characters
   trainingBigramFile: 'bigram_tables/study2/bigram_1pair_easy_choice_LH_noheader.csv',  // Default filename for training bigram pairs
   //study1: nbigramRepetitions: 3,  // number of repetitions of each bigram
@@ -595,7 +595,7 @@ async function runExperiment(options = {}) {
         type: htmlButtonResponse,
         stimulus: `<p>Great job! You've completed the practice session.<br>
                     Now we'll move on to the main part of the experiment,<br>
-                    with a series of 100 such trials.<br><br>
+                    with a series of tens of such trials.<br><br>
                     Please give your best estimate about how much easier<br>
                     one letter pair is to type than the other.</p>`,
         choices: ['Continue'],
@@ -1028,7 +1028,7 @@ async function runExperiment(options = {}) {
         type: htmlButtonResponse,
         stimulus: `<p>Great job! You've completed the practice session.<br>
                     Now we'll move on to the main part of the experiment,<br>
-                    with a series of 100 such trials.<br><br>
+                    with a series of tens of such trials.<br><br>
                     Please give your best estimate about how much easier<br>
                     one letter pair is to type than the other.</p>`,
         choices: ['Continue'],
