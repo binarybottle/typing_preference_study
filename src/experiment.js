@@ -100,21 +100,30 @@ async function loadBigramPairs(trainingFile, mainFile) {
 
 // Function to create and update a progress counter
 function createProgressCounter() {
+  // Remove any existing counter first
+  const existingCounter = document.getElementById('progress-counter');
+  if (existingCounter) {
+    existingCounter.remove();
+  }
+  
   const counterContainer = document.createElement('div');
   counterContainer.id = 'progress-counter';
   counterContainer.style = `
     position: fixed;
-    top: 15px;
+    top: 20px;
     right: 20px;
-    background-color: rgba(240, 240, 240, 0.8);
-    border-radius: 5px;
-    padding: 5px 10px;
-    font-size: 14px;
-    color: #333;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    z-index: 1000;
+    background-color: rgba(65, 105, 225, 0.9);
+    color: white;
+    border-radius: 8px;
+    padding: 8px 15px;
+    font-size: 16px;
+    font-weight: bold;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    z-index: 9999;
+    display: block;
   `;
   document.body.appendChild(counterContainer);
+  console.log("Progress counter created");
 }
 
 // Function to update the progress counter
@@ -122,6 +131,15 @@ function updateProgressCounter(currentTrial, totalTrials) {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
     counterContainer.textContent = `Trial ${currentTrial} of ${totalTrials}`;
+    console.log(`Updated progress counter: ${currentTrial} of ${totalTrials}`);
+  } else {
+    console.warn("Progress counter not found when updating");
+    // Recreate if missing
+    createProgressCounter();
+    const newCounter = document.getElementById('progress-counter');
+    if (newCounter) {
+      newCounter.textContent = `Trial ${currentTrial} of ${totalTrials}`;
+    }
   }
 }
 
@@ -130,6 +148,7 @@ function hideProgressCounter() {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
     counterContainer.style.display = 'none';
+    console.log("Progress counter hidden");
   }
 }
 
@@ -138,6 +157,11 @@ function showProgressCounter() {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
     counterContainer.style.display = 'block';
+    console.log("Progress counter shown");
+  } else {
+    console.warn("Progress counter not found when showing");
+    // Recreate if missing
+    createProgressCounter();
   }
 }
 
@@ -502,8 +526,10 @@ function showSlider(bigram1, bigram2, trialId, fullText, keyData) {
 
     const bigramData = calculateBigramTimes(keyData, bigram1, bigram2);
     
-    // Update progress bar based on completed trials
-    updateTrialProgress();
+    // Update progress counter
+    completedTrials++;
+    console.log(`Completed trial #${completedTrials} of ${totalTrials}`);
+    updateProgressCounter(completedTrials, totalTrials);
     
     jsPsych.finishTrial({
       task: 'typing_and_choice',
@@ -836,9 +862,15 @@ async function runExperiment(options = {}) {
     totalTrials += processedMainPairs.length;
   }
   
-  // Create progress counter
+  console.log(`Total trials: ${totalTrials}`);
+  
+  // Create progress counter immediately and make sure it's initialized
   createProgressCounter();
-  completedTrials = 0; // Reset counter
+  completedTrials = 0;
+  updateProgressCounter(0, totalTrials);
+  
+  // Initially hide it until needed
+  hideProgressCounter();
 
   const timeline = [];
 
