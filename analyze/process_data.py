@@ -161,7 +161,8 @@ def display_information(dframe, title, print_headers, nlines):
 # Functions to filter users by inconsistent or improbable choice thresholds,
 # consecutive same-side selections, and number of near-zero selections
 ###########################################################################
-def filter_users(data, user_stats, improbable_threshold=np.inf, inconsistent_threshold=np.inf,
+def filter_users(data, user_stats, easy_choice_pairs=None, 
+                 improbable_threshold=np.inf, inconsistent_threshold=np.inf,
                  n_repeat_sides=10, percent_close_to_zero=25, distance_close_to_zero=10,
                  filter_by_strong_inconsistencies=False, zero_threshold=20):
     """
@@ -170,6 +171,7 @@ def filter_users(data, user_stats, improbable_threshold=np.inf, inconsistent_thr
     Parameters:
     - data: DataFrame to filter
     - user_stats: DataFrame containing user statistics
+    - easy_choice_pairs: List of tuples containing easy choice (probable, improbable) bigram pairs
     - improbable_threshold: Maximum number of improbable choices allowed
     - inconsistent_threshold: Maximum percentage of inconsistent choices allowed
     - n_repeat_sides: Number of consecutive same-side selections to flag a user
@@ -188,6 +190,11 @@ def filter_users(data, user_stats, improbable_threshold=np.inf, inconsistent_thr
     all_users = set(data['user_id'].unique())
     valid_users = all_users.copy()
     
+    # Create a set of improbable pairs for quick lookup
+    improbable_pairs_set = set()
+    if easy_choice_pairs is not None:
+        improbable_pairs_set = {(pair[1], pair[0]) for pair in easy_choice_pairs}
+
     # Track separate impacts for each filter
     user_impacts = {
         'improbable': set(),
@@ -205,6 +212,58 @@ def filter_users(data, user_stats, improbable_threshold=np.inf, inconsistent_thr
         if len(problematic_users) > 0 and len(problematic_users) <= 10:
             print(f"Removed users: {problematic_users}")
     
+        # Show which improbable pairs were chosen twice
+        if len(problematic_users) > 0:
+            print("\nDetails of consistent improbable choices:")
+            # Create a standardized bigram pair column if not already present
+            if 'std_bigram_pair' not in data.columns:
+                data_with_pairs = data.copy()
+                data_with_pairs['std_bigram_pair'] = data_with_pairs.apply(
+                    lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
+            else:
+                data_with_pairs = data
+                
+            # Only examine data from problematic users
+            prob_user_data = data_with_pairs[data_with_pairs['user_id'].isin(problematic_users)]
+            
+            # For each user in problematic_users
+            for user_id in problematic_users:
+                user_data = prob_user_data[prob_user_data['user_id'] == user_id]
+                print(f"\nUser {user_id}:")
+
+                # Add diagnostic information
+                print(f"  Number of trials: {len(user_data)}")
+                
+                # Group by bigram pair
+                pair_groups = user_data.groupby('std_bigram_pair')
+                print(f"  Number of unique bigram pairs: {len(pair_groups)}")
+                
+                # Show all pairs for this user that appear multiple times
+                has_improbable_choices = False
+                for pair, group in pair_groups:
+                    chosen_bigrams = group['chosenBigram'].tolist()
+                    if len(chosen_bigrams) >= 2:
+                        # See if all choices were the same
+                        if len(set(chosen_bigrams)) == 1:
+                            chosen = chosen_bigrams[0]
+                            unchosen = group['unchosenBigram'].iloc[0]
+                            
+                            # Check each easy choice pair
+                            found_match = False
+                            for good, bad in easy_choice_pairs:
+                                if chosen == bad and unchosen == good:
+                                    print(f"  Consistently chose improbable bigram '{chosen}' over '{unchosen}' {len(chosen_bigrams)} times")
+                                    has_improbable_choices = True
+                                    found_match = True
+                                    break
+                            
+                            # If no match was found in easy_choice_pairs but it's a consistent choice
+                            if not found_match:
+                                print(f"  Consistently chose '{chosen}' over '{unchosen}' {len(chosen_bigrams)} times (not in easy_choice_pairs)")
+                
+                if not has_improbable_choices:
+                    print("  No consistent improbable choices found")
+
     # Filter by inconsistent choices
     if inconsistent_threshold != np.inf:
         if filter_by_strong_inconsistencies:
@@ -1024,7 +1083,7 @@ if __name__ == "__main__":
     # fd,ez  # 2 strongest fingers home row vs. skip home row (study 6)
     # fd,qz  # 2 strongest fingers home row vs. skip home row with weakest finger (study 7)
     # df,wz  # 2 strongest fingers home row vs. skip home row with weakest fingers (study 7)
-    # aa,ff  # strongest vs. weakest finger (study 8)
+    # ff,aa  # strongest vs. weakest finger (study 8)
     filter_users_by_num_improbable_choices = config['process']['filter_users_by_num_improbable_choices']
     filter_users_by_percent_inconsistencies = config['process']['filter_users_by_percent_inconsistencies'] 
     filter_by_strong_inconsistencies = config['process']['filter_by_strong_inconsistencies'] # only works if filter_users_by_percent_inconsistencies is True
@@ -1089,6 +1148,7 @@ if __name__ == "__main__":
     filtered_users_data, valid_users = filter_users(
         raw_data,
         processed_data['user_stats'],
+        easy_choice_pairs=easy_choice_pairs,
         improbable_threshold=improbable_threshold if filter_users_by_num_improbable_choices else np.inf,
         inconsistent_threshold=inconsistent_threshold if filter_users_by_percent_inconsistencies else np.inf,
         n_repeat_sides=n_repeat_sides,
