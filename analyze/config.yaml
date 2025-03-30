@@ -4,7 +4,7 @@
 # Data settings
 #-------------------------------------------------------------------------------
 data:
-  input_dir: "/Users/arno/Downloads/studies_nonprolific"
+  input_dir: "/Users/arno/Downloads/typing/nonprolific_studies6-8"
   filtered_data_file: "output/tables/processed_bigram_data.csv"
 
 #-------------------------------------------------------------------------------
