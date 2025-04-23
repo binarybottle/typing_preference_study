@@ -11,7 +11,7 @@ const jsPsych = initJsPsych();
 let experimentConfig = {
   practiceOnly: false,  // If true, only run the practice set
   nbigramRepetitions: 2,  // number of repetitions of each bigram
-  ncharacters: 1,  // 3 in studies 1-6, 2 in study 7, 1 in study 8: number of random characters (from character_list) preceding each block of bigrams 
+  ncharacters: 1,  // 3 in studies 1-6, 2 in study 7, 1 in studies 8-9: number of random characters (from character_list) preceding each block of bigrams 
   character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./', // Default list of characters
   trainingBigramFile: 'bigram_tables/study2/bigram_1pair_easy_choice_LH_noheader.csv',  // Default filename for training bigram pairs
   //study1: nbigramRepetitions: 3,  // number of repetitions of each bigram
@@ -24,9 +24,9 @@ let experimentConfig = {
   //study4: mainBigramFile: 'bigram_tables/study4/bigram_2x35pairs_LH.csv',  // Default filename for main bigram pairs
   //study5: mainBigramFile: 'bigram_tables/study5/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
   //study6: mainBigramFile: 'bigram_tables/study6/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
-  //study7:   mainBigramFile: 'bigram_tables/study7/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
-  //mainBigramFile: 'bigram_tables/study2/bigram_1pair_easy_choice_LH_noheader.csv',  // Default filename for training bigram pairs
-  mainBigramFile: 'bigram_tables/study8/bigram_2x38pairs_LH.csv',  // Default filename for main bigram pairs
+  //study7: mainBigramFile: 'bigram_tables/study7/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
+  //study8: mainBigramFile: 'bigram_tables/study8/bigram_2x38pairs_LH.csv',  // Default filename for main bigram pairs
+  mainBigramFile: 'bigram_tables/study9/bigram_2x34pairs_LH.csv',  // Default filename for main bigram pairs
   randomizePairOrder: true,  // If true, randomize the order of bigram pairs
   randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
   useTimer: false,  // If true, use a timer (untested)

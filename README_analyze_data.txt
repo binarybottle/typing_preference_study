@@ -1,5 +1,5 @@
-# README for analyze_data.py
-Bigram Typing Analysis Pipeline Documentation
+# README for analyze/analyze_data.py
+Bigram typing analysis pipeline documentation
 
 Author: Arno Klein (arnoklein.info)
 

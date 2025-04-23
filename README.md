@@ -1,6 +1,6 @@
 # Bigram Typing Preference Study
  
--- jspsych website to collect study data via Prolific and python analysis code --
+-- jspsych website to collect study data via Prolific plus python analysis code --
 
 Author: Arno Klein (arnoklein.info)
 
@@ -48,4 +48,4 @@ The purpose of the scripts in this repository is to determine which bigram in ea
   Here we determine a winning bigram for each bigram pair across all users and all trials. If the winning bigram for every user is the same, the winning score is the median absolute score. If the winning bigram differs across users, the winning score is calculated as follows: we subtract the sum of the absolute values of the scores for one bigram from the other, and divide by the number of choices made for that bigram pair across the dataset.
 
   ### analyze_data.py notes:
-  This analysis of bigram typing times was intended to determine whether there is a correlation between typing speed and typing preference, in case we could use speed as a proxy for comfort in future work.
+  This analysis of bigram typing times was intended to determine whether there is a correlation between typing speed and typing preference, in case we could use speed as a proxy for comfort in future work. See README_analyze_data.txt for more information.

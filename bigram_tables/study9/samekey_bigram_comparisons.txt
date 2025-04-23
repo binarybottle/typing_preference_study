@@ -1,0 +1,64 @@
+Preparation for same-key comparisons
+
+Left qwerty keys: qwerasdfzxcv
+
+All 66 possible unique pairs of left keys: 
+wq
+eq, ew
+rq, rw, re
+aq, aw, ae, ar
+sq, sw, se, sr, sa
+dq, dw, de, dr, da, ds
+fq, fw, fe, fr, fa, fs, fd
+zq, zw, ze, zr, za, zs, zd, zf
+xq, xw, xe, xr, xa, xs, xd, xf, xz
+cq, cw, ce, cr, ca, cs, cd, cf, cz, cx
+vq, vw, ve, vr, va, vs, vd, vf, vz, vx, vc
+
+34 comparisons:
+qa, qz, qx, qc
+we, wr, wa, ws, wz, wx, wc, wv
+er, es, ed, ef, ev
+rs, rd, rf, rv
+af, az, ax, ac
+sx, sc, sv
+df, dv
+fv
+zx, zc
+xc
+
+34 comparisons between same-key pairs:
+qq, aa
+qq, zz
+qq, xx
+qq, cc
+ww, ee
+ww, rr
+ww, aa
+ww, ss
+ww, zz
+ww, xx
+ww, cc
+ww, vv
+ee, rr
+ee, ss
+ee, dd
+ee, ff
+ee, vv
+rr, ss
+rr, dd
+rr, ff
+rr, vv
+aa, ff
+aa, zz
+aa, xx
+aa, cc
+ss, xx
+ss, cc
+ss, vv
+dd, ff
+dd, vv
+ff, vv
+zz, xx
+zz, cc
+xx, cc
