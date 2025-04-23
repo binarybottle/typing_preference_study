@@ -10,7 +10,7 @@ const jsPsych = initJsPsych();
 // Global variables and configuration
 let experimentConfig = {
   practiceOnly: false,  // If true, only run the practice set
-  nbigramRepetitions: 2,  // number of repetitions of each bigram
+  nbigramRepetitions: 1,  // 2 in studies 1-8, 1 in study 9:number of repetitions of each bigram
   ncharacters: 1,  // 3 in studies 1-6, 2 in study 7, 1 in studies 8-9: number of random characters (from character_list) preceding each block of bigrams 
   character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./', // Default list of characters
   trainingBigramFile: 'bigram_tables/study2/bigram_1pair_easy_choice_LH_noheader.csv',  // Default filename for training bigram pairs
