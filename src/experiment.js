@@ -334,7 +334,7 @@ const typingInstructionsInfo = {
   type: htmlButtonResponse,
   stimulus: `
     <div class='instruction'> 
-      <p>You wil be asked to <strong>touch type</strong> text containing pairs of letters.
+      <p>You will be asked to <strong>touch type</strong> text containing pairs of letters.
          Touch type as you normally would, with left fingers above the home row letters 
          <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
          and right fingers above the home row letters 
