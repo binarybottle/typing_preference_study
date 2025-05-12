@@ -4,7 +4,7 @@
 
 Author: Arno Klein (arnoklein.info)
 
-GitHub repository: binarybottle/bigram-typing-preference-study
+GitHub repository: binarybottle/bigram_typing_preference_study
 
 License: Apache v2.0 
 
