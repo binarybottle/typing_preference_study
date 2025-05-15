@@ -1090,11 +1090,11 @@ if __name__ == "__main__":
     if filter_users_by_num_improbable_choices:
         improbable_threshold = config['process']['improbable_threshold'] # at least one improbable choice
     else:
-        improbable_threshold = np.Inf
+        improbable_threshold = np.inf
     if filter_users_by_percent_inconsistencies:
         inconsistent_threshold = config['process']['inconsistent_threshold']  # Flag users with at least this percent of inconsistent choices
     else:
-        inconsistent_threshold = np.Inf
+        inconsistent_threshold = np.inf
 
     # Filter users by improbable slider behavior (streaks or close-to-zeros):
     n_repeat_sides = config['process']['n_repeat_sides']  # Flag users with consecutive same-side selections ((1/2)^10 ~= 0.0977%; (1/2)^20 = 1/1,048,576)

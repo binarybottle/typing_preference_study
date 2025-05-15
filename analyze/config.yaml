@@ -4,7 +4,7 @@
 # Data settings
 #-------------------------------------------------------------------------------
 data:
-  input_dir: "/Users/arno/Downloads/typing/nonprolific_studies6-9"
+  input_dir: "/Users/arno/Desktop/typing/nonprolific_studies6-9"
   filtered_data_file: "output/tables/processed_bigram_data.csv"
 
 #-------------------------------------------------------------------------------
@@ -24,8 +24,8 @@ process:
   # fd,qz  # 2 strongest fingers home row vs. skip home row with weakest finger (study 7)
   # df,wz  # 2 strongest fingers home row vs. skip home row with weakest fingers (study 7)
   # ff,aa  # strongest vs. weakest finger (study 8)
-  filter_users_by_num_improbable_choices: True
-  filter_users_by_percent_inconsistencies: True 
+  filter_users_by_num_improbable_choices: False
+  filter_users_by_percent_inconsistencies: False 
   filter_by_strong_inconsistencies: False # only works if filter_users_by_percent_inconsistencies is True
   # if filter_users_by_num_improbable_choices:
   improbable_threshold: 0 # at least one improbable choice
