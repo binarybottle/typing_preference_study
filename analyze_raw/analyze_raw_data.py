@@ -1734,6 +1734,112 @@ def generate_speed_score_output_csv(key_df, mirror_df, output_path):
     
     return output_df
 
+def generate_bigram_accuracy_output_csv(bigram_df, output_path):
+    """
+    Generate a CSV file with accuracy statistics for all bigrams
+    
+    Parameters:
+    bigram_df (DataFrame): DataFrame with bigram statistics
+    output_path (str): Path to save the output CSV
+    """
+    # Create a new DataFrame for the output
+    output_columns = [
+        'bigram', 
+        'frequency-adjusted accuracy', 
+        'frequency-adjusted accuracy MAD', 
+        'accuracy',
+        'error rate', 
+        'error MAD', 
+        'error count', 
+        'total count', 
+        'most common mistype', 
+        'most common mistype count'
+    ]
+    
+    output_data = []
+    
+    # Add data for bigrams
+    for _, row in bigram_df.iterrows():
+        bigram = row['bigram'].upper()
+        
+        # Calculate accuracy (1 - error rate)
+        accuracy = 1 - row['errorRate']
+        freq_adjusted_accuracy = 1 - row.get('errorRate_freq_adjusted', row['errorRate'])
+        
+        output_data.append({
+            'bigram': bigram,
+            'frequency-adjusted accuracy': freq_adjusted_accuracy,
+            'frequency-adjusted accuracy MAD': row.get('errorMAD_freq_adjusted', row['errorMAD']),
+            'accuracy': accuracy,
+            'error rate': row['errorRate'],
+            'error MAD': row['errorMAD'],
+            'error count': row['errorCount'],
+            'total count': row['totalCount'],
+            'most common mistype': row['most_common_mistype'].upper() if 'most_common_mistype' in row and row['most_common_mistype'] else '',
+            'most common mistype count': row['most_common_mistype_count'] if 'most_common_mistype_count' in row else 0
+        })
+    
+    # Create DataFrame and save to CSV
+    output_df = pd.DataFrame(output_data, columns=output_columns)
+    output_df.to_csv(output_path, index=False)
+    print(f"Bigram accuracy statistics saved to {output_path}")
+
+def generate_bigram_speed_output_csv(bigram_df, output_path):
+    """
+    Generate a CSV file with typing speed statistics for all bigrams
+    
+    Parameters:
+    bigram_df (DataFrame): DataFrame with bigram statistics
+    output_path (str): Path to save the output CSV
+    """
+    # Create a new DataFrame for the output
+    output_columns = [
+        'bigram', 
+        'frequency-adjusted speed', 
+        'frequency-adjusted speed MAD', 
+        'speed',
+        'speed MAD',
+        'typing time', 
+        'typing time MAD', 
+        'total count'
+    ]
+    
+    output_data = []
+    
+    # Add data for bigrams
+    for _, row in bigram_df.iterrows():
+        bigram = row['bigram'].upper()
+        
+        # Calculate speed as 1/typing time (only if typing time > 0)
+        typing_time = row['medianTime']
+        speed = 1000/typing_time if typing_time > 0 else 0  # Speed in keystrokes per second
+        
+        # Calculate speed MAD using error propagation
+        speed_MAD = (row['timeMAD'] / (typing_time**2)) * 1000 if typing_time > 0 else 0
+        
+        # Calculate frequency-adjusted speed and its MAD
+        freq_adj_time = row.get('medianTime_freq_adjusted', typing_time)
+        freq_adj_speed = 1000/freq_adj_time if freq_adj_time > 0 else 0
+        
+        freq_adj_time_MAD = row.get('timeMAD_freq_adjusted', row['timeMAD'])
+        freq_adj_speed_MAD = (freq_adj_time_MAD / (freq_adj_time**2)) * 1000 if freq_adj_time > 0 else 0
+        
+        output_data.append({
+            'bigram': bigram,
+            'frequency-adjusted speed': freq_adj_speed,
+            'frequency-adjusted speed MAD': freq_adj_speed_MAD,
+            'speed': speed,
+            'speed MAD': speed_MAD,
+            'typing time': typing_time,
+            'typing time MAD': row['timeMAD'],
+            'total count': row['totalCount']
+        })
+    
+    # Create DataFrame and save to CSV
+    output_df = pd.DataFrame(output_data, columns=output_columns)
+    output_df.to_csv(output_path, index=False)
+    print(f"Bigram speed statistics saved to {output_path}")
+
 #-------------------------------------------------------------------------------
 # Main
 #-------------------------------------------------------------------------------
@@ -1798,7 +1904,7 @@ def verify_data_completeness(key_df, bigram_df):
 def main():
     """Main function to execute the analysis pipeline"""
     # Get all CSV files in the directory
-    csv_path = 'input/raws_nonProlific/*.csv' # 'input/raws_Prolific/*.csv'  
+    csv_path = 'input/raws_Prolific/*.csv' # 'input/raws_Prolific/*.csv'  
     letter_freq_path = 'input/letter_frequencies_english.csv'
     bigram_freq_path = 'input/letter_pair_frequencies_english.csv'
     # Load frequency data
@@ -1887,6 +1993,10 @@ def main():
     generate_accuracy_score_output_csv(left_home_key_df, mirror_pair_df, f"{output_dir}key_accuracy_statistics.csv")
     generate_speed_score_output_csv(left_home_key_df, mirror_pair_df, f"{output_dir}key_speed_statistics.csv")
     
+    # Generate specialized bigram output CSV files
+    generate_bigram_accuracy_output_csv(left_home_bigram_df, f"{output_dir}bigram_accuracy_statistics.csv")
+    generate_bigram_speed_output_csv(left_home_bigram_df, f"{output_dir}bigram_speed_statistics.csv")
+
     print(f"\nResults saved to {output_dir}")
     
     return {
