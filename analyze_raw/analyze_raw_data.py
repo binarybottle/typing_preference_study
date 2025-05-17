@@ -1432,6 +1432,309 @@ def adjust_mirror_pairs_for_frequency(mirror_df):
     return adjusted_df
 
 #-------------------------------------------------------------------------------
+# Generate frequency-adjusted scores 
+#-------------------------------------------------------------------------------
+def adjust_keys_for_frequency(key_df, letter_freq):
+    """
+    Adjust individual key metrics by regressing out letter frequency effects
+    
+    Parameters:
+    key_df (DataFrame): DataFrame with key statistics
+    letter_freq (DataFrame): DataFrame with letter frequencies
+    
+    Returns:
+    DataFrame: Key statistics with frequency-adjusted metrics
+    """
+    # Make a copy to avoid modifying the original
+    adjusted_df = key_df.copy()
+    
+    # Create frequency dictionary
+    freq_dict = {}
+    for _, row in letter_freq.iterrows():
+        letter_value = str(row['item']).lower()
+        if len(letter_value) == 1:  # Only use single characters
+            freq_dict[letter_value] = row['score']
+    
+    # Add frequency data to DataFrame
+    adjusted_df['frequency'] = adjusted_df['key'].map(freq_dict).fillna(0)
+    
+    # Add log-transformed frequency (common in psycholinguistic research)
+    adjusted_df['log_freq'] = np.log10(adjusted_df['frequency'] + 1)  # Add 1 to handle zeros
+    
+    # Metrics to adjust
+    metrics = ['errorRate', 'medianTime']
+    
+    # Adjust each metric
+    for metric in metrics:
+        if metric in adjusted_df.columns:
+            try:
+                # Create the model: metric ~ log_frequency
+                X = sm.add_constant(adjusted_df['log_freq'])
+                y = adjusted_df[metric]
+                
+                # Fit the model
+                model = sm.OLS(y, X).fit()
+                
+                # Get the model parameters
+                intercept = model.params[0]
+                slope = model.params[1]
+                
+                # Calculate predicted values
+                adjusted_df[f'{metric}_pred'] = intercept + slope * adjusted_df['log_freq']
+                
+                # Calculate residuals (the frequency-adjusted values) + mean
+                adjusted_df[f'{metric}_freq_adjusted'] = adjusted_df[metric] - adjusted_df[f'{metric}_pred'] + adjusted_df[metric].mean()
+                
+                print(f"Adjusted {metric} for keys (R² = {model.rsquared:.3f})")
+            except Exception as e:
+                print(f"Error adjusting {metric} for keys: {e}")
+    
+    return adjusted_df
+
+def adjust_bigrams_for_frequency(bigram_df, bigram_freq):
+    """
+    Adjust bigram metrics by regressing out bigram frequency effects
+    
+    Parameters:
+    bigram_df (DataFrame): DataFrame with bigram statistics
+    bigram_freq (DataFrame): DataFrame with bigram frequencies
+    
+    Returns:
+    DataFrame: Bigram statistics with frequency-adjusted metrics
+    """
+    # Make a copy to avoid modifying the original
+    adjusted_df = bigram_df.copy()
+    
+    # Create frequency dictionary
+    freq_dict = {}
+    for _, row in bigram_freq.iterrows():
+        bigram_value = str(row['item_pair']).lower()
+        if len(bigram_value) == 2:  # Only use bigrams
+            freq_dict[bigram_value] = row['score']
+    
+    # Add frequency data to DataFrame
+    adjusted_df['frequency'] = adjusted_df['bigram'].map(freq_dict).fillna(0)
+    
+    # Add log-transformed frequency
+    adjusted_df['log_freq'] = np.log10(adjusted_df['frequency'] + 1)  # Add 1 to handle zeros
+    
+    # Metrics to adjust
+    metrics = ['errorRate', 'medianTime']
+    
+    # Adjust each metric
+    for metric in metrics:
+        if metric in adjusted_df.columns:
+            try:
+                # Filter to only rows with some frequency data
+                model_df = adjusted_df[adjusted_df['frequency'] > 0]
+                
+                if len(model_df) > 5:  # Need enough data points for regression
+                    # Create the model: metric ~ log_frequency
+                    X = sm.add_constant(model_df['log_freq'])
+                    y = model_df[metric]
+                    
+                    # Fit the model
+                    model = sm.OLS(y, X).fit()
+                    
+                    # Get the model parameters
+                    intercept = model.params[0]
+                    slope = model.params[1]
+                    
+                    # Calculate predicted values for all bigrams
+                    adjusted_df[f'{metric}_pred'] = intercept + slope * adjusted_df['log_freq']
+                    
+                    # Calculate residuals (the frequency-adjusted values) + mean
+                    adjusted_df[f'{metric}_freq_adjusted'] = adjusted_df[metric] - adjusted_df[f'{metric}_pred'] + adjusted_df[metric].mean()
+                    
+                    print(f"Adjusted {metric} for bigrams (R² = {model.rsquared:.3f})")
+                else:
+                    print(f"Not enough data points with frequency to adjust {metric} for bigrams")
+            except Exception as e:
+                print(f"Error adjusting {metric} for bigrams: {e}")
+    
+    return adjusted_df
+
+def generate_accuracy_score_output_csv(key_df, mirror_df, output_path):
+    """
+    Generate a CSV file with accuracy statistics for all keys
+    
+    Parameters:
+    key_df (DataFrame): DataFrame with key statistics for left home block
+    mirror_df (DataFrame): DataFrame with mirror pair statistics
+    output_path (str): Path to save the output CSV
+    """
+    # Create a new DataFrame for the output
+    output_columns = [
+        'key', 
+        'frequency-adjusted accuracy', 
+        'frequency-adjusted accuracy MAD', 
+        'accuracy',
+        'error rate', 
+        'error MAD', 
+        'error count', 
+        'total count', 
+        'most common mistype', 
+        'most common mistype count'
+    ]
+    
+    output_data = []
+    
+    # Add data for left home block keys
+    for _, row in key_df.iterrows():
+        key = row['key'].upper()
+        
+        # Calculate accuracy (1 - error rate)
+        accuracy = 1 - row['errorRate']
+        freq_adjusted_accuracy = 1 - row.get('errorRate_freq_adjusted', row['errorRate'])
+        
+        output_data.append({
+            'key': key,
+            'frequency-adjusted accuracy': freq_adjusted_accuracy,
+            'frequency-adjusted accuracy MAD': row.get('errorMAD_freq_adjusted', row['errorMAD']),
+            'accuracy': accuracy,
+            'error rate': row['errorRate'],
+            'error MAD': row['errorMAD'],
+            'error count': row['errorCount'],
+            'total count': row['totalCount'],
+            'most common mistype': row['most_common_mistype'].upper() if row['most_common_mistype'] else '',
+            'most common mistype count': row['most_common_mistype_count']
+        })
+    
+    # Add data for right home block keys from mirror pairs
+    for _, row in mirror_df.iterrows():
+        left_key = row['left_key'].upper()
+        right_key = row['right_key'].upper()
+        
+        # Find if this left key is already in our output data
+        if any(d['key'] == left_key for d in output_data):
+            # Calculate accuracy for right key
+            right_accuracy = 1 - row['right_error_rate']
+            right_freq_adjusted_accuracy = 1 - row.get('right_error_rate_freq_adjusted', row['right_error_rate'])
+            
+            # Add the right key data
+            output_data.append({
+                'key': right_key,
+                'frequency-adjusted accuracy': right_freq_adjusted_accuracy,
+                'frequency-adjusted accuracy MAD': row.get('right_error_mad_freq_adjusted', row['right_error_mad']),
+                'accuracy': right_accuracy,
+                'error rate': row['right_error_rate'],
+                'error MAD': row['right_error_mad'],
+                'error count': int(row['right_count'] * row['right_error_rate']),  # Estimate error count
+                'total count': row['right_count'],
+                'most common mistype': row['right_most_common_mistype'].upper() if row['right_most_common_mistype'] else '',
+                'most common mistype count': 0  # We don't have this data for mirror pairs
+            })
+    
+    # Create the DataFrame and save to CSV
+    output_df = pd.DataFrame(output_data)
+    output_df = output_df[output_columns]  # Ensure column order
+    output_df.to_csv(output_path, index=False)
+    print(f"Accuracy statistics saved to {output_path}")
+    
+    return output_df
+
+def generate_speed_score_output_csv(key_df, mirror_df, output_path):
+    """
+    Generate a CSV file with typing speed statistics for all keys
+
+    Speed MAD: Since speed is the inverse of typing time (speed = 1/time), 
+    we can approximate the speed MAD using error propagation. If we have:
+      speed = 1/time
+      speed_median = 1/time_median
+    Then a reasonable approximation for speed MAD would be:
+        speed_MAD ≈ (timeMAD / time_median²)
+    This follows from error propagation principles for reciprocal transformations.
+    
+    Parameters:
+    key_df (DataFrame): DataFrame with key statistics for left home block
+    mirror_df (DataFrame): DataFrame with mirror pair statistics
+    output_path (str): Path to save the output CSV
+    """
+    # Create a new DataFrame for the output
+    output_columns = [
+        'key', 
+        'frequency-adjusted speed', 
+        'frequency-adjusted speed MAD', 
+        'speed',
+        'speed MAD',
+        'typing time', 
+        'typing time MAD', 
+        'total count'
+    ]
+    
+    output_data = []
+    
+    # Add data for left home block keys
+    for _, row in key_df.iterrows():
+        key = row['key'].upper()
+        
+        # Calculate speed as 1/typing time (only if typing time > 0)
+        typing_time = row['medianTime']
+        speed = 1000/typing_time if typing_time > 0 else 0  # Speed in keystrokes per second
+        
+        # Calculate speed MAD using error propagation
+        speed_MAD = (row['timeMAD'] / (typing_time**2)) * 1000 if typing_time > 0 else 0
+        
+        # Calculate frequency-adjusted speed and its MAD
+        freq_adj_time = row.get('medianTime_freq_adjusted', typing_time)
+        freq_adj_speed = 1000/freq_adj_time if freq_adj_time > 0 else 0
+        
+        freq_adj_time_MAD = row.get('timeMAD_freq_adjusted', row['timeMAD'])
+        freq_adj_speed_MAD = (freq_adj_time_MAD / (freq_adj_time**2)) * 1000 if freq_adj_time > 0 else 0
+        
+        output_data.append({
+            'key': key,
+            'frequency-adjusted speed': freq_adj_speed,
+            'frequency-adjusted speed MAD': freq_adj_speed_MAD,
+            'speed': speed,
+            'speed MAD': speed_MAD,
+            'typing time': typing_time,
+            'typing time MAD': row['timeMAD'],
+            'total count': row['totalCount']
+        })
+    
+    # Add data for right home block keys from mirror pairs
+    for _, row in mirror_df.iterrows():
+        left_key = row['left_key'].upper()
+        right_key = row['right_key'].upper()
+        
+        # Find if this left key is already in our output data
+        if any(d['key'] == left_key for d in output_data):
+            # Calculate speed metrics for right key
+            right_typing_time = row['right_median_time']
+            right_speed = 1000/right_typing_time if right_typing_time > 0 else 0
+            
+            # Calculate speed MAD using error propagation
+            right_speed_MAD = (row['right_time_mad'] / (right_typing_time**2)) * 1000 if right_typing_time > 0 else 0
+            
+            # Calculate frequency-adjusted metrics
+            right_freq_adj_time = row.get('right_median_time_freq_adjusted', right_typing_time)
+            right_freq_adj_speed = 1000/right_freq_adj_time if right_freq_adj_time > 0 else 0
+            
+            right_freq_adj_time_MAD = row.get('right_time_mad_freq_adjusted', row['right_time_mad'])
+            right_freq_adj_speed_MAD = (right_freq_adj_time_MAD / (right_freq_adj_time**2)) * 1000 if right_freq_adj_time > 0 else 0
+            
+            # Add the right key data
+            output_data.append({
+                'key': right_key,
+                'frequency-adjusted speed': right_freq_adj_speed,
+                'frequency-adjusted speed MAD': right_freq_adj_speed_MAD,
+                'speed (keystrokes per second)': right_speed,
+                'speed MAD (time MAD/median^2)': right_speed_MAD,
+                'typing time (median)': right_typing_time,
+                'typing time MAD': row['right_time_mad'],
+                'total count': row['right_count']
+            })
+    
+    # Create the DataFrame and save to CSV
+    output_df = pd.DataFrame(output_data)
+    output_df = output_df[output_columns]  # Ensure column order
+    output_df.to_csv(output_path, index=False)
+    print(f"Speed statistics saved to {output_path}")
+    
+    return output_df
+
+#-------------------------------------------------------------------------------
 # Main
 #-------------------------------------------------------------------------------
 def verify_data_completeness(key_df, bigram_df):
@@ -1495,7 +1798,7 @@ def verify_data_completeness(key_df, bigram_df):
 def main():
     """Main function to execute the analysis pipeline"""
     # Get all CSV files in the directory
-    csv_path = 'input/raws_Prolific/*.csv' # 'input/raws_Prolific/*.csv'  
+    csv_path = 'input/raws_nonProlific/*.csv' # 'input/raws_Prolific/*.csv'  
     letter_freq_path = 'input/letter_frequencies_english.csv'
     bigram_freq_path = 'input/letter_pair_frequencies_english.csv'
     # Load frequency data
@@ -1543,6 +1846,10 @@ def main():
     left_home_key_df = pd.DataFrame([stats for stats in left_home_key_stats.values()])
     left_home_bigram_df = pd.DataFrame([stats for stats in left_home_bigram_stats.values()])
     
+    # Adjust metrics for frequency
+    left_home_key_df = adjust_keys_for_frequency(left_home_key_df, letter_frequencies)
+    left_home_bigram_df = adjust_bigrams_for_frequency(left_home_bigram_df, bigram_frequencies)
+    
     # Analyze mirror pairs using the new key stats
     mirror_pair_df = analyze_mirror_pairs(left_home_key_stats, letter_frequencies)
     
@@ -1570,9 +1877,16 @@ def main():
     # Save results to CSV files
     output_dir = 'output/'
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Standard CSV outputs
     left_home_key_df.to_csv(f"{output_dir}left_home_key_analysis.csv", index=False)
     left_home_bigram_df.to_csv(f"{output_dir}left_home_bigram_analysis.csv", index=False)
     mirror_pair_df.to_csv(f"{output_dir}mirror_pair_analysis.csv", index=False)
+    
+    # Generate specialized output CSV files
+    generate_accuracy_score_output_csv(left_home_key_df, mirror_pair_df, f"{output_dir}key_accuracy_statistics.csv")
+    generate_speed_score_output_csv(left_home_key_df, mirror_pair_df, f"{output_dir}key_speed_statistics.csv")
+    
     print(f"\nResults saved to {output_dir}")
     
     return {
