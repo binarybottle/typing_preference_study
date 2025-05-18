@@ -1840,6 +1840,117 @@ def generate_bigram_speed_output_csv(bigram_df, output_path):
     output_df.to_csv(output_path, index=False)
     print(f"Bigram speed statistics saved to {output_path}")
 
+def generate_composite_bigram_speed_csv(bigram_df, key_df, output_path):
+    """
+    Generate a CSV file with bigram speed statistics where typing time is calculated
+    as the sum of: (1) time to type first key + (2) time to transition from first to second key
+    
+    MAD calculations: error propagation for the sum of two independent measurements
+    The combined MAD for the composite time is calculated using the quadrature sum: √(MAD_1² + MAD_2²).
+
+    Composite speed MAD: error propagation for reciprocal transformations: speed_MAD ≈ (timeMAD / time²) * 1000
+
+    Parameters:
+    bigram_df (DataFrame): DataFrame with bigram statistics
+    key_df (DataFrame): DataFrame with individual key statistics
+    output_path (str): Path to save the output CSV
+    """
+    # Create a new DataFrame for the output
+    output_columns = [
+        'bigram', 
+        'frequency-adjusted composite speed', 
+        'frequency-adjusted composite speed MAD', 
+        'composite speed',
+        'composite speed MAD',
+        'direct speed',
+        'direct speed MAD',
+        'composite typing time', 
+        'direct typing time',
+        'first key time', 
+        'transition time',
+        'total count'
+    ]
+    
+    # Create a dictionary for key lookup
+    key_dict = {row['key'].upper(): row for _, row in key_df.iterrows()}
+    
+    output_data = []
+    
+    # Process each bigram
+    for _, row in bigram_df.iterrows():
+        bigram = row['bigram'].upper()
+        first_key = bigram[0]
+        
+        # Get direct bigram measurements
+        direct_typing_time = row['medianTime']
+        direct_speed = 1000/direct_typing_time if direct_typing_time > 0 else 0
+        direct_speed_MAD = (row['timeMAD'] / (direct_typing_time**2)) * 1000 if direct_typing_time > 0 else 0
+        
+        # Get time for first key (if available)
+        if first_key in key_dict:
+            first_key_time = key_dict[first_key]['medianTime']
+            first_key_time_MAD = key_dict[first_key]['timeMAD']
+        else:
+            # Skip if we don't have data for the first key
+            continue
+        
+        # Get transition time (time from key1 to key2)
+        transition_time = direct_typing_time  # This is already the transition time in the bigram_df
+        transition_time_MAD = row['timeMAD']
+        
+        # Calculate the composite time
+        composite_time = first_key_time + transition_time
+        
+        # Calculate composite speed (keys per second)
+        composite_speed = 1000/composite_time if composite_time > 0 else 0
+        
+        # For the MAD, we need to propagate error from both measurements
+        # Using quadrature sum for independent errors: σ_total² = σ_1² + σ_2²
+        composite_time_MAD = np.sqrt(first_key_time_MAD**2 + transition_time_MAD**2)
+        
+        # Calculate MAD for speed using error propagation for reciprocal: σ_speed ≈ (σ_time / time²) * 1000
+        composite_speed_MAD = (composite_time_MAD / (composite_time**2)) * 1000 if composite_time > 0 else 0
+        
+        # Frequency-adjusted calculations
+        # Get frequency-adjusted times if available
+        freq_adj_first_key_time = key_dict[first_key].get('medianTime_freq_adjusted', first_key_time)
+        freq_adj_first_key_MAD = key_dict[first_key].get('timeMAD_freq_adjusted', first_key_time_MAD)
+        
+        freq_adj_transition_time = row.get('medianTime_freq_adjusted', transition_time)
+        freq_adj_transition_MAD = row.get('timeMAD_freq_adjusted', transition_time_MAD)
+        
+        # Calculate the frequency-adjusted composite time
+        freq_adj_composite_time = freq_adj_first_key_time + freq_adj_transition_time
+        
+        # Calculate frequency-adjusted composite speed
+        freq_adj_composite_speed = 1000/freq_adj_composite_time if freq_adj_composite_time > 0 else 0
+        
+        # Calculate frequency-adjusted composite time MAD
+        freq_adj_composite_time_MAD = np.sqrt(freq_adj_first_key_MAD**2 + freq_adj_transition_MAD**2)
+        
+        # Calculate frequency-adjusted composite speed MAD
+        freq_adj_composite_speed_MAD = (freq_adj_composite_time_MAD / (freq_adj_composite_time**2)) * 1000 if freq_adj_composite_time > 0 else 0
+        
+        output_data.append({
+            'bigram': bigram,
+            'frequency-adjusted composite speed': freq_adj_composite_speed,
+            'frequency-adjusted composite speed MAD': freq_adj_composite_speed_MAD,
+            'composite speed': composite_speed,
+            'composite speed MAD': composite_speed_MAD,
+            'direct speed': direct_speed,
+            'direct speed MAD': direct_speed_MAD,
+            'composite typing time': composite_time,
+            'direct typing time': direct_typing_time,
+            'first key time': first_key_time,
+            'transition time': transition_time,
+            'total count': row['totalCount']
+        })
+    
+    # Create DataFrame and save to CSV
+    output_df = pd.DataFrame(output_data, columns=output_columns)
+    output_df.to_csv(output_path, index=False)
+    print(f"Composite bigram speed statistics saved to {output_path}")
+
 #-------------------------------------------------------------------------------
 # Main
 #-------------------------------------------------------------------------------
@@ -1904,7 +2015,7 @@ def verify_data_completeness(key_df, bigram_df):
 def main():
     """Main function to execute the analysis pipeline"""
     # Get all CSV files in the directory
-    csv_path = 'input/raws_Prolific/*.csv' # 'input/raws_Prolific/*.csv'  
+    csv_path = 'input/raws_nonProlific/*.csv' # 'input/raws_Prolific/*.csv'  
     letter_freq_path = 'input/letter_frequencies_english.csv'
     bigram_freq_path = 'input/letter_pair_frequencies_english.csv'
     # Load frequency data
@@ -1955,7 +2066,11 @@ def main():
     # Adjust metrics for frequency
     left_home_key_df = adjust_keys_for_frequency(left_home_key_df, letter_frequencies)
     left_home_bigram_df = adjust_bigrams_for_frequency(left_home_bigram_df, bigram_frequencies)
-    
+
+    # Filter bigrams by frequency threshold
+    frequency_cutoff = 1
+    left_home_bigram_df = left_home_bigram_df[left_home_bigram_df['frequency'] >= frequency_cutoff].copy()
+
     # Analyze mirror pairs using the new key stats
     mirror_pair_df = analyze_mirror_pairs(left_home_key_stats, letter_frequencies)
     
@@ -1996,6 +2111,9 @@ def main():
     # Generate specialized bigram output CSV files
     generate_bigram_accuracy_output_csv(left_home_bigram_df, f"{output_dir}bigram_accuracy_statistics.csv")
     generate_bigram_speed_output_csv(left_home_bigram_df, f"{output_dir}bigram_speed_statistics.csv")
+
+    # Generate composite bigram timing statistics
+    generate_composite_bigram_speed_csv(left_home_bigram_df, left_home_key_df, f"{output_dir}bigram_composite_speed_statistics.csv")
 
     print(f"\nResults saved to {output_dir}")
     
