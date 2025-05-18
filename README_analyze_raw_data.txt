@@ -10,6 +10,11 @@ The analysis performs several calculations:
 1-key statistics: Analyzes individual keys as the second key in space-flanked bigrams
 2-key (bigram) statistics: Analyzes key combinations defined as two consecutive keys flanked by spaces
 Mirror pair analysis: Compares performance metrics between mirror image key pairs across the keyboard
+Frequency adjustment:
+- Frequency cutoff above a set number of occurrences in Peter Norvig's Google bigram data
+- Log-transformed Frequency: Accounts for non-linear effects of letter frequency
+- Frequency-adjusted Times: Timing metrics with frequency effects removed
+- R²: Variance in performance explained by letter frequency
 
 All analyses exclude same-key bigrams (e.g., "AA") and focus on metrics derived from space-flanked bigrams.
 

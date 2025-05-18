@@ -1,3 +1,18 @@
+"""
+Bigram Typing Analysis Script
+
+Analyzes relationships between bigram typing times, frequencies and user choices,
+combining both legacy and enhanced analysis approaches.
+
+Features:
+- Per-participant normalization and robust statistics
+- Recreation of original plots with enhanced statistical methods
+- Comprehensive logging
+- Configurable analysis parameters
+
+Usage:
+    python analyze_data.py [--config config.yaml]
+"""
 import numpy as np
 import pandas as pd
 import os
