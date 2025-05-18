@@ -95,6 +95,126 @@ def process_typing_data(data):
             })
     return pd.DataFrame(processed)
 
+def adjust_keys_for_frequency(key_df, letter_freq):
+    """
+    Adjust individual key metrics by regressing out letter frequency effects
+    
+    Parameters:
+    key_df (DataFrame): DataFrame with key statistics
+    letter_freq (DataFrame): DataFrame with letter frequencies
+    
+    Returns:
+    DataFrame: Key statistics with frequency-adjusted metrics
+    """
+    # Make a copy to avoid modifying the original
+    adjusted_df = key_df.copy()
+    
+    # Create frequency dictionary
+    freq_dict = {}
+    for _, row in letter_freq.iterrows():
+        letter_value = str(row['item']).lower()
+        if len(letter_value) == 1:  # Only use single characters
+            freq_dict[letter_value] = row['score']
+    
+    # Add frequency data to DataFrame
+    adjusted_df['frequency'] = adjusted_df['key'].map(freq_dict).fillna(0)
+    
+    # Add log-transformed frequency (common in psycholinguistic research)
+    adjusted_df['log_freq'] = np.log10(adjusted_df['frequency'] + 1)  # Add 1 to handle zeros
+    
+    # Metrics to adjust
+    metrics = ['errorRate', 'medianTime']
+    
+    # Adjust each metric
+    for metric in metrics:
+        if metric in adjusted_df.columns:
+            try:
+                # Create the model: metric ~ log_frequency
+                X = sm.add_constant(adjusted_df['log_freq'])
+                y = adjusted_df[metric]
+                
+                # Fit the model
+                model = sm.OLS(y, X).fit()
+                
+                # Get the model parameters
+                intercept = model.params[0]
+                slope = model.params[1]
+                
+                # Calculate predicted values
+                adjusted_df[f'{metric}_pred'] = intercept + slope * adjusted_df['log_freq']
+                
+                # Calculate residuals (the frequency-adjusted values) + mean
+                adjusted_df[f'{metric}_freq_adjusted'] = adjusted_df[metric] - adjusted_df[f'{metric}_pred'] + adjusted_df[metric].mean()
+                
+                print(f"Adjusted {metric} for keys (R² = {model.rsquared:.3f})")
+            except Exception as e:
+                print(f"Error adjusting {metric} for keys: {e}")
+    
+    return adjusted_df
+
+def adjust_bigrams_for_frequency(bigram_df, bigram_freq):
+    """
+    Adjust bigram metrics by regressing out bigram frequency effects
+    
+    Parameters:
+    bigram_df (DataFrame): DataFrame with bigram statistics
+    bigram_freq (DataFrame): DataFrame with bigram frequencies
+    
+    Returns:
+    DataFrame: Bigram statistics with frequency-adjusted metrics
+    """
+    # Make a copy to avoid modifying the original
+    adjusted_df = bigram_df.copy()
+    
+    # Create frequency dictionary
+    freq_dict = {}
+    for _, row in bigram_freq.iterrows():
+        bigram_value = str(row['item_pair']).lower()
+        if len(bigram_value) == 2:  # Only use bigrams
+            freq_dict[bigram_value] = row['score']
+    
+    # Add frequency data to DataFrame
+    adjusted_df['frequency'] = adjusted_df['bigram'].map(freq_dict).fillna(0)
+    
+    # Add log-transformed frequency
+    adjusted_df['log_freq'] = np.log10(adjusted_df['frequency'] + 1)  # Add 1 to handle zeros
+    
+    # Metrics to adjust
+    metrics = ['errorRate', 'medianTime']
+    
+    # Adjust each metric
+    for metric in metrics:
+        if metric in adjusted_df.columns:
+            try:
+                # Filter to only rows with some frequency data
+                model_df = adjusted_df[adjusted_df['frequency'] > 0]
+                
+                if len(model_df) > 5:  # Need enough data points for regression
+                    # Create the model: metric ~ log_frequency
+                    X = sm.add_constant(model_df['log_freq'])
+                    y = model_df[metric]
+                    
+                    # Fit the model
+                    model = sm.OLS(y, X).fit()
+                    
+                    # Get the model parameters
+                    intercept = model.params[0]
+                    slope = model.params[1]
+                    
+                    # Calculate predicted values for all bigrams
+                    adjusted_df[f'{metric}_pred'] = intercept + slope * adjusted_df['log_freq']
+                    
+                    # Calculate residuals (the frequency-adjusted values) + mean
+                    adjusted_df[f'{metric}_freq_adjusted'] = adjusted_df[metric] - adjusted_df[f'{metric}_pred'] + adjusted_df[metric].mean()
+                    
+                    print(f"Adjusted {metric} for bigrams (R² = {model.rsquared:.3f})")
+                else:
+                    print(f"Not enough data points with frequency to adjust {metric} for bigrams")
+            except Exception as e:
+                print(f"Error adjusting {metric} for bigrams: {e}")
+    
+    return adjusted_df
+
 #-------------------------------------------------------------------------------
 # Analyze keys
 #-------------------------------------------------------------------------------
@@ -1447,128 +1567,8 @@ def adjust_mirror_pairs_for_frequency(mirror_df):
     return adjusted_df
 
 #-------------------------------------------------------------------------------
-# Generate frequency-adjusted scores 
+# Generate csv files
 #-------------------------------------------------------------------------------
-def adjust_keys_for_frequency(key_df, letter_freq):
-    """
-    Adjust individual key metrics by regressing out letter frequency effects
-    
-    Parameters:
-    key_df (DataFrame): DataFrame with key statistics
-    letter_freq (DataFrame): DataFrame with letter frequencies
-    
-    Returns:
-    DataFrame: Key statistics with frequency-adjusted metrics
-    """
-    # Make a copy to avoid modifying the original
-    adjusted_df = key_df.copy()
-    
-    # Create frequency dictionary
-    freq_dict = {}
-    for _, row in letter_freq.iterrows():
-        letter_value = str(row['item']).lower()
-        if len(letter_value) == 1:  # Only use single characters
-            freq_dict[letter_value] = row['score']
-    
-    # Add frequency data to DataFrame
-    adjusted_df['frequency'] = adjusted_df['key'].map(freq_dict).fillna(0)
-    
-    # Add log-transformed frequency (common in psycholinguistic research)
-    adjusted_df['log_freq'] = np.log10(adjusted_df['frequency'] + 1)  # Add 1 to handle zeros
-    
-    # Metrics to adjust
-    metrics = ['errorRate', 'medianTime']
-    
-    # Adjust each metric
-    for metric in metrics:
-        if metric in adjusted_df.columns:
-            try:
-                # Create the model: metric ~ log_frequency
-                X = sm.add_constant(adjusted_df['log_freq'])
-                y = adjusted_df[metric]
-                
-                # Fit the model
-                model = sm.OLS(y, X).fit()
-                
-                # Get the model parameters
-                intercept = model.params[0]
-                slope = model.params[1]
-                
-                # Calculate predicted values
-                adjusted_df[f'{metric}_pred'] = intercept + slope * adjusted_df['log_freq']
-                
-                # Calculate residuals (the frequency-adjusted values) + mean
-                adjusted_df[f'{metric}_freq_adjusted'] = adjusted_df[metric] - adjusted_df[f'{metric}_pred'] + adjusted_df[metric].mean()
-                
-                print(f"Adjusted {metric} for keys (R² = {model.rsquared:.3f})")
-            except Exception as e:
-                print(f"Error adjusting {metric} for keys: {e}")
-    
-    return adjusted_df
-
-def adjust_bigrams_for_frequency(bigram_df, bigram_freq):
-    """
-    Adjust bigram metrics by regressing out bigram frequency effects
-    
-    Parameters:
-    bigram_df (DataFrame): DataFrame with bigram statistics
-    bigram_freq (DataFrame): DataFrame with bigram frequencies
-    
-    Returns:
-    DataFrame: Bigram statistics with frequency-adjusted metrics
-    """
-    # Make a copy to avoid modifying the original
-    adjusted_df = bigram_df.copy()
-    
-    # Create frequency dictionary
-    freq_dict = {}
-    for _, row in bigram_freq.iterrows():
-        bigram_value = str(row['item_pair']).lower()
-        if len(bigram_value) == 2:  # Only use bigrams
-            freq_dict[bigram_value] = row['score']
-    
-    # Add frequency data to DataFrame
-    adjusted_df['frequency'] = adjusted_df['bigram'].map(freq_dict).fillna(0)
-    
-    # Add log-transformed frequency
-    adjusted_df['log_freq'] = np.log10(adjusted_df['frequency'] + 1)  # Add 1 to handle zeros
-    
-    # Metrics to adjust
-    metrics = ['errorRate', 'medianTime']
-    
-    # Adjust each metric
-    for metric in metrics:
-        if metric in adjusted_df.columns:
-            try:
-                # Filter to only rows with some frequency data
-                model_df = adjusted_df[adjusted_df['frequency'] > 0]
-                
-                if len(model_df) > 5:  # Need enough data points for regression
-                    # Create the model: metric ~ log_frequency
-                    X = sm.add_constant(model_df['log_freq'])
-                    y = model_df[metric]
-                    
-                    # Fit the model
-                    model = sm.OLS(y, X).fit()
-                    
-                    # Get the model parameters
-                    intercept = model.params[0]
-                    slope = model.params[1]
-                    
-                    # Calculate predicted values for all bigrams
-                    adjusted_df[f'{metric}_pred'] = intercept + slope * adjusted_df['log_freq']
-                    
-                    # Calculate residuals (the frequency-adjusted values) + mean
-                    adjusted_df[f'{metric}_freq_adjusted'] = adjusted_df[metric] - adjusted_df[f'{metric}_pred'] + adjusted_df[metric].mean()
-                    
-                    print(f"Adjusted {metric} for bigrams (R² = {model.rsquared:.3f})")
-                else:
-                    print(f"Not enough data points with frequency to adjust {metric} for bigrams")
-            except Exception as e:
-                print(f"Error adjusting {metric} for bigrams: {e}")
-    
-    return adjusted_df
-
 def generate_accuracy_score_output_csv(key_df, mirror_df, output_path):
     """
     Generate a CSV file with accuracy statistics for all keys
@@ -1966,6 +1966,129 @@ def generate_composite_bigram_speed_csv(bigram_df, key_df, output_path):
     output_df.to_csv(output_path, index=False)
     print(f"Composite bigram speed statistics saved to {output_path}")
 
+def generate_instantaneous_error_rate_1key_csv(key_df, min_count=10, output_path='output/instantaneous_error_rate_1key.csv'):
+    """
+    Generate a CSV file with instantaneous error rate data for 1-key typing
+    
+    Instantaneous error rate = error rate / typing time (adjusted for frequency when available)
+    
+    Parameters:
+    key_df (DataFrame): DataFrame containing individual key statistics
+    min_count (int): Minimum count threshold for inclusion
+    output_path (str): Path to save the output CSV
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Filter for sufficient data
+    filtered_df = key_df[key_df['totalCount'] > min_count].copy()
+    if filtered_df.empty:
+        print("No data available for instantaneous error rate calculation")
+        return
+    
+    # Calculate instantaneous error rate
+    # Use frequency-adjusted values when available
+    filtered_df['error_rate'] = filtered_df.get('errorRate_freq_adjusted', filtered_df['errorRate'])
+    filtered_df['typing_time'] = filtered_df.get('medianTime_freq_adjusted', filtered_df['medianTime'])
+    
+    # Avoid division by zero
+    filtered_df['instantaneous_error_rate'] = filtered_df.apply(
+        lambda row: row['error_rate'] / row['typing_time'] if row['typing_time'] > 0 else 0, 
+        axis=1
+    )
+    
+    # Calculate MAD for instantaneous error rate using error propagation
+    # For function f(x,y) = x/y, the propagated error is approximately:
+    # σ_f ≈ f * sqrt((σ_x/x)^2 + (σ_y/y)^2)
+    filtered_df['error_mad'] = filtered_df.get('errorMAD_freq_adjusted', filtered_df['errorMAD'])
+    filtered_df['time_mad'] = filtered_df.get('timeMAD_freq_adjusted', filtered_df['timeMAD'])
+    
+    filtered_df['instantaneous_error_rate_mad'] = filtered_df.apply(
+        lambda row: row['instantaneous_error_rate'] * np.sqrt(
+            (row['error_mad']/row['error_rate'])**2 + 
+            (row['time_mad']/row['typing_time'])**2
+        ) if row['error_rate'] > 0 and row['typing_time'] > 0 else 0,
+        axis=1
+    )
+    
+    # Prepare output DataFrame
+    output_df = filtered_df[['key', 'error_rate', 'error_mad', 'typing_time', 'time_mad', 
+                           'instantaneous_error_rate', 'instantaneous_error_rate_mad', 
+                           'totalCount']].copy()
+    
+    # Convert keys to uppercase for display
+    output_df['key'] = output_df['key'].str.upper()
+    
+    # Save to CSV
+    output_df.to_csv(output_path, index=False)
+    print(f"Instantaneous error rate data saved to {output_path}")
+    
+    return output_df
+
+def generate_instantaneous_error_rate_2key_csv(bigram_df, min_count=10, output_path='output/instantaneous_error_rate_2key.csv'):
+    """
+    Generate a CSV file with instantaneous error rate data for 2-key (bigram) typing
+    
+    Instantaneous error rate = error rate / typing time (adjusted for frequency when available)
+    
+    Parameters:
+    bigram_df (DataFrame): DataFrame containing bigram statistics
+    min_count (int): Minimum count threshold for inclusion
+    output_path (str): Path to save the output CSV
+    """
+    # Create output directory if it doesn't exist
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    
+    # Filter for sufficient data with timing samples
+    filtered_df = bigram_df[(bigram_df['totalCount'] > min_count) & 
+                          (bigram_df['medianTime'] > 0)].copy()
+    
+    # Further filter for rows with non-zero error rates
+    filtered_df = filtered_df[filtered_df['errorRate'] > 0]
+    
+    if filtered_df.empty:
+        print("No data available for bigram instantaneous error rate calculation")
+        return
+    
+    # Calculate instantaneous error rate
+    # Use frequency-adjusted values when available
+    filtered_df['error_rate'] = filtered_df.get('errorRate_freq_adjusted', filtered_df['errorRate'])
+    filtered_df['typing_time'] = filtered_df.get('medianTime_freq_adjusted', filtered_df['medianTime'])
+    
+    # Avoid division by zero
+    filtered_df['instantaneous_error_rate'] = filtered_df.apply(
+        lambda row: row['error_rate'] / row['typing_time'] if row['typing_time'] > 0 else 0, 
+        axis=1
+    )
+    
+    # Calculate MAD for instantaneous error rate using error propagation
+    # For function f(x,y) = x/y, the propagated error is approximately:
+    # σ_f ≈ f * sqrt((σ_x/x)^2 + (σ_y/y)^2)
+    filtered_df['error_mad'] = filtered_df.get('errorMAD_freq_adjusted', filtered_df['errorMAD'])
+    filtered_df['time_mad'] = filtered_df.get('timeMAD_freq_adjusted', filtered_df['timeMAD'])
+    
+    filtered_df['instantaneous_error_rate_mad'] = filtered_df.apply(
+        lambda row: row['instantaneous_error_rate'] * np.sqrt(
+            (row['error_mad']/row['error_rate'])**2 + 
+            (row['time_mad']/row['typing_time'])**2
+        ) if row['error_rate'] > 0 and row['typing_time'] > 0 else 0,
+        axis=1
+    )
+    
+    # Prepare output DataFrame
+    output_df = filtered_df[['bigram', 'error_rate', 'error_mad', 'typing_time', 'time_mad', 
+                           'instantaneous_error_rate', 'instantaneous_error_rate_mad', 
+                           'totalCount']].copy()
+    
+    # Convert bigrams to uppercase for display
+    output_df['bigram'] = output_df['bigram'].str.upper()
+    
+    # Save to CSV
+    output_df.to_csv(output_path, index=False)
+    print(f"Bigram instantaneous error rate data saved to {output_path}")
+    
+    return output_df
+
 #-------------------------------------------------------------------------------
 # Main
 #-------------------------------------------------------------------------------
@@ -2029,24 +2152,27 @@ def verify_data_completeness(key_df, bigram_df):
 
 def main():
     """Main function to execute the analysis pipeline"""
+
+    frequency_cutoff = 1000000000
+
     # Get all CSV files in the directory
     csv_path = 'input/raws_nonProlific/*.csv' # 'input/raws_Prolific/*.csv'  
     letter_freq_path = 'input/letter_frequencies_english.csv'
     bigram_freq_path = 'input/letter_pair_frequencies_english.csv'
+
     # Load frequency data
     letter_frequencies, bigram_frequencies = load_frequency_data(letter_freq_path, bigram_freq_path)
     csv_files = glob.glob(csv_path)
-    # Check if any files were found
     if not csv_files:
         print(f"No CSV files found at path: {csv_path}")
         print("Please check the path and ensure CSV files exist there.")
         return None
     print(f"Found {len(csv_files)} CSV files")
     all_data = []
+
     # Process each file
     for i, file_path in enumerate(csv_files):
         try:
-            # Read CSV file
             print(f"Reading file {i+1}/{len(csv_files)}: {os.path.basename(file_path)}", end="... ")
             df = pd.read_csv(file_path)
             print(f"loaded {len(df)} rows")
@@ -2056,16 +2182,18 @@ def main():
                 print(f"  Warning: File {os.path.basename(file_path)} contains no data")
         except Exception as e:
             print(f"Error reading file {os.path.basename(file_path)}: {str(e)}")
-    # Check if any data was loaded
     if not all_data:
         print("No data was successfully loaded from any CSV file.")
         return None
+
     # Combine all data
     combined_data = pd.concat(all_data, ignore_index=True)
     print(f"Loaded {len(combined_data)} total typing data records")
+
     # Filter out intro-trial-1 data
     filtered_data = combined_data[combined_data['trialId'] != 'intro-trial-1'].copy()
     print(f"After filtering: {len(filtered_data)} records")
+
     # Process the data to calculate typing time
     processed_data = process_typing_data(filtered_data)
 
@@ -2083,7 +2211,6 @@ def main():
     left_home_bigram_df = adjust_bigrams_for_frequency(left_home_bigram_df, bigram_frequencies)
 
     # Filter bigrams by frequency threshold
-    frequency_cutoff = 1
     left_home_bigram_df = left_home_bigram_df[left_home_bigram_df['frequency'] >= frequency_cutoff].copy()
 
     # Analyze mirror pairs using the new key stats
@@ -2129,6 +2256,10 @@ def main():
 
     # Generate composite bigram timing statistics
     generate_composite_bigram_speed_csv(left_home_bigram_df, left_home_key_df, f"{output_dir}bigram_composite_speed_statistics.csv")
+
+    # Generate instantaneous error rate CSV files
+    generate_instantaneous_error_rate_1key_csv(left_home_key_df, output_path=f"{output_dir}instantaneous_error_rate_1key.csv")
+    generate_instantaneous_error_rate_2key_csv(left_home_bigram_df, output_path=f"{output_dir}instantaneous_error_rate_2key.csv")
 
     print(f"\nResults saved to {output_dir}")
     
