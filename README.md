@@ -1,15 +1,15 @@
-# Bigram Typing Preference Study
+# Typing Preference Study
  
 -- jspsych website to collect study data via Prolific plus python analysis code --
 
 Author: Arno Klein (arnoklein.info)
 
-GitHub repository: binarybottle/bigram_typing_preference_study
+GitHub repository: binarybottle/typing_preferences_study
 
 License: Apache v2.0 
 
 ## Description
-The purpose of the scripts in this repository is to determine which bigram in each of many bigram pairs is easier (more comfortable) to type on a qwerty computer keyboard, ultimately to inform the design of future keyboard layouts. These data are later converted to individual bigram comfort scores (https://github.com/binarybottle/bigram_typing_preferences_to_comfort_scores).
+The purpose of the scripts in this repository is to determine which bigram in each of many bigram pairs is easier (more comfortable) to type on a qwerty computer keyboard, ultimately to inform the design of future keyboard layouts. These data are later converted to individual bigram comfort scores (https://github.com/binarybottle/typing_preferences_to_comfort_scores).
 
   - src/experiment.js: script to present and collect bigram typing data via a website
   

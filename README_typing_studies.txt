@@ -1,5 +1,5 @@
 This file contains information about specific studies run with this 
-software to prepare data for bigram_typing_preferences_to_comfort_scores 
+software to prepare data for typing_preferences_to_comfort_scores 
 and optimize_layouts (for optimization of keyboard layouts).
 
 Studies 1-5 were run exclusively on the Prolific recruitment platform.
@@ -7,19 +7,19 @@ Studies 1-5 were run exclusively on the Prolific recruitment platform.
 Studies 6-9 were conducted with non-Prolific participants.
 
 Study 6's 50 bigram pairs were selected using the following program:
-bigram_typing_preferences_to_comfort_scores/extra/pair_recommender.py.
+typing_preferences_to_comfort_scores/extra/pair_recommender.py.
 It uses maximum-minimum distance selection in PCA space to identify 
 diverse bigram pairs for bigram pair typing data collection. 
 
 Study 7's 50 bigram pairs were selected using
-bigram_typing_preferences_to_comfort_scores' recommendations.py
+typing_preferences_to_comfort_scores' recommendations.py
 to select a complementary set of 50 pairs distinct from those of 
 Study 6 in PCA space.
 
 Study 8's 37 bigram pairs were selected as follows:
 1. bigram-typing-comfort-experiment software was used to collect
 bigram typing preference choices from Prolific participants.
-2. bigram_typing_preferences_to_comfort_scores software
+2. typing_preferences_to_comfort_scores software
 estimated latent comfort scores for bigrams from the choices in #1.
 3. All possible bigrams were ranked according to these estimated scores.
 4. The top 29 pairs of neighbors in the ranked bigrams were selected.

@@ -15,7 +15,7 @@ er
 
 Installation steps for either local/remote hosting:
 
-1. Clone the project's repository (``git clone git@github.com:binarybottle/bigram-typing-comfort-experiment.git``)
+1. Clone the project's repository (``git clone git@github.com:binarybottle/bigram-typing-preference-study.git``)
 2. ``cd bigram-typing-comfort-experiment``
 3. Make sure you have ``Node.js >= 18.x``
 4. Run ``npm install`` to install the necessary dependencies

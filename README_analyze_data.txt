@@ -3,7 +3,7 @@ Bigram typing analysis pipeline documentation
 
 Author: Arno Klein (arnoklein.info)
 
-GitHub repository: binarybottle/bigram-typing-comfort-experiment
+GitHub repository: binarybottle/bigram-typing-preference-study
 
 License: Apache v2.0 
 
