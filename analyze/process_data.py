@@ -1073,17 +1073,6 @@ if __name__ == "__main__":
     # Filter parameters
     ###################
     # Filter users by inconsistent or improbable choice thresholds:
-    # Improbable choices (left typing hand) in the easy_choice_pairs_file
-    # good_choice,bad_choice
-    # fr,vr  # same finger same direction 1 vs. 2 off home row (studies 1-7)
-    # aq,zq  # same finger same direction 1 vs. 2 off home row (study 2A)
-    # fd,ce  # 2 strongest fingers home row vs. skip home row with same finger (study 1)
-    # df,qz  # 2 strongest fingers home row vs. skip home row with weakest finger (study 6)
-    # df,ex  # 2 strongest fingers home row vs. skip home row (study 6)
-    # fd,ez  # 2 strongest fingers home row vs. skip home row (study 6)
-    # fd,qz  # 2 strongest fingers home row vs. skip home row with weakest finger (study 7)
-    # df,wz  # 2 strongest fingers home row vs. skip home row with weakest fingers (study 7)
-    # ff,aa  # strongest vs. weakest finger (study 8)
     filter_users_by_num_improbable_choices = config['process']['filter_users_by_num_improbable_choices']
     filter_users_by_percent_inconsistencies = config['process']['filter_users_by_percent_inconsistencies'] 
     filter_by_strong_inconsistencies = config['process']['filter_by_strong_inconsistencies'] # only works if filter_users_by_percent_inconsistencies is True

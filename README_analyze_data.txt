@@ -160,7 +160,7 @@ robust evidence for keyboard layout optimization principles by testing five key 
 - **Statistical approach**: Binomial test for directional movement preferences
 - **Design implications**: Guides optimization of finger roll patterns
 
-#### Statistical Methodology
+#### Statistical Methods
 
 **Core Approach**:
 - **Binomial tests** for binary preference comparisons

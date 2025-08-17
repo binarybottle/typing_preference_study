@@ -9,7 +9,6 @@ data:
 
 #-------------------------------------------------------------------------------
 # process_data.py settings
-# process_data.py --config config.yaml
 #-------------------------------------------------------------------------------
 process:
   # Filter users by inconsistent or improbable choice thresholds:
@@ -43,7 +42,7 @@ process:
   zero_threshold: 50  # Consider values within this distance of zero as "close to zero" (max 100)
 
   # Filter rows with bigrams containing any of the following letters:
-  filter_letters: ['t', 'g', 'b']
+  filter_letters: [] #['t', 'g', 'b']
 
 #-------------------------------------------------------------------------------
 # analyze_data.py settings
@@ -66,13 +65,14 @@ analysis:
   # Frequency analysis
   frequency_transform: "log10"  # Options: log10, log2, none
 
+  #- - - - - - - - - - - - - - - - - - - -
   # Keyboard ergonomics analysis settings
-  #-------------------------------------------------------------------------
-  run_ergonomics_tests: true  # Set to true to enable ergonomics analysis
-  
-  # Statistical testing parameters
+  #- - - - - - - - - - - - - - - - - - - -
+  run_ergonomics_tests: true          # Descriptive statistical approach
+  run_mixed_effects_ergonomics: true  # Mixed-effects statistical approach
   alpha_level: 0.05  # Significance level
   correction_method: 'fdr_bh'  # Multiple comparison correction: 'fdr_bh' or 'bonferroni'
+  n_bootstrap: 1000
   
   # Minimum sample sizes for reliable testing
   min_comparisons_per_test: 10  # Minimum number of comparisons needed for a test

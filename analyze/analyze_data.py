@@ -29,7 +29,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from bigram_frequencies import bigrams, bigram_frequencies_array
-from keyboard_ergonomics import add_ergonomics_analysis_to_main
+from ergonomics_descriptive import add_ergonomics_analysis_to_main
+from ergonomics_mixed_effects import add_mixed_effects_analysis_to_main
 
 # Configure logging
 logging.basicConfig(
@@ -2598,8 +2599,6 @@ def main():
         config = load_config(args.config)
         input_folder = os.path.join(config['data']['input_dir'])
         output_folder = os.path.join(input_folder, 'output')
-        output_plots_folder = os.path.join(output_folder, 'plots')
-        os.makedirs(output_plots_folder, exist_ok=True)
 
         # Create output directories
         choice_folder = os.path.join(output_folder, 
@@ -2643,49 +2642,21 @@ def main():
                                                              'bigram_pair_choices.csv')
 
         # ERGONOMICS ANALYSIS SECTION:
-        run_ergonomics = config.get('analysis', {}).get('run_ergonomics_tests', False)        
-        if run_ergonomics:
-            
-            # Check for required columns
-            required_cols = ['user_id', 'chosen_bigram', 'unchosen_bigram', 'is_consistent']
-            missing_cols = [col for col in required_cols if col not in data.columns]
-            if missing_cols:
-                print(f"ERROR: Missing required columns: {missing_cols}")
-            
-            # Check is_consistent column
-            if 'is_consistent' in data.columns:
-                consistent_count = data['is_consistent'].sum() if data['is_consistent'].dtype == bool else (data['is_consistent'] == True).sum()
-                
-                if consistent_count == 0:
-                    print("ERROR: No consistent rows found!")
-                else:
-                    # Try importing the ergonomics module
-                    try:
-                        from keyboard_ergonomics import KeyboardErgonomicsAnalysis
-                        
-                        # Try creating the analyzer
-                        try:
-                            ergonomics_analyzer = KeyboardErgonomicsAnalysis(config)
-                            
-                            # Try running the analysis
-                            try:
-                                ergonomics_results = ergonomics_analyzer.run_all_ergonomics_tests(data, output_folder)
-                            except Exception as e:
-                                print(f"ERROR: Ergonomics analysis failed: {e}")
-                                import traceback
-                                traceback.print_exc()
-                                
-                        except Exception as e:
-                            print(f"ERROR: Failed to create ergonomics analyzer: {e}")
-                            import traceback
-                            traceback.print_exc()
-                            
-                    except ImportError as e:
-                        print(f"ERROR: Failed to import KeyboardErgonomicsAnalysis: {e}")
-                        print("Make sure keyboard_ergonomics.py is in the same directory as analyze_data.py")
-                        
-            else:
-                print("ERROR: is_consistent column not found!")
+
+        # Descriptive statistical analysis
+        logger.info("Running keyboard ergonomics analysis...")
+        ergonomics_results = add_ergonomics_analysis_to_main(analyzer, data, output_folder, config)
+        if ergonomics_results:
+            logger.info("Keyboard ergonomics analysis completed successfully!")
+        else:
+            logger.info("Keyboard ergonomics analysis skipped (not enabled in config)")
+
+        # Mixed-effects statistical analysis
+        if config.get('analysis', {}).get('run_mixed_effects_ergonomics', False):
+            logger.info("Running mixed-effects ergonomics analysis...")
+            mixed_effects_results = add_mixed_effects_analysis_to_main(analyzer, data, output_folder, config)
+            if mixed_effects_results:
+                logger.info("Mixed-effects analysis completed successfully!")
 
     except Exception as e:
         logger.error(f"Analysis failed: {str(e)}")
