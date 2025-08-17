@@ -906,12 +906,16 @@ class KeyboardErgonomicsAnalysis:
             
             q1 = results['question_1']
             
+            # 1.1 Home row vs others
             if 'home_vs_others' in q1:
                 home_result = q1['home_vs_others']
+                report_lines.extend([
+                    "1.1 HOME ROW vs TOP/BOTTOM ROWS",
+                    "--------------------------------"
+                ])
+                
                 if 'interpretation' in home_result:
                     report_lines.extend([
-                        "1.1 HOME ROW vs TOP/BOTTOM ROWS",
-                        "--------------------------------",
                         f"Result: {home_result['interpretation']}",
                         f"Statistical significance: p = {home_result.get('p_value', 'N/A'):.3e}",
                         f"Effect size: {home_result.get('effect_size', 0):.3f} ({home_result.get('practical_significance', 'N/A')})",
@@ -923,13 +927,33 @@ class KeyboardErgonomicsAnalysis:
                         "→ This is the strongest ergonomic preference in typing",
                         ""
                     ])
+                else:
+                    report_lines.extend([
+                        f"Result: {home_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {home_result.get('p_value', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Insufficient data to determine home row preferences",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "1.1 HOME ROW vs TOP/BOTTOM ROWS",
+                    "--------------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
             
+            # 1.2 Top vs bottom
             if 'top_vs_bottom' in q1:
                 top_result = q1['top_vs_bottom']
+                report_lines.extend([
+                    "1.2 TOP ROW vs BOTTOM ROW",
+                    "-------------------------"
+                ])
+                
                 if 'interpretation' in top_result:
                     report_lines.extend([
-                        "1.2 TOP ROW vs BOTTOM ROW",
-                        "-------------------------",
                         f"Result: {top_result['interpretation']}",
                         f"Statistical significance: p = {top_result.get('p_value', 'N/A'):.3e}",
                         f"Effect size: {top_result.get('effect_size', 0):.3f} ({top_result.get('practical_significance', 'N/A')})",
@@ -939,35 +963,83 @@ class KeyboardErgonomicsAnalysis:
                         "→ When not using home row, consider top vs bottom row preferences",
                         ""
                     ])
+                else:
+                    report_lines.extend([
+                        f"Result: {top_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {top_result.get('p_value', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Insufficient data to determine top vs bottom row preferences",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "1.2 TOP ROW vs BOTTOM ROW",
+                    "-------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
+            
+            # 1.3 Finger preferences
+            report_lines.extend([
+                "1.3 FINGER-SPECIFIC ROW PREFERENCES",
+                "-----------------------------------"
+            ])
             
             if 'finger_preferences' in q1:
-                report_lines.extend([
-                    "1.3 FINGER-SPECIFIC ROW PREFERENCES",
-                    "-----------------------------------"
-                ])
                 finger_names = {'index': 'Index', 'middle': 'Middle', 'ring': 'Ring', 'pinky': 'Pinky'}
-                for finger, finger_result in q1['finger_preferences'].items():
+                
+                for finger_key in ['index', 'middle', 'ring', 'pinky']:
+                    finger_result = q1['finger_preferences'].get(finger_key, {})
+                    finger_name = finger_names.get(finger_key, finger_key)
+                    
                     if finger_result.get('n_comparisons', 0) > 0:
                         prop = finger_result.get('proportion_chose_top', 0.5)
                         effect_size = abs(prop - 0.5)
+                        p_val = finger_result.get('p_value', float('inf'))
                         
-                        if effect_size >= 0.05:  # Only report meaningful effects
-                            preference = "TOP row" if prop > 0.5 else "BOTTOM row"
-                            strength = "strongly" if effect_size >= 0.15 else "moderately"
-                            
-                            report_lines.extend([
-                                f"{finger_names.get(finger, finger)} finger: {strength} prefers {preference}",
-                                f"  → {prop:.1%} prefer top row (effect size: {effect_size:.3f})",
-                                f"  → p = {finger_result.get('p_value', 'N/A'):.3e}, n = {finger_result.get('n_comparisons', 0)}",
-                                ""
-                            ])
+                        preference = "TOP row" if prop > 0.5 else "BOTTOM row"
+                        
+                        if effect_size >= 0.15:
+                            strength = "strongly"
+                        elif effect_size >= 0.05:
+                            strength = "moderately"
+                        else:
+                            strength = "weakly"
+                        
+                        significance = "significant" if p_val < 0.05 else "not significant"
+                        
+                        report_lines.extend([
+                            f"{finger_name} finger: {strength} prefers {preference}",
+                            f"  → {prop:.1%} prefer top row (effect size: {effect_size:.3f})",
+                            f"  → p = {p_val:.3e} ({significance}), n = {finger_result.get('n_comparisons', 0)}",
+                            ""
+                        ])
+                    else:
+                        report_lines.extend([
+                            f"{finger_name} finger: No valid comparisons found",
+                            f"  → Insufficient data for analysis",
+                            ""
+                        ])
                 
                 report_lines.extend([
                     "DESIGN IMPLICATION:",
                     "→ When fingers must leave home row, use finger-specific preferences",
-                    "→ Pinky: strongly prefers bottom row (Z, X) over top row (Q, W)",
+                    "→ Pay special attention to significant finger preferences",
                     ""
                 ])
+            else:
+                report_lines.extend([
+                    "Finger-specific analysis: Not conducted",
+                    ""
+                ])
+        else:
+            report_lines.extend([
+                "QUESTION 1: ROW PREFERENCES",
+                "===========================",
+                "Analysis not conducted",
+                ""
+            ])
         
         # Question 2: Row pair preferences
         if 'question_2' in results:
@@ -979,12 +1051,16 @@ class KeyboardErgonomicsAnalysis:
             
             q2 = results['question_2']
             
+            # 2.1 Same vs different row
             if 'same_vs_different_row' in q2:
                 same_result = q2['same_vs_different_row']
+                report_lines.extend([
+                    "2.1 SAME ROW vs CROSS-ROW BIGRAMS",
+                    "---------------------------------"
+                ])
+                
                 if 'interpretation' in same_result:
                     report_lines.extend([
-                        "2.1 SAME ROW vs CROSS-ROW BIGRAMS",
-                        "---------------------------------",
                         f"Result: {same_result['interpretation']}",
                         f"Statistical significance: p = {same_result.get('p_value', 'N/A'):.3e}",
                         f"Effect size: {same_result.get('effect_size', 0):.3f} ({same_result.get('practical_significance', 'N/A')})",
@@ -995,13 +1071,33 @@ class KeyboardErgonomicsAnalysis:
                         "→ Major constraint for keyboard layout optimization",
                         ""
                     ])
+                else:
+                    report_lines.extend([
+                        f"Result: {same_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {same_result.get('p_value', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Insufficient data to determine row movement preferences",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "2.1 SAME ROW vs CROSS-ROW BIGRAMS",
+                    "---------------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
             
+            # 2.2 Adjacent vs non-adjacent
             if 'adjacent_vs_nonadjacent' in q2:
                 adj_result = q2['adjacent_vs_nonadjacent']
+                report_lines.extend([
+                    "2.2 ADJACENT vs SKIP ROW MOVEMENTS",
+                    "----------------------------------"
+                ])
+                
                 if 'interpretation' in adj_result:
                     report_lines.extend([
-                        "2.2 ADJACENT vs SKIP ROW MOVEMENTS",
-                        "----------------------------------",
                         f"Result: {adj_result['interpretation']}",
                         f"Statistical significance: p = {adj_result.get('p_value', 'N/A'):.3e}",
                         f"Effect size: {adj_result.get('effect_size', 0):.3f} ({adj_result.get('practical_significance', 'N/A')})",
@@ -1012,6 +1108,29 @@ class KeyboardErgonomicsAnalysis:
                         "→ Avoid skip movements (top↔bottom) for frequent bigrams",
                         ""
                     ])
+                else:
+                    report_lines.extend([
+                        f"Result: {adj_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {adj_result.get('p_value', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Insufficient data to determine adjacent vs skip row preferences",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "2.2 ADJACENT vs SKIP ROW MOVEMENTS",
+                    "----------------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
+        else:
+            report_lines.extend([
+                "QUESTION 2: ROW MOVEMENT PATTERNS",
+                "=================================",
+                "Analysis not conducted",
+                ""
+            ])
         
         # Question 3: Column preferences
         if 'question_3' in results:
@@ -1028,8 +1147,8 @@ class KeyboardErgonomicsAnalysis:
             report_lines.append("----------------------------------")
             
             column_tests = [
-                ('col5_vs_col4', 'Column 4 vs Column 5'),
-                ('col4_vs_col3', 'Column 3 vs Column 4'),
+                ('col5_vs_col4', 'Column 5 vs Column 4'),
+                ('col4_vs_col3', 'Column 4 vs Column 3'),
                 ('col3_vs_col2', 'Column 3 vs Column 2'), 
                 ('col2_vs_col1', 'Column 2 vs Column 1')
             ]
@@ -1037,37 +1156,104 @@ class KeyboardErgonomicsAnalysis:
             for test_name, description in column_tests:
                 if test_name in q3:
                     result = q3[test_name]
-                    if isinstance(result, dict) and 'interpretation' in result:
-                        # Determine which column is preferred
-                        prop_higher = result.get('proportion_chose_higher', 0.5)
-                        if 'col5_vs_col4' in test_name:
-                            preferred = "Column 4" if prop_higher < 0.5 else "Column 5"
-                            prop_preferred = 1 - prop_higher if prop_higher < 0.5 else prop_higher
-                        elif 'col4_vs_col3' in test_name:
-                            preferred = "Column 3" if prop_higher < 0.5 else "Column 4"
-                            prop_preferred = 1 - prop_higher if prop_higher < 0.5 else prop_higher
-                        elif 'col3_vs_col2' in test_name:
-                            preferred = "Column 3" if prop_higher > 0.5 else "Column 2"
-                            prop_preferred = prop_higher if prop_higher > 0.5 else 1 - prop_higher
-                        else:  # col2_vs_col1
-                            preferred = "Column 2" if prop_higher > 0.5 else "Column 1"
-                            prop_preferred = prop_higher if prop_higher > 0.5 else 1 - prop_higher
-                        
-                        effect_size = abs(prop_preferred - 0.5)
-                        
+                    if isinstance(result, dict):
+                        if 'interpretation' in result:
+                            # Determine which column is preferred
+                            prop_higher = result.get('proportion_chose_higher', 0.5)
+                            effect_size = result.get('effect_size', 0)
+                            
+                            if 'col5_vs_col4' in test_name:
+                                preferred = "Column 4" if prop_higher < 0.5 else "Column 5"
+                                prop_preferred = 1 - prop_higher if prop_higher < 0.5 else prop_higher
+                            elif 'col4_vs_col3' in test_name:
+                                preferred = "Column 3" if prop_higher < 0.5 else "Column 4"
+                                prop_preferred = 1 - prop_higher if prop_higher < 0.5 else prop_higher
+                            elif 'col3_vs_col2' in test_name:
+                                preferred = "Column 3" if prop_higher > 0.5 else "Column 2"
+                                prop_preferred = prop_higher if prop_higher > 0.5 else 1 - prop_higher
+                            else:  # col2_vs_col1
+                                preferred = "Column 2" if prop_higher > 0.5 else "Column 1"
+                                prop_preferred = prop_higher if prop_higher > 0.5 else 1 - prop_higher
+                            
+                            significance = "significant" if result.get('significant', False) else "not significant"
+                            
+                            report_lines.extend([
+                                f"{description}: {preferred} preferred {prop_preferred:.1%} of the time",
+                                f"  → Effect size: {effect_size:.3f}, p = {result.get('p_value', 'N/A'):.3e} ({significance})",
+                                f"  → Design priority: {result.get('design_priority', 'N/A')}",
+                                ""
+                            ])
+                        else:
+                            report_lines.extend([
+                                f"{description}: {result.get('test', 'No valid data found')}",
+                                f"  → p = {result.get('p_value', 'N/A')}",
+                                ""
+                            ])
+                    else:
                         report_lines.extend([
-                            f"{description}: {preferred} preferred {prop_preferred:.1%} of the time",
-                            f"  → Effect size: {effect_size:.3f}, p = {result.get('p_value', 'N/A'):.3e}",
+                            f"{description}: Invalid result format",
                             ""
                         ])
+                else:
+                    report_lines.extend([
+                        f"{description}: Test not conducted",
+                        ""
+                    ])
             
-            # Column 5 avoidance analysis
+            # Column 5 vs other columns
+            report_lines.extend([
+                "3.2 COLUMN 5 vs OTHER COLUMNS",
+                "-----------------------------"
+            ])
+            
+            col5_individual_tests = [
+                ('col5_vs_col1', 'Column 5 vs Column 1'),
+                ('col5_vs_col2', 'Column 5 vs Column 2'),
+                ('col5_vs_col3', 'Column 5 vs Column 3')
+            ]
+            
+            for test_name, description in col5_individual_tests:
+                if test_name in q3:
+                    result = q3[test_name]
+                    if isinstance(result, dict):
+                        if 'interpretation' in result:
+                            prop_higher = result.get('proportion_chose_higher', 0.5)
+                            other_col = test_name.split('_')[2]  # Extract column number
+                            proportion_chose_other = 1 - prop_higher
+                            effect_size = result.get('effect_size', 0)
+                            significance = "significant" if result.get('significant', False) else "not significant"
+                            
+                            report_lines.extend([
+                                f"{description}: Column {other_col} preferred {proportion_chose_other:.1%} of the time",
+                                f"  → Effect size: {effect_size:.3f}, p = {result.get('p_value', 'N/A'):.3e} ({significance})",
+                                ""
+                            ])
+                        else:
+                            report_lines.extend([
+                                f"{description}: {result.get('test', 'No valid data found')}",
+                                ""
+                            ])
+                    else:
+                        report_lines.extend([
+                            f"{description}: Invalid result format",
+                            ""
+                        ])
+                else:
+                    report_lines.extend([
+                        f"{description}: Test not conducted",
+                        ""
+                    ])
+            
+            # Overall column 5 avoidance
             if 'col5_avoidance_overall' in q3:
                 avoid_result = q3['col5_avoidance_overall']
+                report_lines.extend([
+                    "3.3 COLUMN 5 SYSTEMATIC AVOIDANCE",
+                    "----------------------------------"
+                ])
+                
                 if 'interpretation' in avoid_result:
                     report_lines.extend([
-                        "3.2 COLUMN 5 SYSTEMATIC AVOIDANCE",
-                        "----------------------------------",
                         f"Result: {avoid_result['interpretation']}",
                         f"Statistical significance: p = {avoid_result.get('p_value', 'N/A'):.3e}",
                         f"Effect size: {avoid_result.get('effect_size', 0):.3f} ({avoid_result.get('practical_significance', 'N/A')})",
@@ -1078,8 +1264,273 @@ class KeyboardErgonomicsAnalysis:
                         "→ Avoid placing frequent letters in extreme positions (columns 1, 5)",
                         ""
                     ])
+                else:
+                    report_lines.extend([
+                        f"Result: {avoid_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {avoid_result.get('p_value', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Insufficient data to determine column 5 avoidance patterns",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "3.3 COLUMN 5 SYSTEMATIC AVOIDANCE",
+                    "----------------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
+        else:
+            report_lines.extend([
+                "QUESTION 3: COLUMN PREFERENCES",
+                "==============================",
+                "Analysis not conducted",
+                ""
+            ])
         
-        # Add summary section
+        # Question 4: Column pair preferences  
+        if 'question_4' in results:
+            report_lines.extend([
+                "QUESTION 4: COLUMN PAIR PREFERENCES",
+                "===================================",
+                ""
+            ])
+            
+            q4 = results['question_4']
+            
+            # 4.1 Overall adjacent vs remote
+            if 'adjacent_vs_remote_overall' in q4:
+                adj_result = q4['adjacent_vs_remote_overall']
+                report_lines.extend([
+                    "4.1 ADJACENT vs REMOTE FINGERS (Overall)",
+                    "----------------------------------------"
+                ])
+                
+                if 'interpretation' in adj_result:
+                    report_lines.extend([
+                        f"Result: {adj_result['interpretation']}",
+                        f"Statistical significance: p = {adj_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {adj_result.get('effect_size', 0):.3f} ({adj_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {adj_result.get('design_priority', 'N/A')}",
+                        ""
+                    ])
+                else:
+                    report_lines.extend([
+                        f"Result: {adj_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {adj_result.get('p_value', 'N/A')}",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "4.1 ADJACENT vs REMOTE FINGERS (Overall)",
+                    "----------------------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
+            
+            # 4.2 Same row adjacent vs remote
+            if 'adjacent_vs_remote_same_row' in q4:
+                adj_result = q4['adjacent_vs_remote_same_row']
+                report_lines.extend([
+                    "4.2 ADJACENT vs REMOTE FINGERS (Within Same Row)",
+                    "------------------------------------------------"
+                ])
+                
+                if 'interpretation' in adj_result:
+                    report_lines.extend([
+                        f"Result: {adj_result['interpretation']}",
+                        f"Statistical significance: p = {adj_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {adj_result.get('effect_size', 0):.3f} ({adj_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {adj_result.get('design_priority', 'N/A')}",
+                        ""
+                    ])
+                else:
+                    report_lines.extend([
+                        f"Result: {adj_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {adj_result.get('p_value', 'N/A')}",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "4.2 ADJACENT vs REMOTE FINGERS (Within Same Row)",
+                    "------------------------------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
+            
+            # 4.3 Different row adjacent vs remote
+            if 'adjacent_vs_remote_diff_row' in q4:
+                adj_result = q4['adjacent_vs_remote_diff_row']
+                report_lines.extend([
+                    "4.3 ADJACENT vs REMOTE FINGERS (Across Different Rows)",
+                    "------------------------------------------------------"
+                ])
+                
+                if 'interpretation' in adj_result:
+                    report_lines.extend([
+                        f"Result: {adj_result['interpretation']}",
+                        f"Statistical significance: p = {adj_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {adj_result.get('effect_size', 0):.3f} ({adj_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {adj_result.get('design_priority', 'N/A')}",
+                        ""
+                    ])
+                else:
+                    report_lines.extend([
+                        f"Result: {adj_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {adj_result.get('p_value', 'N/A')}",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "4.3 ADJACENT vs REMOTE FINGERS (Across Different Rows)",
+                    "------------------------------------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
+            
+            # 4.4 Overall finger separation distances
+            report_lines.extend([
+                "4.4 FINGER SEPARATION DISTANCE PREFERENCES (Overall)",
+                "----------------------------------------------------"
+            ])
+            
+            if 'separation_distances_overall' in q4 and q4['separation_distances_overall']:
+                for distance_name, result in q4['separation_distances_overall'].items():
+                    if result.get('n_comparisons', 0) > 0:
+                        significance = "significant" if result.get('significant', False) else "not significant"
+                        report_lines.extend([
+                            f"{distance_name}: {result.get('proportion_chose_smaller', 'N/A'):.3f} prefer smaller distance",
+                            f"  → p = {result.get('p_value', 'N/A'):.3e} ({significance}), n = {result.get('n_comparisons', 0)}",
+                            ""
+                        ])
+                    else:
+                        report_lines.extend([
+                            f"{distance_name}: No valid comparisons found",
+                            ""
+                        ])
+            else:
+                report_lines.extend([
+                    "No overall finger separation data available",
+                    ""
+                ])
+            
+            # 4.5 Same row finger separation distances
+            report_lines.extend([
+                "4.5 FINGER SEPARATION DISTANCE PREFERENCES (Within Same Row)",
+                "------------------------------------------------------------"
+            ])
+            
+            if 'separation_distances_same_row' in q4 and q4['separation_distances_same_row']:
+                for distance_name, result in q4['separation_distances_same_row'].items():
+                    if result.get('n_comparisons', 0) > 0:
+                        significance = "significant" if result.get('significant', False) else "not significant"
+                        report_lines.extend([
+                            f"{distance_name}: {result.get('proportion_chose_smaller', 'N/A'):.3f} prefer smaller distance",
+                            f"  → p = {result.get('p_value', 'N/A'):.3e} ({significance}), n = {result.get('n_comparisons', 0)}",
+                            ""
+                        ])
+                    else:
+                        report_lines.extend([
+                            f"{distance_name}: No valid comparisons found",
+                            ""
+                        ])
+            else:
+                report_lines.extend([
+                    "No same-row finger separation data available",
+                    ""
+                ])
+            
+            # 4.6 Different row finger separation distances
+            report_lines.extend([
+                "4.6 FINGER SEPARATION DISTANCE PREFERENCES (Across Different Rows)",
+                "-------------------------------------------------------------------"
+            ])
+            
+            if 'separation_distances_diff_row' in q4 and q4['separation_distances_diff_row']:
+                for distance_name, result in q4['separation_distances_diff_row'].items():
+                    if result.get('n_comparisons', 0) > 0:
+                        significance = "significant" if result.get('significant', False) else "not significant"
+                        report_lines.extend([
+                            f"{distance_name}: {result.get('proportion_chose_smaller', 'N/A'):.3f} prefer smaller distance",
+                            f"  → p = {result.get('p_value', 'N/A'):.3e} ({significance}), n = {result.get('n_comparisons', 0)}",
+                            ""
+                        ])
+                    else:
+                        report_lines.extend([
+                            f"{distance_name}: No valid comparisons found",
+                            ""
+                        ])
+            else:
+                report_lines.extend([
+                    "No cross-row finger separation data available",
+                    ""
+                ])
+                
+            report_lines.extend([
+                "DESIGN IMPLICATION:",
+                "→ Adjacent finger movements generally preferred for same-row bigrams",
+                "→ Cross-row finger coordination may follow different patterns",
+                ""
+            ])
+        else:
+            report_lines.extend([
+                "QUESTION 4: COLUMN PAIR PREFERENCES",
+                "===================================",
+                "Analysis not conducted",
+                ""
+            ])
+        
+        # Question 5: Direction preferences
+        if 'question_5' in results:
+            report_lines.extend([
+                "QUESTION 5: DIRECTION PREFERENCES",
+                "=================================",
+                ""
+            ])
+            
+            q5 = results['question_5']
+            
+            if 'direction_preference' in q5:
+                dir_result = q5['direction_preference']
+                report_lines.extend([
+                    "5.1 DIRECTION TOWARD COLUMN 5 (Low-to-High Fingers)",
+                    "----------------------------------------------------"
+                ])
+                
+                if 'interpretation' in dir_result:
+                    report_lines.extend([
+                        f"Result: {dir_result['interpretation']}",
+                        f"Statistical significance: p = {dir_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {dir_result.get('effect_size', 0):.3f} ({dir_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {dir_result.get('design_priority', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Weak directional preference - low priority for layout optimization",
+                        ""
+                    ])
+                else:
+                    report_lines.extend([
+                        f"Result: {dir_result.get('test', 'No valid data found')}",
+                        f"Statistical significance: p = {dir_result.get('p_value', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Insufficient data to determine directional preferences",
+                        ""
+                    ])
+            else:
+                report_lines.extend([
+                    "5.1 DIRECTION TOWARD COLUMN 5 (Low-to-High Fingers)",
+                    "----------------------------------------------------",
+                    "Result: Test not conducted",
+                    ""
+                ])
+        else:
+            report_lines.extend([
+                "QUESTION 5: DIRECTION PREFERENCES",
+                "=================================",
+                "Analysis not conducted",
+                ""
+            ])
         report_lines.extend([
             "SUMMARY FOR KEYBOARD LAYOUT OPTIMIZATION",
             "========================================",
