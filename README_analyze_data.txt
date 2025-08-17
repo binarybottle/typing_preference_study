@@ -10,13 +10,18 @@ License: Apache v2.0
 ## Overview
 
 This pipeline analyzes relationships between bigram typing times, user preferences, 
-and frequency patterns. The analysis is implemented in `analyze_data.py` 
-and consists of three main components:
+frequency patterns, and keyboard ergonomics principles. 
+The analysis is implemented in `analyze_data.py` 
+and consists of four main components:
 
 1. Typing Time vs. User Preference Analysis
 2. Typing Time vs. Frequency Analysis 
 3. Preference Prediction Analysis
+4. Keyboard Ergonomics Statistical Tests
 
+## Output Directory Structure
+
+```
 .
 ├── typing_time_vs_preference/
 │   ├── raw_typing_time_diff_vs_slider_value.png
@@ -32,14 +37,18 @@ and consists of three main components:
 │   ├── freq_vs_time_raw.png
 │   ├── freq_vs_time_normalized.png
 │   └── frequency_timing_analysis_results.txt
-└── preference_prediction/
-    ├── speed_accuracy_by_magnitude.png
-    ├── speed_accuracy_by_confidence.png
-    ├── user_accuracy_distribution.png
-    ├── preference_prediction_report.txt
-    ├── below_chance_analysis_report.txt
-    ├── variance_prediction_analysis.txt
-    └── bigram_pair_choices.csv
+├── preference_prediction/
+│   ├── speed_accuracy_by_magnitude.png
+│   ├── speed_accuracy_by_confidence.png
+│   ├── user_accuracy_distribution.png
+│   ├── preference_prediction_report.txt
+│   ├── below_chance_analysis_report.txt
+│   ├── variance_prediction_analysis.txt
+│   └── bigram_pair_choices.csv
+└── keyboard_ergonomics/
+    ├── keyboard_ergonomics_report.txt
+    └── ergonomics_interpretation.txt
+```
 
 ## Analysis Components
 
@@ -111,24 +120,118 @@ measure of typing comfort, potentially replacing subjective ratings in future st
    and typing speed. This helps identify whether speed-based prediction is equally reliable 
    across different users.
 
+### 4. Keyboard Ergonomics Statistical Tests
+
+This comprehensive analysis tests biomechanical hypotheses about keyboard ergonomics 
+using participants' consistent bigram preferences. The analysis provides statistically 
+robust evidence for keyboard layout optimization principles by testing five key research questions:
+
+#### Research Questions and Statistical Tests
+
+**Question 1: Row Preferences**
+- **Row preference hierarchy**: Is the home row preferred over top/bottom rows?
+- **Row comparison**: Is the top row preferred over the bottom row?
+- **Finger-specific preferences**: Which fingers prefer which rows for non-home positions?
+- **Statistical approach**: Binomial tests comparing proportions of choices favoring each row
+- **Design implications**: Guides placement of frequent keys by row and finger
+
+**Question 2: Row Movement Patterns**
+- **Same vs. different rows**: Are same-row bigrams preferred over cross-row movements?
+- **Adjacent vs. skip movements**: Are adjacent-row movements (home↔top, home↔bottom) preferred over skip movements (top↔bottom)?
+- **Statistical approach**: Binomial tests for movement pattern preferences
+- **Design implications**: Minimizes uncomfortable cross-row sequences in layout optimization
+
+**Question 3: Column Preferences**
+- **Sequential column comparisons**: Tests preferences between adjacent columns (5vs4, 4vs3, 3vs2, 2vs1)
+- **Column 5 avoidance**: Comprehensive test of whether column 5 is systematically avoided vs. all other columns (1-4)
+- **Individual column vs. column 5**: Separate tests for each column (1,2,3,4) vs. column 5
+- **Statistical approach**: Binomial tests with multiple comparison correction
+- **Design implications**: Establishes column preference hierarchy for frequent letter placement
+
+**Question 4: Finger Distance and Coordination**
+- **Adjacent vs. remote fingers**: Tests preference for adjacent finger movements vs. larger stretches
+- **Separation distance effects**: Compares 1-finger, 2-finger, and 3-finger separations
+- **Row-specific analysis**: Separate tests for same-row vs. cross-row finger movements
+- **Statistical approach**: Categorical comparison of finger distance preferences
+- **Design implications**: Optimizes finger coordination patterns in common bigrams
+
+**Question 5: Movement Direction**
+- **Directional preferences**: Tests preferences for inward vs. outward finger sequences
+- **Finger sequence patterns**: Compares low-to-high finger numbers vs. high-to-low sequences
+- **Statistical approach**: Binomial test for directional movement preferences
+- **Design implications**: Guides optimization of finger roll patterns
+
+#### Statistical Methodology
+
+**Core Approach**:
+- **Binomial tests** for binary preference comparisons
+- **Participant-level random effects** to account for individual differences  
+- **Multiple comparison correction** using False Discovery Rate (FDR) or Bonferroni methods
+- **Effect size reporting** via proportion differences and confidence intervals
+
+**Data Quality Controls**:
+- **Consistent choices only**: Analysis limited to bigram pairs with consistent participant responses
+- **Sufficient sample sizes**: Minimum comparison thresholds for reliable statistical testing
+- **Outlier handling**: Robust statistical methods resistant to extreme values
+
+**Validation Approach**:
+- **Cross-dataset replication**: Results can be validated across different participant samples
+- **Effect size thresholds**: Distinguishes statistical significance from practical importance
+- **Comprehensive reporting**: All statistical tests reported with corrections applied
+
+#### Output Files and Interpretation
+
+**keyboard_ergonomics_report.txt**:
+- Detailed statistical results for all five research questions
+- P-values, effect sizes, and significance tests with multiple comparison corrections
+- Proportion estimates with confidence intervals
+- Complete test-by-test breakdown of results
+
+**ergonomics_interpretation.txt**:
+- Practical design principles derived from statistical findings
+- Implementation priorities ranked by statistical evidence strength
+- Specific recommendations for keyboard layout optimization
+- Translation of statistical results into actionable design constraints
+
+#### Integration with Layout Optimization
+
+The ergonomics analysis provides weighted constraints for multi-objective keyboard layout optimization:
+
+**High Priority Constraints** (strong statistical evidence):
+- Maximize home row usage for frequent letters
+- Minimize cross-row bigram sequences
+- Favor middle column (column 3) for most frequent letters
+- Optimize adjacent finger movements for common bigrams
+
+**Medium Priority Constraints** (moderate evidence):
+- Pinky preference for bottom row over top row when leaving home
+- Adjacent row movements preferred over skip movements
+- Avoid extreme columns (1,5) for very frequent letters
+
+**Low Priority Constraints** (weak evidence):
+- Slight preference for inward finger movement patterns
+
 ### Overall Analysis Strategy
 
-The three analyses work together to:
+The four analyses work together to:
 1. Validate whether subjective preferences align with objective performance
 2. Separate the effects of familiarity (frequency) from inherent typing comfort
 3. Test whether typing speed could serve as an objective measure of preference
+4. **Establish evidence-based ergonomic principles for keyboard layout design**
 
 This comprehensive approach helps understand:
 - The reliability of subjective preference ratings
 - The role of practice vs. biomechanics in typing comfort
 - The potential for using objective measures in future typing comfort studies
+- **Statistically robust guidelines for optimizing keyboard layouts**
 
 ## Setup and Configuration
 
 ### Prerequisites
 - Python 3.x
-- Required packages: numpy, pandas, scipy, sklearn, matplotlib, seaborn, PyYAML
+- Required packages: numpy, pandas, scipy, sklearn, matplotlib, seaborn, PyYAML, statsmodels
 - Input data in CSV format with required columns (see Data Format section)
+- keymaps.py file with keyboard position definitions
 
 ### Configuration
 The analysis is controlled via `config.yaml` with the following key sections:
@@ -143,14 +246,21 @@ analysis:
   outlier_threshold_sd: Standard deviation threshold for outliers (default: 3.0)
   max_time_ms: Maximum allowed typing time in milliseconds (default: 3000)
   
+  # Ergonomics analysis settings
+  run_ergonomics_tests: Enable/disable ergonomics analysis (default: true)
+  alpha_level: Significance level for statistical tests (default: 0.05)
+  correction_method: Multiple comparison correction ('fdr_bh' or 'bonferroni')
+  
 visualization:
   dpi: Plot resolution
   figsize: Default figure dimensions
   colors: Color scheme for plots
 
-output:
-  base_dir: Base output directory
-  subdirs: Subdirectories for different analysis types
+subdirs:
+  typing_time_vs_preference: "typing_time_vs_preference"
+  typing_time_vs_frequency: "typing_time_vs_frequency"
+  preference_prediction: "preference_prediction"
+  keyboard_ergonomics: "keyboard_ergonomics"
 ```
 
 ## Input Data
@@ -162,6 +272,12 @@ output:
 - `chosen_bigram_time`: Typing time for chosen bigram (ms)
 - `unchosen_bigram_time`: Typing time for unchosen bigram (ms)
 - `sliderValue`: User preference rating (-100 to 100)
+- `is_consistent`: Boolean indicating consistent choice across repeated presentations
+
+### Keyboard Mapping Requirements
+- `keymaps.py`: Defines keyboard layout with row_map, column_map, and finger_map dictionaries
+- Maps each key to its row (1-3), column (1-10), and finger assignment (1-4)
+- Required for ergonomics analysis to determine key positions and finger assignments
 
 ## Output Data
 
@@ -169,7 +285,7 @@ output:
 
 The pipeline generates the following files in the configured output directories:
 
-1. Typing Time vs. Preference Analysis (`typing_time_vs_preference/`)
+1. **Typing Time vs. Preference Analysis** (`typing_time_vs_preference/`)
    - `raw_typing_time_diff_vs_slider_value.png`
      * Scatter plot of raw time differences vs. slider values
      * Shows relationship between typing speed differences and preference strength
@@ -185,7 +301,7 @@ The pipeline generates the following files in the configured output directories:
    - `normalized_overlaid_typing_times_by_slider_value_histograms.png`
      * Normalized version of overlaid distributions
 
-2. Frequency Analysis (`typing_time_vs_frequency/`)
+2. **Frequency Analysis** (`typing_time_vs_frequency/`)
    - `frequency_and_timing_distribution.png`
      * Main distribution plot with error bars and sample sizes
      * Shows relationship between frequency and typing speed
@@ -197,7 +313,7 @@ The pipeline generates the following files in the configured output directories:
      * Detailed statistical analysis results
      * Includes correlations, ANOVA results, and group statistics
 
-3. Prediction Analysis (`preference_prediction/`)
+3. **Prediction Analysis** (`preference_prediction/`)
    - `speed_accuracy_by_magnitude.png`
      * Prediction accuracy across speed difference magnitudes
    - `speed_accuracy_by_confidence.png`
@@ -211,15 +327,27 @@ The pipeline generates the following files in the configured output directories:
    - `variance_prediction_analysis.txt`
      * Variance explained by different factors
 
+4. **Keyboard Ergonomics Analysis** (`keyboard_ergonomics/`)
+   - `keyboard_ergonomics_report.txt`
+     * Comprehensive statistical results for all ergonomics research questions
+     * Includes p-values, effect sizes, confidence intervals, and significance tests
+     * Multiple comparison correction results and interpretation
+     * Detailed breakdown of row, column, and movement pattern preferences
+   - `ergonomics_interpretation.txt`
+     * Practical design principles derived from statistical findings
+     * Implementation priorities ranked by evidence strength
+     * Specific recommendations for keyboard layout optimization
+     * Translation of statistical results into actionable design constraints
+
 ### Statistical Measures and Interpretations
 
-1. Normalization Metrics
+1. **Normalization Metrics**
    - **Within-participant Z-scores**: (x - median) / MAD
      * MAD (Median Absolute Deviation) provides robust scale estimate
      * Controls for individual typing speed differences
      * Allows comparison across participants
 
-2. Correlation Measures
+2. **Correlation Measures**
    - **Spearman's Rank Correlation**: Used for frequency-time relationships
      * Non-parametric measure robust to outliers
      * Captures monotonic relationships
@@ -228,7 +356,7 @@ The pipeline generates the following files in the configured output directories:
        * -1 indicates perfect negative correlation
        * 0 indicates no correlation
    
-3. Regression Statistics
+3. **Regression Statistics**
    - **R-squared**: Variance explained by the model
      * Range: [0, 1], higher values indicate better fit
    - **Slope**: Rate of change in typing time with log-frequency
@@ -236,21 +364,21 @@ The pipeline generates the following files in the configured output directories:
      * Interpretation differs from linear R²
      * Values above 0.2 considered good fit
 
-4. Confidence Intervals
+4. **Confidence Intervals**
    - **Bootstrap CI**: Non-parametric 95% confidence intervals
      * Based on 1000 resamples
      * Robust to non-normal distributions
    - **Standard Error**: Uncertainty in mean estimates
      * Calculated using bootstrap for robustness
 
-5. Group Comparisons
+5. **Group Comparisons**
    - **ANOVA F-statistic**: Tests for differences between frequency groups
      * Larger F-values indicate stronger group differences
    - **Post-hoc Tests**: Bonferroni-corrected pairwise comparisons
      * Controls family-wise error rate
      * Reports adjusted p-values
 
-6. Prediction Metrics
+6. **Prediction Metrics**
    - **Accuracy**: Percentage of correct predictions
    - **ROC-AUC**: Area under ROC curve
      * Range: [0.5, 1.0]
@@ -260,44 +388,33 @@ The pipeline generates the following files in the configured output directories:
      * Values > 1 indicate positive association
      * Values < 1 indicate negative association
 
-7. Robust Statistics
+7. **Ergonomics Statistical Tests**
+   - **Binomial Tests**: Tests proportion differences from chance (0.5)
+     * Two-tailed tests for bidirectional hypotheses
+     * Reports exact p-values for small samples
+   - **Effect Sizes**: Absolute deviation from 0.5 proportion
+     * Range: [0, 0.5], larger values indicate stronger preferences
+   - **Multiple Comparison Correction**: 
+     * FDR (False Discovery Rate): Controls expected proportion of false positives
+     * Bonferroni: Conservative family-wise error rate control
+   - **Confidence Intervals**: Bootstrap-based 95% CIs for proportions
+     * Provides uncertainty estimates for effect sizes
+
+8. **Robust Statistics**
    - **Median**: Central tendency resistant to outliers
    - **MAD**: Scale measure resistant to outliers
    - **Winsorization**: Extreme value handling at 3000ms
    - **Quantile-based Analysis**: Distribution-free comparisons
 
-## Known Limitations
-
-1. Frequency Analysis:
-   - Relies on pre-calculated bigram frequencies
-   - May not account for domain-specific frequency patterns
-
-2. Prediction Analysis:
-   - Assumes typing speed differences are meaningful predictors
-   - May be sensitive to individual typing patterns
-
-3. Statistical Power:
-   - Accuracy of confidence intervals depends on sample sizes
-   - Small participant groups may have less reliable estimates
-
 ## Usage Example
 
 ```bash
+# Run complete analysis including ergonomics tests
 python analyze_data.py --config config.yaml
+
+# Configuration file should include:
+# analysis:
+#   run_ergonomics_tests: true
+#   alpha_level: 0.05
+#   correction_method: 'fdr_bh'
 ```
-
-## Extending the Pipeline
-
-To add new analyses:
-1. Create new methods in the `BigramAnalysis` class
-2. Add corresponding configuration in `config.yaml`
-3. Update output directory structure
-4. Implement appropriate error handling and logging
-5. Add visualization methods as needed
-
-## Version History
-
-Current Version: 1.0
-- Initial implementation of three core analyses
-- Comprehensive visualization suite
-- Robust statistical methodology

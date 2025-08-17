@@ -4,7 +4,7 @@
 # Data settings
 #-------------------------------------------------------------------------------
 data:
-  input_dir: "/Users/arno/Desktop/typing/nonprolific_studies6-9"
+  input_dir: "/Users/arno/Software/typing/typing_preference_study/analyze/"
   filtered_data_file: "output/tables/processed_bigram_data.csv"
 
 #-------------------------------------------------------------------------------
@@ -46,7 +46,7 @@ process:
   filter_letters: ['t', 'g', 'b']
 
 #-------------------------------------------------------------------------------
-# analysis.py settings
+# analyze_data.py settings
 #-------------------------------------------------------------------------------
 analysis:
   # Participant-level settings
@@ -65,13 +65,32 @@ analysis:
   
   # Frequency analysis
   frequency_transform: "log10"  # Options: log10, log2, none
+
+  # Keyboard ergonomics analysis settings
+  #-------------------------------------------------------------------------
+  run_ergonomics_tests: true  # Set to true to enable ergonomics analysis
   
+  # Statistical testing parameters
+  alpha_level: 0.05  # Significance level
+  correction_method: 'fdr_bh'  # Multiple comparison correction: 'fdr_bh' or 'bonferroni'
+  
+  # Minimum sample sizes for reliable testing
+  min_comparisons_per_test: 10  # Minimum number of comparisons needed for a test
+  
+  # Effect size thresholds for practical significance
+  effect_size_threshold: 0.1  # Minimum effect size to consider meaningful
+  
+  # Reporting options
+  report_all_tests: true  # Include all tests in report, even non-significant ones
+  detailed_finger_analysis: true  # Include detailed per-finger analysis
+
 # Subdirectory names
   subdirs:
     typing_time_vs_preference: "typing_time_vs_preference"
     typing_time_vs_frequency: "typing_time_vs_frequency"
     preference_prediction: "preference_prediction"
-  
+    keyboard_ergonomics: "keyboard_ergonomics"
+
 # Logging settings
 logging:
   level: "INFO"
