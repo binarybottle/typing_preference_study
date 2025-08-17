@@ -2602,15 +2602,18 @@ def main():
         os.makedirs(output_plots_folder, exist_ok=True)
 
         # Create output directories
-        choice_folder = os.path.join(output_plots_folder, 
+        choice_folder = os.path.join(output_folder, 
                                      config['analysis']['subdirs']['typing_time_vs_preference'])
-        freq_folder = os.path.join(output_plots_folder, 
+        freq_folder = os.path.join(output_folder, 
                                    config['analysis']['subdirs']['typing_time_vs_frequency'])
-        predict_folder = os.path.join(output_plots_folder, 
+        predict_folder = os.path.join(output_folder, 
                                       config['analysis']['subdirs']['preference_prediction'])
+        ergonomics_folder = os.path.join(output_folder,
+                                        config['analysis']['subdirs']['keyboard_ergonomics'])
         os.makedirs(choice_folder, exist_ok=True)
         os.makedirs(freq_folder, exist_ok=True)
         os.makedirs(predict_folder, exist_ok=True)
+        os.makedirs(ergonomics_folder, exist_ok=True)
 
         # Initialize analyzer
         analyzer = BigramAnalysis(config)
@@ -2666,7 +2669,7 @@ def main():
                             
                             # Try running the analysis
                             try:
-                                ergonomics_results = ergonomics_analyzer.run_all_ergonomics_tests(data, predict_folder)
+                                ergonomics_results = ergonomics_analyzer.run_all_ergonomics_tests(data, output_folder)
                             except Exception as e:
                                 print(f"ERROR: Ergonomics analysis failed: {e}")
                                 import traceback

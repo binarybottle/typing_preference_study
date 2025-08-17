@@ -46,8 +46,7 @@ and consists of four main components:
 │   ├── variance_prediction_analysis.txt
 │   └── bigram_pair_choices.csv
 └── keyboard_ergonomics/
-    ├── keyboard_ergonomics_report.txt
-    └── ergonomics_interpretation.txt
+    └── keyboard_ergonomics_report.txt
 ```
 
 ## Analysis Components
@@ -179,19 +178,13 @@ robust evidence for keyboard layout optimization principles by testing five key 
 - **Effect size thresholds**: Distinguishes statistical significance from practical importance
 - **Comprehensive reporting**: All statistical tests reported with corrections applied
 
-#### Output Files and Interpretation
+#### Output Files
 
 **keyboard_ergonomics_report.txt**:
 - Detailed statistical results for all five research questions
 - P-values, effect sizes, and significance tests with multiple comparison corrections
 - Proportion estimates with confidence intervals
 - Complete test-by-test breakdown of results
-
-**ergonomics_interpretation.txt**:
-- Practical design principles derived from statistical findings
-- Implementation priorities ranked by statistical evidence strength
-- Specific recommendations for keyboard layout optimization
-- Translation of statistical results into actionable design constraints
 
 #### Integration with Layout Optimization
 
@@ -331,13 +324,8 @@ The pipeline generates the following files in the configured output directories:
    - `keyboard_ergonomics_report.txt`
      * Comprehensive statistical results for all ergonomics research questions
      * Includes p-values, effect sizes, confidence intervals, and significance tests
-     * Multiple comparison correction results and interpretation
+     * Multiple comparison correction results
      * Detailed breakdown of row, column, and movement pattern preferences
-   - `ergonomics_interpretation.txt`
-     * Practical design principles derived from statistical findings
-     * Implementation priorities ranked by evidence strength
-     * Specific recommendations for keyboard layout optimization
-     * Translation of statistical results into actionable design constraints
 
 ### Statistical Measures and Interpretations
 

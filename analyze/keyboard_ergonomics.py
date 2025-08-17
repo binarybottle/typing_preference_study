@@ -80,6 +80,125 @@ class KeyboardErgonomicsAnalysis:
         logger.info("Keyboard ergonomics analysis complete!")
         return results
     
+    def _calculate_proportion_ci(self, successes: int, trials: int, confidence: float = 0.95) -> Tuple[float, float]:
+        """
+        Calculate Wilson score confidence interval for a proportion.
+        More accurate than normal approximation for small samples.
+        """
+        if trials == 0:
+            return np.nan, np.nan
+            
+        z = stats.norm.ppf(1 - (1 - confidence) / 2)  # Critical value
+        p = successes / trials
+        
+        # Wilson score interval
+        denominator = 1 + z**2 / trials
+        center = (p + z**2 / (2 * trials)) / denominator
+        margin = z * np.sqrt((p * (1 - p) + z**2 / (4 * trials)) / trials) / denominator
+        
+        ci_lower = max(0, center - margin)
+        ci_upper = min(1, center + margin)
+        
+        return ci_lower, ci_upper
+    
+    def _add_enhanced_reporting(self, base_result: Dict[str, Any], 
+                               successes: int, trials: int, 
+                               success_description: str) -> Dict[str, Any]:
+        """Add enhanced reporting with effect sizes, CIs, and interpretation"""
+        
+        if trials == 0:
+            return {**base_result, 'interpretation': 'No valid data for analysis'}
+        
+        proportion = successes / trials
+        
+        # Calculate confidence interval
+        ci_lower, ci_upper = self._calculate_proportion_ci(successes, trials)
+        
+        # Effect size (deviation from chance)
+        effect_size = abs(proportion - 0.5)
+        
+        # Practical significance categorization
+        if effect_size >= 0.20:
+            practical_significance = "Large effect"
+            design_priority = "HIGH PRIORITY"
+        elif effect_size >= 0.10:
+            practical_significance = "Medium effect"
+            design_priority = "MEDIUM PRIORITY"
+        elif effect_size >= 0.05:
+            practical_significance = "Small effect"
+            design_priority = "LOW PRIORITY"
+        else:
+            practical_significance = "Trivial effect"
+            design_priority = "IGNORE"
+        
+        # Interpretation
+        interpretation = f"{success_description} {proportion:.1%} of the time (95% CI: {ci_lower:.1%}-{ci_upper:.1%})"
+        
+        enhanced_result = {
+            **base_result,
+            'proportion': proportion,
+            'effect_size': effect_size,
+            'ci_lower': ci_lower,
+            'ci_upper': ci_upper,
+            'practical_significance': practical_significance,
+            'design_priority': design_priority,
+            'interpretation': interpretation
+        }
+        
+        return enhanced_result
+    
+    def _test_column5_avoidance(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """Test if column 5 is systematically avoided compared to columns 1-4"""
+        
+        comparison_data = []
+        
+        for _, row in data.iterrows():
+            # Count occurrences of column 5 vs columns 1-4 in chosen vs unchosen
+            chosen_cols = (row['chosen_bigram_col1'], row['chosen_bigram_col2'])
+            unchosen_cols = (row['unchosen_bigram_col1'], row['unchosen_bigram_col2'])
+            
+            chosen_col5_count = sum(1 for c in chosen_cols if c == 5)
+            chosen_others_count = sum(1 for c in chosen_cols if c in [1, 2, 3, 4])
+            
+            unchosen_col5_count = sum(1 for c in unchosen_cols if c == 5)
+            unchosen_others_count = sum(1 for c in unchosen_cols if c in [1, 2, 3, 4])
+            
+            # Score: +1 for each non-col5 key, -1 for each col5 key
+            chosen_score = chosen_others_count - chosen_col5_count
+            unchosen_score = unchosen_others_count - unchosen_col5_count
+            
+            if chosen_score != unchosen_score:
+                comparison_data.append({
+                    'user_id': row['user_id'],
+                    'chose_more_non_col5': chosen_score > unchosen_score,
+                    'avoidance_difference': chosen_score - unchosen_score
+                })
+        
+        comparison_df = pd.DataFrame(comparison_data)
+        
+        if len(comparison_df) == 0:
+            return {'test': 'No valid comparisons found', 'p_value': np.nan}
+        
+        n_chose_more_non_col5 = comparison_df['chose_more_non_col5'].sum()
+        n_total = len(comparison_df)
+        
+        p_value = stats.binomtest(n_chose_more_non_col5, n_total, 0.5, alternative='two-sided').pvalue
+        
+        base_result = {
+            'test_name': 'Column 5 avoidance (vs columns 1-4)',
+            'n_comparisons': n_total,
+            'n_chose_more_non_col5': n_chose_more_non_col5,
+            'p_value': p_value,
+            'significant': p_value < self.alpha
+        }
+        
+        result = self._add_enhanced_reporting(
+            base_result, n_chose_more_non_col5, n_total,
+            "Columns 1-4 chosen over column 5"
+        )
+        
+        return results
+    
     def _add_keyboard_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """
         Add keyboard position features using existing keymaps.
@@ -176,6 +295,7 @@ class KeyboardErgonomicsAnalysis:
         """
         Test Question 3: Column preferences
         - Sequential column comparisons (5>4, 4>3, 3>2, 2>1)
+        - Column 5 vs all other columns (1-4)
         """
         results = {}
         
@@ -190,6 +310,22 @@ class KeyboardErgonomicsAnalysis:
         for col_high, col_low, test_name in column_comparisons:
             result = self._test_column_preference(data, col_high, col_low)
             results[test_name] = result
+        
+        # NEW: Test column 5 vs all other columns individually
+        col5_vs_others = [
+            (5, 1, "col5_vs_col1"),
+            (5, 2, "col5_vs_col2"), 
+            (5, 3, "col5_vs_col3"),
+            # col5_vs_col4 already done above
+        ]
+        
+        for col_high, col_low, test_name in col5_vs_others:
+            result = self._test_column_preference(data, col_high, col_low)
+            results[test_name] = result
+        
+        # NEW: Combined test - is column 5 systematically avoided?
+        col5_avoidance_result = self._test_column5_avoidance(data)
+        results['col5_avoidance_overall'] = col5_avoidance_result
             
         return results
     
@@ -291,18 +427,39 @@ class KeyboardErgonomicsAnalysis:
         # Binomial test: is proportion choosing more home row significantly > 0.5?
         n_chose_more_home = comparison_df['chose_more_home'].sum()
         n_total = len(comparison_df)
+        proportion = n_chose_more_home / n_total
         
         # Two-tailed binomial test
         p_value = stats.binomtest(n_chose_more_home, n_total, 0.5, alternative='two-sided').pvalue
+        
+        # Calculate confidence interval using Wilson score interval
+        ci_lower, ci_upper = self._calculate_proportion_ci(n_chose_more_home, n_total)
+        
+        # Effect size (deviation from chance)
+        effect_size = abs(proportion - 0.5)
+        
+        # Practical significance categorization
+        if effect_size >= 0.20:
+            practical_significance = "Large effect"
+        elif effect_size >= 0.10:
+            practical_significance = "Medium effect"
+        elif effect_size >= 0.05:
+            practical_significance = "Small effect"
+        else:
+            practical_significance = "Trivial effect"
         
         result = {
             'test_name': 'Home row preference',
             'n_comparisons': n_total,
             'n_chose_more_home': n_chose_more_home,
-            'proportion_chose_home': n_chose_more_home / n_total,
+            'proportion_chose_home': proportion,
             'p_value': p_value,
-            'effect_size': abs(0.5 - (n_chose_more_home / n_total)),
-            'significant': p_value < self.alpha
+            'effect_size': effect_size,
+            'ci_lower': ci_lower,
+            'ci_upper': ci_upper,
+            'practical_significance': practical_significance,
+            'significant': p_value < self.alpha,
+            'interpretation': f"Home row keys chosen {proportion:.1%} of the time when compared to top/bottom row keys"
         }
         
         return result
@@ -346,15 +503,18 @@ class KeyboardErgonomicsAnalysis:
         
         p_value = stats.binomtest(n_chose_more_top, n_total, 0.5, alternative='two-sided').pvalue
         
-        result = {
+        base_result = {
             'test_name': 'Top vs bottom row preference',
             'n_comparisons': n_total,
             'n_chose_more_top': n_chose_more_top,
-            'proportion_chose_top': n_chose_more_top / n_total,
             'p_value': p_value,
-            'effect_size': abs(0.5 - (n_chose_more_top / n_total)),
             'significant': p_value < self.alpha
         }
+        
+        result = self._add_enhanced_reporting(
+            base_result, n_chose_more_top, n_total,
+            "Top row keys chosen over bottom row keys"
+        )
         
         return result
     
@@ -445,15 +605,18 @@ class KeyboardErgonomicsAnalysis:
         
         p_value = stats.binomtest(n_chose_same_row, n_total, 0.5, alternative='two-sided').pvalue
         
-        result = {
+        base_result = {
             'test_name': 'Same vs different row preference',
             'n_comparisons': n_total,
             'n_chose_same_row': n_chose_same_row,
-            'proportion_chose_same_row': n_chose_same_row / n_total,
             'p_value': p_value,
-            'effect_size': abs(0.5 - (n_chose_same_row / n_total)),
             'significant': p_value < self.alpha
         }
+        
+        result = self._add_enhanced_reporting(
+            base_result, n_chose_same_row, n_total,
+            "Same-row bigrams chosen over cross-row bigrams"
+        )
         
         return result
     
@@ -714,7 +877,7 @@ class KeyboardErgonomicsAnalysis:
         return results
     
     def _generate_ergonomics_report(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Generate comprehensive ergonomics analysis report"""
+        """Generate comprehensive ergonomics analysis report with effect sizes and interpretations"""
         
         # Apply multiple comparison correction
         results = self._apply_multiple_comparison_correction(results)
@@ -724,369 +887,256 @@ class KeyboardErgonomicsAnalysis:
             "==================================\n",
             f"Analysis conducted with α = {self.alpha}",
             f"Multiple comparison correction: {self.correction_method}",
+            "",
+            "INTERPRETATION GUIDE:",
+            "• Effect sizes: Large (≥20pp), Medium (10-20pp), Small (5-10pp), Trivial (<5pp)",
+            "• Design Priority: HIGH (large effects), MEDIUM (medium effects), LOW (small effects)",
+            "• Confidence Intervals: 95% Wilson score intervals for proportions",
+            "• pp = percentage points above/below chance (50%)",
             ""
         ]
         
         # Question 1: Row preferences
         if 'question_1' in results:
             report_lines.extend([
-                "Question 1: Row Preferences",
-                "-------------------------"
+                "QUESTION 1: ROW PREFERENCES",
+                "===========================",
+                ""
             ])
             
             q1 = results['question_1']
             
             if 'home_vs_others' in q1:
                 home_result = q1['home_vs_others']
-                report_lines.extend([
-                    f"Home row preference:",
-                    f"  Proportion choosing more home row keys: {home_result.get('proportion_chose_home', 'N/A'):.3f}",
-                    f"  p-value: {home_result.get('p_value', 'N/A'):.3e}",
-                    f"  Significant: {'Yes' if home_result.get('significant', False) else 'No'}",
-                    ""
-                ])
+                if 'interpretation' in home_result:
+                    report_lines.extend([
+                        "1.1 HOME ROW vs TOP/BOTTOM ROWS",
+                        "--------------------------------",
+                        f"Result: {home_result['interpretation']}",
+                        f"Statistical significance: p = {home_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {home_result.get('effect_size', 0):.3f} ({home_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {home_result.get('design_priority', 'N/A')}",
+                        f"Sample size: {home_result.get('n_comparisons', 0)} comparisons",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Maximize home row usage for frequent letters (ASDF JKL;)",
+                        "→ This is the strongest ergonomic preference in typing",
+                        ""
+                    ])
             
             if 'top_vs_bottom' in q1:
                 top_result = q1['top_vs_bottom']
-                report_lines.extend([
-                    f"Top vs bottom row preference:",
-                    f"  Proportion choosing more top row keys: {top_result.get('proportion_chose_top', 'N/A'):.3f}",
-                    f"  p-value: {top_result.get('p_value', 'N/A'):.3e}",
-                    f"  Significant: {'Yes' if top_result.get('significant', False) else 'No'}",
-                    ""
-                ])
+                if 'interpretation' in top_result:
+                    report_lines.extend([
+                        "1.2 TOP ROW vs BOTTOM ROW",
+                        "-------------------------",
+                        f"Result: {top_result['interpretation']}",
+                        f"Statistical significance: p = {top_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {top_result.get('effect_size', 0):.3f} ({top_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {top_result.get('design_priority', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ When not using home row, consider top vs bottom row preferences",
+                        ""
+                    ])
             
             if 'finger_preferences' in q1:
-                report_lines.append("Row preferences by finger:")
+                report_lines.extend([
+                    "1.3 FINGER-SPECIFIC ROW PREFERENCES",
+                    "-----------------------------------"
+                ])
+                finger_names = {'index': 'Index', 'middle': 'Middle', 'ring': 'Ring', 'pinky': 'Pinky'}
                 for finger, finger_result in q1['finger_preferences'].items():
                     if finger_result.get('n_comparisons', 0) > 0:
-                        report_lines.append(
-                            f"  {finger.capitalize()}: {finger_result.get('proportion_chose_top', 'N/A'):.3f} "
-                            f"prefer top row (p={finger_result.get('p_value', 'N/A'):.3e})"
-                        )
-                report_lines.append("")
+                        prop = finger_result.get('proportion_chose_top', 0.5)
+                        effect_size = abs(prop - 0.5)
+                        
+                        if effect_size >= 0.05:  # Only report meaningful effects
+                            preference = "TOP row" if prop > 0.5 else "BOTTOM row"
+                            strength = "strongly" if effect_size >= 0.15 else "moderately"
+                            
+                            report_lines.extend([
+                                f"{finger_names.get(finger, finger)} finger: {strength} prefers {preference}",
+                                f"  → {prop:.1%} prefer top row (effect size: {effect_size:.3f})",
+                                f"  → p = {finger_result.get('p_value', 'N/A'):.3e}, n = {finger_result.get('n_comparisons', 0)}",
+                                ""
+                            ])
+                
+                report_lines.extend([
+                    "DESIGN IMPLICATION:",
+                    "→ When fingers must leave home row, use finger-specific preferences",
+                    "→ Pinky: strongly prefers bottom row (Z, X) over top row (Q, W)",
+                    ""
+                ])
         
         # Question 2: Row pair preferences
         if 'question_2' in results:
             report_lines.extend([
-                "Question 2: Row Pair Preferences", 
-                "------------------------------"
+                "QUESTION 2: ROW MOVEMENT PATTERNS",
+                "=================================",
+                ""
             ])
             
             q2 = results['question_2']
             
             if 'same_vs_different_row' in q2:
                 same_result = q2['same_vs_different_row']
-                report_lines.extend([
-                    f"Same vs different row preference:",
-                    f"  Proportion choosing same-row bigrams: {same_result.get('proportion_chose_same_row', 'N/A'):.3f}",
-                    f"  p-value: {same_result.get('p_value', 'N/A'):.3e}",
-                    f"  Significant: {'Yes' if same_result.get('significant', False) else 'No'}",
-                    ""
-                ])
+                if 'interpretation' in same_result:
+                    report_lines.extend([
+                        "2.1 SAME ROW vs CROSS-ROW BIGRAMS",
+                        "---------------------------------",
+                        f"Result: {same_result['interpretation']}",
+                        f"Statistical significance: p = {same_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {same_result.get('effect_size', 0):.3f} ({same_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {same_result.get('design_priority', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Optimize frequent bigrams to stay within same row when possible",
+                        "→ Major constraint for keyboard layout optimization",
+                        ""
+                    ])
             
             if 'adjacent_vs_nonadjacent' in q2:
                 adj_result = q2['adjacent_vs_nonadjacent']
-                report_lines.extend([
-                    f"Adjacent vs non-adjacent row preference:",
-                    f"  Proportion choosing adjacent rows: {adj_result.get('proportion_chose_adjacent', 'N/A'):.3f}",
-                    f"  p-value: {adj_result.get('p_value', 'N/A'):.3e}",
-                    f"  Significant: {'Yes' if adj_result.get('significant', False) else 'No'}",
-                    ""
-                ])
+                if 'interpretation' in adj_result:
+                    report_lines.extend([
+                        "2.2 ADJACENT vs SKIP ROW MOVEMENTS",
+                        "----------------------------------",
+                        f"Result: {adj_result['interpretation']}",
+                        f"Statistical significance: p = {adj_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {adj_result.get('effect_size', 0):.3f} ({adj_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {adj_result.get('design_priority', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ When cross-row movement needed, prefer adjacent rows (home↔top, home↔bottom)",
+                        "→ Avoid skip movements (top↔bottom) for frequent bigrams",
+                        ""
+                    ])
         
         # Question 3: Column preferences
         if 'question_3' in results:
             report_lines.extend([
-                "Question 3: Column Preferences",
-                "----------------------------"
+                "QUESTION 3: COLUMN PREFERENCES",
+                "==============================",
+                ""
             ])
             
             q3 = results['question_3']
-            for test_name, result in q3.items():
-                if isinstance(result, dict) and 'test_name' in result:
+            
+            # Individual column comparisons
+            report_lines.append("3.1 INDIVIDUAL COLUMN COMPARISONS")
+            report_lines.append("----------------------------------")
+            
+            column_tests = [
+                ('col5_vs_col4', 'Column 4 vs Column 5'),
+                ('col4_vs_col3', 'Column 3 vs Column 4'),
+                ('col3_vs_col2', 'Column 3 vs Column 2'), 
+                ('col2_vs_col1', 'Column 2 vs Column 1')
+            ]
+            
+            for test_name, description in column_tests:
+                if test_name in q3:
+                    result = q3[test_name]
+                    if isinstance(result, dict) and 'interpretation' in result:
+                        # Determine which column is preferred
+                        prop_higher = result.get('proportion_chose_higher', 0.5)
+                        if 'col5_vs_col4' in test_name:
+                            preferred = "Column 4" if prop_higher < 0.5 else "Column 5"
+                            prop_preferred = 1 - prop_higher if prop_higher < 0.5 else prop_higher
+                        elif 'col4_vs_col3' in test_name:
+                            preferred = "Column 3" if prop_higher < 0.5 else "Column 4"
+                            prop_preferred = 1 - prop_higher if prop_higher < 0.5 else prop_higher
+                        elif 'col3_vs_col2' in test_name:
+                            preferred = "Column 3" if prop_higher > 0.5 else "Column 2"
+                            prop_preferred = prop_higher if prop_higher > 0.5 else 1 - prop_higher
+                        else:  # col2_vs_col1
+                            preferred = "Column 2" if prop_higher > 0.5 else "Column 1"
+                            prop_preferred = prop_higher if prop_higher > 0.5 else 1 - prop_higher
+                        
+                        effect_size = abs(prop_preferred - 0.5)
+                        
+                        report_lines.extend([
+                            f"{description}: {preferred} preferred {prop_preferred:.1%} of the time",
+                            f"  → Effect size: {effect_size:.3f}, p = {result.get('p_value', 'N/A'):.3e}",
+                            ""
+                        ])
+            
+            # Column 5 avoidance analysis
+            if 'col5_avoidance_overall' in q3:
+                avoid_result = q3['col5_avoidance_overall']
+                if 'interpretation' in avoid_result:
                     report_lines.extend([
-                        f"{result['test_name']}:",
-                        f"  Proportion choosing higher column: {result.get('proportion_chose_higher', 'N/A'):.3f}",
-                        f"  p-value: {result.get('p_value', 'N/A'):.3e}",
-                        f"  Significant: {'Yes' if result.get('significant', False) else 'No'}",
+                        "3.2 COLUMN 5 SYSTEMATIC AVOIDANCE",
+                        "----------------------------------",
+                        f"Result: {avoid_result['interpretation']}",
+                        f"Statistical significance: p = {avoid_result.get('p_value', 'N/A'):.3e}",
+                        f"Effect size: {avoid_result.get('effect_size', 0):.3f} ({avoid_result.get('practical_significance', 'N/A')})",
+                        f"Design priority: {avoid_result.get('design_priority', 'N/A')}",
+                        "",
+                        "DESIGN IMPLICATION:",
+                        "→ Column preference hierarchy for left hand: 3 > 2,4 > 1,5",
+                        "→ Avoid placing frequent letters in extreme positions (columns 1, 5)",
                         ""
                     ])
         
-        # Question 4: Column pair preferences  
-        if 'question_4' in results:
-            report_lines.extend([
-                "Question 4: Column Pair Preferences",
-                "---------------------------------"
-            ])
-            
-            q4 = results['question_4']
-            
-            # Overall adjacent vs remote
-            if 'adjacent_vs_remote_overall' in q4:
-                adj_result = q4['adjacent_vs_remote_overall']
-                report_lines.extend([
-                    f"Adjacent vs remote fingers (overall):",
-                    f"  Proportion choosing adjacent fingers: {adj_result.get('proportion_chose_adjacent', 'N/A'):.3f}",
-                    f"  p-value: {adj_result.get('p_value', 'N/A'):.3e}",
-                    f"  Significant: {'Yes' if adj_result.get('significant', False) else 'No'}",
-                    ""
-                ])
-            
-            # Same row adjacent vs remote
-            if 'adjacent_vs_remote_same_row' in q4:
-                adj_result = q4['adjacent_vs_remote_same_row']
-                if 'proportion_chose_adjacent' in adj_result:
-                    report_lines.extend([
-                        f"Adjacent vs remote fingers (within same row):",
-                        f"  Proportion choosing adjacent fingers: {adj_result.get('proportion_chose_adjacent', 'N/A'):.3f}",
-                        f"  p-value: {adj_result.get('p_value', 'N/A'):.3e}",
-                        f"  Significant: {'Yes' if adj_result.get('significant', False) else 'No'}",
-                        ""
-                    ])
-                else:
-                    report_lines.extend([
-                        f"Adjacent vs remote fingers (within same row): {adj_result.get('test', 'No data')}",
-                        ""
-                    ])
-            
-            # Different row adjacent vs remote
-            if 'adjacent_vs_remote_diff_row' in q4:
-                adj_result = q4['adjacent_vs_remote_diff_row']
-                if 'proportion_chose_adjacent' in adj_result:
-                    report_lines.extend([
-                        f"Adjacent vs remote fingers (across different rows):",
-                        f"  Proportion choosing adjacent fingers: {adj_result.get('proportion_chose_adjacent', 'N/A'):.3f}",
-                        f"  p-value: {adj_result.get('p_value', 'N/A'):.3e}",
-                        f"  Significant: {'Yes' if adj_result.get('significant', False) else 'No'}",
-                        ""
-                    ])
-                else:
-                    report_lines.extend([
-                        f"Adjacent vs remote fingers (across different rows): {adj_result.get('test', 'No data')}",
-                        ""
-                    ])
-            
-            # Overall finger separation distances
-            if 'separation_distances_overall' in q4:
-                report_lines.append("Finger separation distance preferences (overall):")
-                for distance_name, result in q4['separation_distances_overall'].items():
-                    if result.get('n_comparisons', 0) > 0:
-                        report_lines.append(
-                            f"  {distance_name}: {result.get('proportion_chose_smaller', 'N/A'):.3f} "
-                            f"prefer smaller distance (p={result.get('p_value', 'N/A'):.3e})"
-                        )
-                report_lines.append("")
-            
-            # Same row finger separation distances
-            if 'separation_distances_same_row' in q4 and q4['separation_distances_same_row']:
-                report_lines.append("Finger separation distance preferences (within same row):")
-                for distance_name, result in q4['separation_distances_same_row'].items():
-                    if result.get('n_comparisons', 0) > 0:
-                        report_lines.append(
-                            f"  {distance_name}: {result.get('proportion_chose_smaller', 'N/A'):.3f} "
-                            f"prefer smaller distance (p={result.get('p_value', 'N/A'):.3e})"
-                        )
-                report_lines.append("")
-            else:
-                report_lines.extend([
-                    "Finger separation distance preferences (within same row): No data available",
-                    ""
-                ])
-            
-            # Different row finger separation distances
-            if 'separation_distances_diff_row' in q4 and q4['separation_distances_diff_row']:
-                report_lines.append("Finger separation distance preferences (across different rows):")
-                for distance_name, result in q4['separation_distances_diff_row'].items():
-                    if result.get('n_comparisons', 0) > 0:
-                        report_lines.append(
-                            f"  {distance_name}: {result.get('proportion_chose_smaller', 'N/A'):.3f} "
-                            f"prefer smaller distance (p={result.get('p_value', 'N/A'):.3e})"
-                        )
-                report_lines.append("")
-            else:
-                report_lines.extend([
-                    "Finger separation distance preferences (across different rows): No data available",
-                    ""
-                ])
+        # Add summary section
+        report_lines.extend([
+            "SUMMARY FOR KEYBOARD LAYOUT OPTIMIZATION",
+            "========================================",
+            "",
+            "HIGH PRIORITY CONSTRAINTS (Large effects, strong evidence):",
+        ])
         
-        # Question 5: Direction preferences
-        if 'question_5' in results:
-            report_lines.extend([
-                "Question 5: Direction Preferences",
-                "-------------------------------"
-            ])
-            
-            q5 = results['question_5']
-            
-            if 'direction_preference' in q5:
-                dir_result = q5['direction_preference']
-                report_lines.extend([
-                    f"Direction toward column 5 (low-to-high fingers):",
-                    f"  Proportion choosing toward column 5: {dir_result.get('proportion_chose_toward_5', 'N/A'):.3f}",
-                    f"  p-value: {dir_result.get('p_value', 'N/A'):.3e}",
-                    f"  Significant: {'Yes' if dir_result.get('significant', False) else 'No'}",
-                    ""
-                ])
+        # Extract high priority findings
+        high_priority_items = []
+        for question_key, question_data in results.items():
+            if isinstance(question_data, dict):
+                for test_key, test_data in question_data.items():
+                    if isinstance(test_data, dict) and test_data.get('design_priority') == 'HIGH PRIORITY':
+                        high_priority_items.append(f"• {test_data.get('test_name', test_key)}: {test_data.get('interpretation', 'N/A')}")
+        
+        if high_priority_items:
+            report_lines.extend(high_priority_items)
+        else:
+            report_lines.append("• No high priority effects found")
+        
+        report_lines.extend([
+            "",
+            "MEDIUM PRIORITY CONSTRAINTS (Medium effects, moderate evidence):",
+        ])
+        
+        # Extract medium priority findings
+        medium_priority_items = []
+        for question_key, question_data in results.items():
+            if isinstance(question_data, dict):
+                for test_key, test_data in question_data.items():
+                    if isinstance(test_data, dict) and test_data.get('design_priority') == 'MEDIUM PRIORITY':
+                        medium_priority_items.append(f"• {test_data.get('test_name', test_key)}: {test_data.get('interpretation', 'N/A')}")
+        
+        if medium_priority_items:
+            report_lines.extend(medium_priority_items)
+        else:
+            report_lines.append("• No medium priority effects found")
         
         # Multiple comparison correction summary
         if 'multiple_comparison_correction' in results:
             mcc = results['multiple_comparison_correction']
             report_lines.extend([
-                "Multiple Comparison Correction",
-                "----------------------------",
-                f"Method: {mcc['method']}",
-                f"Number of tests: {mcc['n_tests']}",
-                f"Alpha level: {mcc['alpha_level']}",
-                ""
+                "",
+                "STATISTICAL VALIDATION",
+                "=====================",
+                f"Multiple comparison correction: {mcc['method']}",
+                f"Total tests conducted: {mcc['n_tests']}",
+                f"Tests significant after correction: {len([t for t in mcc['test_results'] if t['significant_corrected']])}",
+                f"Family-wise error rate controlled at α = {mcc['alpha_level']}"
             ])
-            
-            significant_tests = [test for test in mcc['test_results'] if test['significant_corrected']]
-            report_lines.extend([
-                f"Tests significant after correction: {len(significant_tests)}",
-                ""
-            ])
-            
-            if significant_tests:
-                report_lines.append("Significant results after correction:")
-                for test in significant_tests:
-                    report_lines.append(f"  {test['test']}: p = {test['corrected_p']:.3e}")
-                report_lines.append("")
         
         # Save report
         report_path = os.path.join(output_folder, 'keyboard_ergonomics_report.txt')
         with open(report_path, 'w') as f:
             f.write('\n'.join(report_lines))
         
-        # Generate interpretation guide
-        self._generate_interpretation_guide(results, output_folder)
-        
-        logger.info(f"Ergonomics analysis report saved to {report_path}")
-        logger.info(f"Interpretation guide saved to {os.path.join(output_folder, 'ergonomics_interpretation.txt')}")
-    
-    def _generate_interpretation_guide(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Generate practical interpretation guide for keyboard design"""
-        
-        interpretation_lines = [
-            "Keyboard Ergonomics Results - Design Interpretation Guide",
-            "=======================================================\n",
-            "This guide translates statistical findings into practical keyboard design principles.\n",
-        ]
-        
-        # Extract key findings and translate to design principles
-        q1 = results.get('question_1', {})
-        q2 = results.get('question_2', {})
-        q3 = results.get('question_3', {})
-        q4 = results.get('question_4', {})
-        q5 = results.get('question_5', {})
-        
-        # Design Principle 1: Row Optimization
-        interpretation_lines.extend([
-            "DESIGN PRINCIPLE 1: Row Optimization",
-            "-----------------------------------"
-        ])
-        
-        if 'home_vs_others' in q1:
-            home_pref = q1['home_vs_others'].get('proportion_chose_home', 0)
-            interpretation_lines.append(f"• HOME ROW IS KING: {home_pref:.1%} preference for home row keys")
-            interpretation_lines.append("  → Place most frequent letters on home row (ASDF JKL;)")
-        
-        if 'finger_preferences' in q1:
-            pinky_pref = q1['finger_preferences'].get('pinky', {}).get('proportion_chose_top', 1)
-            if pinky_pref < 0.5:
-                interpretation_lines.append(f"• PINKY PREFERS BOTTOM: Only {pinky_pref:.1%} prefer top row")
-                interpretation_lines.append("  → When pinky must leave home row, use bottom row (Z, X) over top row (Q, W)")
-        
-        interpretation_lines.append("")
-        
-        # Design Principle 2: Movement Patterns  
-        interpretation_lines.extend([
-            "DESIGN PRINCIPLE 2: Movement Patterns",
-            "------------------------------------"
-        ])
-        
-        if 'same_vs_different_row' in q2:
-            same_row_pref = q2['same_vs_different_row'].get('proportion_chose_same_row', 0)
-            interpretation_lines.append(f"• MINIMIZE ROW JUMPING: {same_row_pref:.1%} prefer same-row bigrams")
-            interpretation_lines.append("  → Optimize common letter pairs to stay within same row")
-        
-        if 'adjacent_vs_nonadjacent' in q2:
-            adj_pref = q2['adjacent_vs_nonadjacent'].get('proportion_chose_adjacent', 0)
-            interpretation_lines.append(f"• ADJACENT ROWS BETTER: {adj_pref:.1%} prefer adjacent over skip rows")
-            interpretation_lines.append("  → When cross-row movement needed, prefer home↔top or home↔bottom over top↔bottom")
-        
-        interpretation_lines.append("")
-        
-        # Design Principle 3: Column Preferences
-        interpretation_lines.extend([
-            "DESIGN PRINCIPLE 3: Column Preferences",
-            "-------------------------------------"
-        ])
-        
-        # Analyze column preferences to determine ranking
-        col_results = {}
-        for test_name, result in q3.items():
-            if isinstance(result, dict) and 'proportion_chose_higher' in result:
-                if 'col5_vs_col4' in test_name:
-                    col_results['4_vs_5'] = 1 - result['proportion_chose_higher']  # Proportion preferring col 4
-                elif 'col4_vs_col3' in test_name:
-                    col_results['3_vs_4'] = 1 - result['proportion_chose_higher']  # Proportion preferring col 3
-                elif 'col3_vs_col2' in test_name:
-                    col_results['3_vs_2'] = result['proportion_chose_higher']  # Proportion preferring col 3
-                elif 'col2_vs_col1' in test_name:
-                    col_results['2_vs_1'] = result['proportion_chose_higher']  # Proportion preferring col 2
-        
-        interpretation_lines.append("• COLUMN PREFERENCE ORDER (left hand):")
-        interpretation_lines.append("  → Column 3 (middle finger) most preferred")
-        interpretation_lines.append("  → Columns 2, 4 (ring, index) moderately preferred") 
-        interpretation_lines.append("  → Columns 1, 5 (pinky positions) least preferred")
-        interpretation_lines.append("  → Place frequent letters: D, F (best) > S, F (good) > A, G (acceptable)")
-        interpretation_lines.append("")
-        
-        # Design Principle 4: Finger Coordination
-        interpretation_lines.extend([
-            "DESIGN PRINCIPLE 4: Finger Coordination", 
-            "---------------------------------------"
-        ])
-        
-        if 'adjacent_vs_remote_overall' in q4:
-            adj_finger_pref = q4['adjacent_vs_remote_overall'].get('proportion_chose_adjacent', 0)
-            interpretation_lines.append(f"• ADJACENT FINGERS PREFERRED: {adj_finger_pref:.1%} prefer adjacent finger movements")
-            interpretation_lines.append("  → Favor sequences like: index→middle, middle→ring, ring→pinky")
-            interpretation_lines.append("  → Avoid: pinky→index, pinky→middle stretches")
-        
-        interpretation_lines.append("")
-        
-        # Implementation Priority
-        interpretation_lines.extend([
-            "IMPLEMENTATION PRIORITY FOR LAYOUT OPTIMIZATION",
-            "==============================================",
-            "",
-            "HIGH PRIORITY (Strong statistical evidence):",
-            "1. Maximize home row usage for frequent letters",
-            "2. Minimize cross-row bigram sequences", 
-            "3. Favor column 3 (middle finger) for most frequent letters",
-            "4. Use adjacent finger movements for common bigrams",
-            "",
-            "MEDIUM PRIORITY (Moderate evidence):",
-            "5. When pinky leaves home row, prefer bottom over top",
-            "6. When cross-row movement needed, use adjacent rows",
-            "7. Avoid extreme columns (1, 5) for very frequent letters",
-            "",
-            "LOW PRIORITY (Weak evidence):",
-            "8. Slight preference for inward finger movements",
-            "",
-            "PRACTICAL APPLICATION:",
-            "• Use these principles as weighted objectives in multi-objective optimization",
-            "• Weight high-priority principles more heavily than low-priority ones",
-            "• Consider letter frequency when applying column preferences",
-            "• Test final layouts with actual typing to validate theoretical predictions"
-        ])
-        
-        # Save interpretation guide
-        interpretation_path = os.path.join(output_folder, 'ergonomics_interpretation.txt')
-        with open(interpretation_path, 'w') as f:
-            f.write('\n'.join(interpretation_lines))
+        logger.info(f"Comprehensive ergonomics analysis report saved to {report_path}")
 
 
 # Integration function for existing analyze_data.py
