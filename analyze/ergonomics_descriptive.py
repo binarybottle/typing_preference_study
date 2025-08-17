@@ -40,7 +40,59 @@ class KeyboardErgonomicsAnalysis:
         # Set style for plots
         plt.style.use('seaborn-v0_8-whitegrid')
         sns.set_palette("husl")
+
+    def _standardize_test_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Ensure all test results have consistent formatting and include sample sizes.
+        This method recursively processes the results dictionary to add missing fields.
+        """
         
+        def standardize_single_result(result_dict: Dict[str, Any]) -> None:
+            """Standardize a single test result dictionary."""
+            if isinstance(result_dict, dict) and 'p_value' in result_dict:
+                # Ensure all required fields are present
+                if 'n_comparisons' not in result_dict:
+                    result_dict['n_comparisons'] = 0
+                    logger.warning(f"Missing n_comparisons in test: {result_dict.get('test_name', 'Unknown')}")
+                
+                if 'effect_size' not in result_dict and 'proportion' in result_dict:
+                    result_dict['effect_size'] = abs(result_dict['proportion'] - 0.5)
+                
+                if 'cohens_h' not in result_dict and 'proportion' in result_dict:
+                    result_dict['cohens_h'] = self._calculate_cohens_h(result_dict['proportion'], 0.5)
+                    result_dict['cohens_h_interpretation'] = self._interpret_cohens_h(result_dict['cohens_h'])
+                
+                if 'significant' not in result_dict and 'p_value' in result_dict:
+                    result_dict['significant'] = result_dict['p_value'] < self.alpha
+                
+                # Add confidence intervals if missing but we have the data
+                if 'ci_lower' not in result_dict and 'proportion' in result_dict and result_dict['n_comparisons'] > 0:
+                    n_successes = int(result_dict['proportion'] * result_dict['n_comparisons'])
+                    ci_lower, ci_upper = self._calculate_proportion_ci(n_successes, result_dict['n_comparisons'])
+                    result_dict['ci_lower'] = ci_lower
+                    result_dict['ci_upper'] = ci_upper
+        
+        def process_recursively(obj: Any) -> None:
+            """Recursively process the results dictionary."""
+            if isinstance(obj, dict):
+                # Check if this is a test result
+                standardize_single_result(obj)
+                
+                # Recurse into nested dictionaries
+                for key, value in obj.items():
+                    if isinstance(value, dict):
+                        process_recursively(value)
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, dict):
+                                process_recursively(item)
+        
+        # Create a copy to avoid modifying the original
+        standardized_results = results.copy()
+        process_recursively(standardized_results)
+        
+        return standardized_results
+
     def run_complete_analysis(self, data: pd.DataFrame, output_folder: str) -> Dict[str, Any]:
         """
         Run complete analysis including all enhancements.
@@ -1095,13 +1147,7 @@ class KeyboardErgonomicsAnalysis:
     def run_all_ergonomics_tests(self, data: pd.DataFrame, output_folder: str) -> Dict[str, Any]:
         """
         Run all 5 ergonomics research questions and generate comprehensive report.
-        
-        Args:
-            data: DataFrame with columns [user_id, chosen_bigram, unchosen_bigram, is_consistent]
-            output_folder: Directory to save results
-            
-        Returns:
-            Dictionary containing all test results
+        Enhanced version that ensures all results have consistent formatting.
         """
         logger.info("Running comprehensive ergonomics tests...")
         
@@ -1122,9 +1168,13 @@ class KeyboardErgonomicsAnalysis:
         logger.info("Testing Question 5: Direction preferences...")
         results['question_5'] = self.test_direction_preferences(data)
         
+        # Standardize all results to ensure consistent formatting
+        logger.info("Standardizing test result formatting...")
+        results = self._standardize_test_results(results)
+        
         logger.info("All ergonomics tests complete!")
         return results
-    
+
     # ====================================
     # COMPREHENSIVE ERGONOMICS TEST METHODS
     # ====================================
@@ -1329,26 +1379,32 @@ class KeyboardErgonomicsAnalysis:
         comparison_df = pd.DataFrame(comparison_data)
         
         if len(comparison_df) == 0:
-            return {'test': 'No valid comparisons found', 'p_value': np.nan}
+            return {
+                'test_name': 'Home row preference',
+                'test': 'No valid comparisons found', 
+                'p_value': np.nan,
+                'n_comparisons': 0,
+                'proportion': np.nan,
+                'effect_size': np.nan,
+                'significant': False
+            }
         
         n_chose_more_home = comparison_df['chose_more_home'].sum()
         n_total = len(comparison_df)
         proportion = n_chose_more_home / n_total
         
         p_value = stats.binomtest(n_chose_more_home, n_total, 0.5, alternative='two-sided').pvalue
-        ci_lower, ci_upper = self._calculate_proportion_ci(n_chose_more_home, n_total)
         
-        result = {
+        base_result = {
             'test_name': 'Home row preference',
-            'n_comparisons': n_total,
-            'n_chose_more_home': n_chose_more_home,
-            'proportion': proportion,
             'p_value': p_value,
-            'effect_size': abs(proportion - 0.5),
-            'ci_lower': ci_lower,
-            'ci_upper': ci_upper,
             'significant': p_value < self.alpha
         }
+        
+        result = self._add_enhanced_reporting(
+            base_result, n_chose_more_home, n_total,
+            "Home row keys chosen over non-home row keys"
+        )
         
         return result
     
@@ -1768,12 +1824,24 @@ class KeyboardErgonomicsAnalysis:
         return result
     
     def _add_enhanced_reporting(self, base_result: Dict[str, Any], 
-                               successes: int, trials: int, 
-                               success_description: str) -> Dict[str, Any]:
-        """Add enhanced reporting with effect sizes, CIs, and interpretation"""
+                            successes: int, trials: int, 
+                            success_description: str) -> Dict[str, Any]:
+        """Add enhanced reporting with effect sizes, CIs, and interpretation."""
         
         if trials == 0:
-            return {**base_result, 'interpretation': 'No valid data for analysis'}
+            return {
+                **base_result, 
+                'interpretation': 'No valid data for analysis',
+                'n_comparisons': 0,
+                'proportion': np.nan,
+                'effect_size': np.nan,
+                'ci_lower': np.nan,
+                'ci_upper': np.nan,
+                'cohens_h': np.nan,
+                'cohens_h_interpretation': 'Cannot determine',
+                'practical_significance': 'No data',
+                'design_priority': 'NO DATA'
+            }
         
         proportion = successes / trials
         
@@ -1782,6 +1850,10 @@ class KeyboardErgonomicsAnalysis:
         
         # Effect size (deviation from chance)
         effect_size = abs(proportion - 0.5)
+        
+        # Cohen's h effect size
+        cohens_h = self._calculate_cohens_h(proportion, 0.5)
+        cohens_h_interpretation = self._interpret_cohens_h(cohens_h)
         
         # Practical significance categorization
         if effect_size >= 0.20:
@@ -1797,13 +1869,18 @@ class KeyboardErgonomicsAnalysis:
             practical_significance = "Trivial effect"
             design_priority = "IGNORE"
         
-        # Interpretation
-        interpretation = f"{success_description} {proportion:.1%} of the time (95% CI: {ci_lower:.1%}-{ci_upper:.1%})"
+        # Interpretation with sample size
+        interpretation = (f"{success_description} {proportion:.1%} of the time "
+                        f"(n = {trials} comparisons, 95% CI: {ci_lower:.1%}-{ci_upper:.1%})")
         
         enhanced_result = {
             **base_result,
+            'n_comparisons': trials,  # Ensure this is always present
+            'n_successes': successes,  # Add number of successes for clarity
             'proportion': proportion,
             'effect_size': effect_size,
+            'cohens_h': cohens_h,
+            'cohens_h_interpretation': cohens_h_interpretation,
             'ci_lower': ci_lower,
             'ci_upper': ci_upper,
             'practical_significance': practical_significance,
@@ -2212,50 +2289,120 @@ class KeyboardErgonomicsAnalysis:
             
             report_lines.append("")
         
-        # Main findings summary
+        # Enhanced findings summary with ALL results
         if 'main_results' in results:
             report_lines.extend([
-                "KEY FINDINGS",
-                "============",
+                "COMPLETE TEST RESULTS",
+                "===================",
                 ""
             ])
             
-            # Extract key significant results
-            significant_results = []
+            # Extract ALL results (both significant and non-significant)
+            all_results = []
             
-            def find_significant_results(obj, prefix=""):
+            def extract_all_results(obj, prefix=""):
                 if isinstance(obj, dict):
-                    if obj.get('significant', False) and 'test_name' in obj:
-                        significant_results.append({
+                    if 'test_name' in obj and 'p_value' in obj:
+                        all_results.append({
                             'name': obj['test_name'],
                             'effect_size': obj.get('effect_size', 0),
                             'p_value': obj.get('p_value', 1),
                             'proportion': obj.get('proportion', 0.5),
-                            'cohens_h': obj.get('cohens_h', 0)
+                            'cohens_h': obj.get('cohens_h', 0),
+                            'n_comparisons': obj.get('n_comparisons', 0),
+                            'significant': obj.get('significant', False),
+                            'ci_lower': obj.get('ci_lower', None),
+                            'ci_upper': obj.get('ci_upper', None)
                         })
                     
                     for key, value in obj.items():
                         if isinstance(value, dict):
-                            find_significant_results(value, f"{prefix}.{key}" if prefix else key)
+                            extract_all_results(value, f"{prefix}.{key}" if prefix else key)
             
-            find_significant_results(results['main_results'])
+            extract_all_results(results['main_results'])
             
-            if significant_results:
-                # Sort by effect size
-                significant_results.sort(key=lambda x: x['effect_size'], reverse=True)
+            if all_results:
+                # Sort by effect size (descending)
+                all_results.sort(key=lambda x: x['effect_size'], reverse=True)
                 
-                report_lines.append("STATISTICALLY SIGNIFICANT EFFECTS:")
-                for result in significant_results:
-                    effect_desc = "Large" if result['effect_size'] >= 0.25 else "Medium" if result['effect_size'] >= 0.15 else "Small"
-                    report_lines.append(
-                        f"• {result['name']}: {result['proportion']:.1%} preference "
-                        f"(Effect size: {result['effect_size']:.3f} - {effect_desc}, "
-                        f"p = {result['p_value']:.3e}, Cohen's h = {result['cohens_h']:.3f})"
-                    )
-                report_lines.append("")
+                # Separate significant and non-significant results
+                significant_results = [r for r in all_results if r['significant']]
+                non_significant_results = [r for r in all_results if not r['significant']]
+                
+                # Report significant effects first
+                if significant_results:
+                    report_lines.extend([
+                        "STATISTICALLY SIGNIFICANT EFFECTS (p < 0.05):",
+                        "----------------------------------------------"
+                    ])
+                    
+                    for result in significant_results:
+                        effect_desc = ("Large" if result['effect_size'] >= 0.25 else 
+                                    "Medium" if result['effect_size'] >= 0.15 else "Small")
+                        
+                        ci_text = ""
+                        if result['ci_lower'] is not None and result['ci_upper'] is not None:
+                            ci_text = f", 95% CI: {result['ci_lower']:.1%}-{result['ci_upper']:.1%}"
+                        
+                        report_lines.append(
+                            f"• {result['name']}: {result['proportion']:.1%} preference "
+                            f"(n = {result['n_comparisons']} comparisons{ci_text})"
+                        )
+                        report_lines.append(
+                            f"  Effect size: {result['effect_size']:.3f} ({effect_desc}), "
+                            f"p = {result['p_value']:.3e}, Cohen's h = {result['cohens_h']:.3f}"
+                        )
+                        report_lines.append("")
+                else:
+                    report_lines.extend([
+                        "STATISTICALLY SIGNIFICANT EFFECTS (p < 0.05):",
+                        "----------------------------------------------",
+                        "• No statistically significant effects found at α = 0.05",
+                        ""
+                    ])
+                
+                # Report all non-significant effects
+                if non_significant_results:
+                    report_lines.extend([
+                        "NON-SIGNIFICANT EFFECTS (p ≥ 0.05):",
+                        "-----------------------------------"
+                    ])
+                    
+                    for result in non_significant_results:
+                        effect_desc = ("Large" if result['effect_size'] >= 0.25 else 
+                                    "Medium" if result['effect_size'] >= 0.15 else "Small")
+                        
+                        ci_text = ""
+                        if result['ci_lower'] is not None and result['ci_upper'] is not None:
+                            ci_text = f", 95% CI: {result['ci_lower']:.1%}-{result['ci_upper']:.1%}"
+                        
+                        report_lines.append(
+                            f"• {result['name']}: {result['proportion']:.1%} preference "
+                            f"(n = {result['n_comparisons']} comparisons{ci_text})"
+                        )
+                        report_lines.append(
+                            f"  Effect size: {result['effect_size']:.3f} ({effect_desc}), "
+                            f"p = {result['p_value']:.3f}, Cohen's h = {result['cohens_h']:.3f}"
+                        )
+                        report_lines.append("")
+                
+                # Summary statistics
+                total_tests = len(all_results)
+                significant_count = len(significant_results)
+                
+                report_lines.extend([
+                    "TEST SUMMARY:",
+                    "------------",
+                    f"• Total tests conducted: {total_tests}",
+                    f"• Statistically significant: {significant_count} ({significant_count/total_tests:.1%})",
+                    f"• Non-significant: {total_tests - significant_count} ({(total_tests - significant_count)/total_tests:.1%})",
+                    f"• Largest effect size: {max(r['effect_size'] for r in all_results):.3f}" if all_results else "• No effects calculated",
+                    f"• Mean effect size: {np.mean([r['effect_size'] for r in all_results]):.3f}" if all_results else "• No effects calculated",
+                    ""
+                ])
             else:
                 report_lines.extend([
-                    "• No statistically significant effects found at α = 0.05",
+                    "• No test results found for analysis",
                     ""
                 ])
         
@@ -2286,8 +2433,8 @@ class KeyboardErgonomicsAnalysis:
         
         # Methodology summary
         report_lines.extend([
-            "METHODOLOGY SUMMARY",
-            "==================",
+            "METHODS SUMMARY",
+            "===============",
             "",
             "Statistical Approach:",
             "• Binomial tests for proportion comparisons",
@@ -2334,7 +2481,7 @@ class KeyboardErgonomicsAnalysis:
             "• effect_size_distribution.png/pdf - Histogram of all effect sizes",
             "• consistency_analysis.png/pdf - Individual effect size patterns",
             "",
-            "TIP: Read the .txt summary files for quick overviews, use the .json files for data analysis"
+            "TIP: Read the .txt summary files for quick overviews, use the json files for data analysis"
         ])
         
         # Save comprehensive report
@@ -2343,7 +2490,6 @@ class KeyboardErgonomicsAnalysis:
             f.write('\n'.join(report_lines))
         
         logger.info(f"Comprehensive report saved to {report_path}")
-
 
 # Integration functions for existing analyze_data.py
 
