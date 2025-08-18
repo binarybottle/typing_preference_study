@@ -29,7 +29,7 @@ The purpose of the scripts in this repository is to determine which bigram in ea
     - Step 3. Score choices by slider values.
     - Step 4. Choose winning bigrams for bigram pairs.
 
-  - analyze/analyze_speed_frequencies_choices.py: script to analyze experiment's bigram typing data
+  - analyze/analyze_frequency_speed_preference.py: script to analyze experiment's bigram typing data
 
     - Input config.yaml file with various settings, including the csv table of filtered user data.
     - See analyze/README_analyze_data.txt 

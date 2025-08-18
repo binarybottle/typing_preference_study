@@ -8,7 +8,7 @@ License: Apache v2.0
 
 This pipeline analyzes relationships between bigram typing times, user preferences, 
 frequency patterns, and keyboard ergonomics principles. 
-The analysis is implemented in `analyze_speed_frequencies_choices.py` 
+The analysis is implemented in `analyze_frequency_speed_preference.py` 
 and consists of four main components:
 
 1. Typing Time vs. User Preference Analysis
@@ -395,7 +395,7 @@ The pipeline generates the following files in the configured output directories:
 
 ```bash
 # Run complete analysis including ergonomics tests
-python analyze_speed_frequencies_choices.py --config config.yaml
+python analyze_frequency_speed_preference.py --config config.yaml
 
 # Configuration file should include:
 # analysis:

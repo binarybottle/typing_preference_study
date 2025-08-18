@@ -4,7 +4,7 @@
 # Data settings
 #-------------------------------------------------------------------------------
 data:
-  input_dir: "input/Prolific_studies"
+  input_dir: "input/summary_data/nonProlific_studies"
   filtered_data_file: "output/tables/processed_consistent_choices.csv"
 
 #-------------------------------------------------------------------------------
@@ -22,30 +22,29 @@ process:
   # fd,ez  # 2 strongest fingers home row vs. skip home row (study 6)
   # fd,qz  # 2 strongest fingers home row vs. skip home row with weakest finger (study 7)
   # df,wz  # 2 strongest fingers home row vs. skip home row with weakest fingers (study 7)
-  # ff,aa  # strongest vs. weakest finger (study 8)
-  filter_users_by_num_improbable_choices: False
-  filter_users_by_percent_inconsistencies: False 
-  filter_by_strong_inconsistencies: False # only works if filter_users_by_percent_inconsistencies is True
-  # if filter_users_by_num_improbable_choices:
-  improbable_threshold: np.inf # if 0, at least one improbable choice
-  # if filter_users_by_percent_inconsistencies:
-  inconsistent_threshold: 50  # Flag users with at least this percent of inconsistent choices
+  # ff,aa  # strongest vs. weakest finger (studies 8-9)
+  filter_users_by_num_improbable_choices: True
+  improbable_threshold: 0 # if 0, at least one improbable bigram chosen both times
  
-  # Filter users by improbable slider behavior (streaks or close-to-zeros):
-  n_repeat_sides: 100  # Flag users with consecutive same-side selections ((1/2)^10 ~= 0.0977%; (1/2)^20 = 1/1,048,576)
+  # Filter users by inconsistent choices (choosing both sides of a bigram pair):
+  filter_users_by_percent_strong_inconsistencies: True
+  strong_inconsistent_threshold: 50  # Flag users with at least this percent of strongly inconsistent choices
+
+  # Filter users by improbable slider behavior (consecutive side bias or close-to-zeros):
+  streak_side_percent: 50  # Flag users with consecutive same-side selections
   percent_close_to_zero: 90  # Flag users with this percent of selections close to zero
   distance_close_to_zero: 10  # Consider values within this distance of zero as "close to zero" (max 100)
 
   # Filter rows with *per user* single-presentation bigram pairs or inconsistent bigram pair choices away from zero:
   filter_single_presentations: False
-  filter_inconsistent_choices_away_from_zero: False
-  zero_threshold: 50  # Consider values within this distance of zero as "close to zero" (max 100)
+  filter_inconsistent_choices_away_from_zero: True
+  zero_threshold: 50  # Consider absolute values greater than this as "away from zero" (max 100)
 
   # Filter rows with bigrams containing any of the following letters:
   filter_letters: [] #['t', 'g', 'b']
 
 #-------------------------------------------------------------------------------
-# analyze_speed_frequencies_choices.py settings (main analysis)
+# analyze_frequency_speed_preference.py settings (main analysis)
 #-------------------------------------------------------------------------------
 analysis:
   # Participant-level settings
@@ -65,7 +64,7 @@ analysis:
   # Frequency analysis
   frequency_transform: "log10"  # Options: log10, log2, none
 
-# Subdirectory names
+  # Subdirectory names
   subdirs:
     typing_time_vs_preference: "typing_time_vs_preference"
     typing_time_vs_frequency: "typing_time_vs_frequency"
@@ -76,18 +75,18 @@ analysis:
 # analyze_preferred_positions_transitions.py settings (Bradley-Terry analysis)
 #-------------------------------------------------------------------------------
 position_transition_analysis:
-  # Enable/disable the new Bradley-Terry position and transition analysis
+  # Enable/disable the Bradley-Terry position and transition analysis
   enabled: true
   
   # Statistical settings
   alpha_level: 0.05                    # Significance level for statistical tests
   correction_method: 'fdr_bh'          # Multiple comparison correction: 'fdr_bh' or 'bonferroni'
-  bootstrap_iterations: 1000           # For bootstrap validation
+  bootstrap_iterations: 1000           # For bootstrap confidence intervals
   confidence_level: 0.95               # For confidence intervals
   
   # Bradley-Terry model settings
   max_iterations: 1000                 # Maximum iterations for model fitting
-  convergence_tolerance: 1e-6          # Convergence criterion
+  convergence_tolerance: 1e-6          # Convergence criterion (not currently used)
   regularization: 1e-10                # Small value to prevent numerical issues
   
   # Minimum sample size requirements
@@ -130,18 +129,18 @@ position_transition_analysis:
   # Output settings
   generate_visualizations: true        # Create plots and figures
   generate_detailed_report: true       # Create comprehensive text report
-  save_raw_results: true              # Save complete JSON results
+  save_raw_results: true              # Save complete JSON results and CSV tables
   
   # Visualization settings
   figure_dpi: 300                     # Resolution for saved figures
-  figure_format: ['png', 'pdf']       # Output formats for figures
+  figure_format: ['png']              # Output formats for figures (png, pdf, svg)
   heatmap_colormap: 'RdYlGn'          # Colormap for preference heatmaps
   ranking_plot_style: 'horizontal'    # 'horizontal' or 'vertical' bar plots
 
 # Logging settings
 logging:
   level: "INFO"
-  file: "bigram_analysis.log"
+  file: "input/logs/bigram_analysis.log"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
 # Visualization settings (for main analysis script)

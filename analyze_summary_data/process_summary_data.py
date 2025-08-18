@@ -78,15 +78,7 @@ def load_and_combine_data(input_folder: str, output_tables_folder: str,
                          logger: logging.Logger, verbose: bool = False) -> Optional[pd.DataFrame]:
     """
     Load and combine data from multiple CSV files in a folder of subfolders.
-
-    Parameters:
-    - input_folder: path to the folder containing folders of CSV files
-    - output_tables_folder: path to the folder where the combined data will be saved
-    - logger: configured logger instance
-    - verbose: if True, provide detailed logging output
-
-    Returns:
-    - combined_df: DataFrame with combined data, or None if no data found
+    Each file becomes a unique participant.
     """
     logger.info(f"Loading data from {input_folder}")
     
@@ -96,6 +88,8 @@ def load_and_combine_data(input_folder: str, output_tables_folder: str,
     
     dataframes = []
     csv_files_found = []
+    used_user_ids = set()
+    processed_files = []  # Track which files we actually process
     
     # Walk through directory and collect all CSV files
     for root, dirs, files in os.walk(input_folder):
@@ -117,10 +111,12 @@ def load_and_combine_data(input_folder: str, output_tables_folder: str,
                         logger.warning(f"{filename} is empty, skipping")
                         continue
                     
-                    # Extract user ID from filename with robust parsing
-                    user_id = _extract_user_id_from_filename(filename)
+                    # Generate user ID from filename (one file = one participant)
+                    user_id = _generate_unique_user_id(filename, used_user_ids)
+                    used_user_ids.add(user_id)
                     df['user_id'] = user_id
                     df['filename'] = filename
+                    processed_files.append(filename)
                     
                     # Add the subfolder name
                     subfolder = os.path.relpath(root, input_folder)
@@ -132,7 +128,7 @@ def load_and_combine_data(input_folder: str, output_tables_folder: str,
                     if len(df_filtered) > 0:
                         dataframes.append(df_filtered)
                         if verbose:
-                            logger.debug(f"Added {filename} to dataframes list")
+                            logger.debug(f"Added {filename} as user {user_id}")
                     else:
                         logger.warning(f"{filename} has no rows after filtering")
                         
@@ -140,9 +136,21 @@ def load_and_combine_data(input_folder: str, output_tables_folder: str,
                     logger.error(f"Error reading {file_path}: {str(e)}")
                     continue
     
-    # Summary logging
+    # Enhanced logging to help debug the file count issue
     logger.info(f"Total CSV files found: {len(csv_files_found)}")
-    logger.info(f"Successfully processed files: {len(dataframes)}")
+    logger.info(f"Successfully processed files: {len(processed_files)}")
+    logger.info(f"Unique user IDs created: {len(used_user_ids)}")
+    
+    # If there's a mismatch, log the details
+    if len(processed_files) != len(used_user_ids):
+        logger.warning(f"Mismatch: {len(processed_files)} files processed but {len(used_user_ids)} unique user IDs")
+        logger.warning("This suggests duplicate filenames in your directory structure")
+        
+        # Log all processed filenames
+        if verbose:
+            logger.debug("All processed filenames:")
+            for i, fname in enumerate(sorted(processed_files), 1):
+                logger.debug(f"  {i}: {fname}")
     
     if not csv_files_found:
         logger.error(f"No CSV files found in {input_folder}")
@@ -156,6 +164,7 @@ def load_and_combine_data(input_folder: str, output_tables_folder: str,
     combined_df = pd.concat(dataframes, ignore_index=True)
     logger.info(f"Successfully combined data from {len(dataframes)} files")
     logger.info(f"Combined dataframe shape: {combined_df.shape}")
+    logger.info(f"Unique participants: {len(combined_df['user_id'].unique())}")
 
     if verbose:
         logger.debug(f"Combined dataframe columns: {list(combined_df.columns)}")
@@ -168,17 +177,18 @@ def load_and_combine_data(input_folder: str, output_tables_folder: str,
 
     return combined_df
 
-def _extract_user_id_from_filename(filename: str) -> str:
-    """Extract user ID from filename with robust parsing."""
-    try:
-        # Try expected format: experiment_data_USERID_*.csv
-        parts = filename.replace('.csv', '').split('_')
-        if len(parts) > 2:
-            return parts[2]
-        else:
-            return filename.replace('.csv', '')
-    except Exception:
-        return filename.replace('.csv', '')
+def _generate_unique_user_id(filename: str, used_ids: set) -> str:
+    """Generate user ID from filename - each file represents exactly one participant."""
+    # Simply use the filename without extension as the user ID
+    user_id = filename.replace('.csv', '')
+    
+    # If this filename has already been seen, that's a data issue that should be logged
+    if user_id in used_ids:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Duplicate filename detected: {filename}. Each file should represent a unique participant.")
+        logger.warning(f"This may indicate duplicate files in your directory structure.")
+    
+    return user_id
 
 def _filter_intro_trials(df: pd.DataFrame, logger: logging.Logger, verbose: bool) -> pd.DataFrame:
     """Filter out intro trials from the dataframe."""
@@ -214,16 +224,7 @@ def _display_sample_data(df: pd.DataFrame, logger: logging.Logger, nlines: int =
         logger.debug(f"\n{df[print_headers].iloc[:nlines]}")
 
 def load_easy_choice_pairs(file_path: str, logger: logging.Logger) -> List[Tuple[str, str]]:
-    """
-    Load easy choice bigram pairs from a CSV file.
-
-    Parameters:
-    - file_path: String, path to the CSV file containing easy choice bigram pairs
-    - logger: configured logger instance
-
-    Returns:
-    - easy_choice_pairs: List of tuples, each containing a pair of bigrams where one is highly improbable
-    """
+    """Load easy choice bigram pairs from a CSV file."""
     try:
         df = pd.read_csv(file_path)
         
@@ -243,54 +244,296 @@ def load_easy_choice_pairs(file_path: str, logger: logging.Logger) -> List[Tuple
         return []
 
 #######################################
+# Data Processing Functions
+#######################################
+def create_standardized_bigram_pairs(data: pd.DataFrame) -> pd.DataFrame:
+    """Create standardized bigram pair representation as tuples."""
+    # Only process rows with valid bigram data
+    valid_data = data.dropna(subset=['chosenBigram', 'unchosenBigram']).copy()
+    
+    valid_data['std_bigram_pair'] = valid_data.apply(
+        lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
+    
+    return valid_data
+
+def identify_probable_improbable_choices(data: pd.DataFrame, easy_choice_pairs: List[Tuple[str, str]]) -> pd.DataFrame:
+    """Mark probable/improbable choices in the data."""
+    data = data.copy()
+    
+    # Create dictionaries for quick lookup
+    probable_pairs = {(pair[0], pair[1]): True for pair in easy_choice_pairs}
+    improbable_pairs = {(pair[1], pair[0]): True for pair in easy_choice_pairs}
+    
+    # Apply to each row
+    data['is_probable'] = data.apply(
+        lambda row: probable_pairs.get((row['chosenBigram'], row['unchosenBigram']), False), axis=1)
+    data['is_improbable'] = data.apply(
+        lambda row: improbable_pairs.get((row['chosenBigram'], row['unchosenBigram']), False), axis=1)
+    
+    return data
+
+def calculate_choice_consistency(data_with_choices: pd.DataFrame) -> pd.DataFrame:
+    """Determine if choices are consistent for each group - no fallbacks."""
+    logger = logging.getLogger(__name__)
+    
+    # Clean up any duplicate columns first
+    if len(data_with_choices.columns) != len(set(data_with_choices.columns)):
+        logger.warning(f"Found duplicate columns: {data_with_choices.columns.tolist()}")
+        data_with_choices = data_with_choices.loc[:, ~data_with_choices.columns.duplicated()]
+        logger.info(f"After removing duplicates: {list(data_with_choices.columns)}")
+    
+    # Only work with complete data
+    required_columns = ['user_id', 'std_bigram_pair', 'chosenBigram', 'unchosenBigram', 'sliderValue']
+    valid_data = data_with_choices.dropna(subset=required_columns).copy()
+    
+    logger.info(f"Removed {len(data_with_choices) - len(valid_data)} rows with missing required data")
+    
+    if len(valid_data) == 0:
+        logger.error("No valid data remaining")
+        return pd.DataFrame()
+    
+    # Check if we already have the consistency columns (from previous processing)
+    has_consistency = 'is_consistent' in valid_data.columns
+    has_group_size = 'group_size' in valid_data.columns
+    
+    if not has_group_size:
+        # Calculate group sizes
+        group_sizes = valid_data.groupby(['user_id', 'std_bigram_pair']).size().reset_index()
+        group_sizes.columns = ['user_id', 'std_bigram_pair', 'group_size']
+        
+        # Merge group sizes
+        valid_data = valid_data.merge(group_sizes, on=['user_id', 'std_bigram_pair'], how='left')
+    
+    if not has_consistency:
+        # Calculate consistency
+        consistency_info = valid_data.groupby(['user_id', 'std_bigram_pair'])['chosenBigram'].apply(
+            lambda x: len(set(x)) == 1 if len(x) > 1 else None
+        ).reset_index()
+        consistency_info.columns = ['user_id', 'std_bigram_pair', 'is_consistent']
+        
+        # Merge consistency info
+        valid_data = valid_data.merge(consistency_info, on=['user_id', 'std_bigram_pair'], how='left')
+    
+    # Extract bigram1 and bigram2 from std_bigram_pair if not already present
+    if 'bigram1' not in valid_data.columns or 'bigram2' not in valid_data.columns:
+        bigram_pairs_df = pd.DataFrame(valid_data['std_bigram_pair'].tolist(), 
+                                     index=valid_data.index, 
+                                     columns=['bigram1', 'bigram2'])
+        valid_data = pd.concat([valid_data, bigram_pairs_df], axis=1)
+    
+    # Calculate bigram times (only for rows with valid time data and if columns don't exist)
+    def safe_bigram_time(row, bigram_num):
+        try:
+            target_bigram = row[f'bigram{bigram_num}']
+            chosen_bigram = row['chosenBigram']
+            
+            # Handle case where pandas returns a Series instead of scalar
+            if hasattr(target_bigram, 'iloc'):
+                target_bigram = target_bigram.iloc[0]
+            if hasattr(chosen_bigram, 'iloc'):
+                chosen_bigram = chosen_bigram.iloc[0]
+            
+            if chosen_bigram == target_bigram:
+                chosen_time = row.get('chosenBigramTime', np.nan)
+                return chosen_time.iloc[0] if hasattr(chosen_time, 'iloc') else chosen_time
+            else:
+                unchosen_time = row.get('unchosenBigramTime', np.nan)
+                return unchosen_time.iloc[0] if hasattr(unchosen_time, 'iloc') else unchosen_time
+        except:
+            return np.nan
+    
+    # Only calculate bigram times if we don't already have these columns
+    if 'bigram1_time' not in valid_data.columns and 'chosenBigramTime' in valid_data.columns:
+        valid_data['bigram1_time'] = valid_data.apply(lambda row: safe_bigram_time(row, 1), axis=1)
+    if 'bigram2_time' not in valid_data.columns and 'unchosenBigramTime' in valid_data.columns:
+        valid_data['bigram2_time'] = valid_data.apply(lambda row: safe_bigram_time(row, 2), axis=1)
+    
+    # Add abs_sliderValue if not present
+    if 'abs_sliderValue' not in valid_data.columns:
+        valid_data['abs_sliderValue'] = valid_data['sliderValue'].abs()
+    
+    # Rename columns to standardized names (only if they exist and target doesn't)
+    rename_mapping = {
+        'chosenBigram': 'chosen_bigram',
+        'unchosenBigram': 'unchosen_bigram', 
+        'chosenBigramTime': 'chosen_bigram_time',
+        'unchosenBigramTime': 'unchosen_bigram_time',
+        'chosenBigramCorrect': 'chosen_bigram_correct',
+        'unchosenBigramCorrect': 'unchosen_bigram_correct',
+        'std_bigram_pair': 'bigram_pair'
+    }
+    
+    # Only rename columns that exist and where target doesn't already exist
+    columns_to_rename = {}
+    for old_name, new_name in rename_mapping.items():
+        if old_name in valid_data.columns and new_name not in valid_data.columns:
+            columns_to_rename[old_name] = new_name
+    
+    if columns_to_rename:
+        valid_data = valid_data.rename(columns=columns_to_rename)
+    
+    # Final cleanup of any remaining duplicates
+    if len(valid_data.columns) != len(set(valid_data.columns)):
+        logger.warning("Final duplicate cleanup")
+        valid_data = valid_data.loc[:, ~valid_data.columns.duplicated()]
+        logger.info(f"Final columns: {list(valid_data.columns)}")
+    
+    return valid_data
+
+def calculate_user_statistics(bigram_data: pd.DataFrame, easy_choice_pairs: List[Tuple[str, str]]) -> pd.DataFrame:
+    """Calculate user statistics - only from actual data, no fallbacks."""
+    users = bigram_data['user_id'].unique()
+    user_stats = pd.DataFrame({'user_id': users})
+    
+    # Basic counts
+    user_stats['total_choices'] = user_stats['user_id'].map(bigram_data['user_id'].value_counts())
+    
+    # Filter data for specific choice types
+    consistent_choices = bigram_data[(bigram_data['is_consistent'] == True) & (bigram_data['group_size'] > 1)]
+    inconsistent_choices = bigram_data[(bigram_data['is_consistent'] == False) & (bigram_data['group_size'] > 1)]
+    probable_choices = bigram_data[bigram_data['is_probable'] == True]
+    improbable_choices = bigram_data[bigram_data['is_improbable'] == True]
+    
+    # Count occurrences
+    user_stats['consistent_choices'] = user_stats['user_id'].map(consistent_choices['user_id'].value_counts())
+    user_stats['inconsistent_choices'] = user_stats['user_id'].map(inconsistent_choices['user_id'].value_counts())
+    user_stats['probable_choices'] = user_stats['user_id'].map(probable_choices['user_id'].value_counts())
+    user_stats['improbable_choices'] = user_stats['user_id'].map(improbable_choices['user_id'].value_counts())
+    
+    # Calculate improbable choices made twice (consistently)
+    pair_counts = improbable_choices.groupby(['user_id', 'bigram_pair']).size().reset_index(name='count')
+    improbable_choices_2x = pair_counts[pair_counts['count'] == 2].groupby('user_id').size()
+    user_stats['improbable_choices_2x'] = user_stats['user_id'].map(improbable_choices_2x)
+    
+    # Additional statistics
+    user_stats['total_consistency_choices'] = user_stats['user_id'].map(
+        bigram_data[bigram_data['group_size'] > 1]['user_id'].value_counts())
+    user_stats['num_easy_choice_pairs'] = len(easy_choice_pairs)
+    
+    # Keep NaN values as NaN - don't fill with 0
+    return user_stats
+
+def process_experiment_data(data: pd.DataFrame, easy_choice_pairs: List[Tuple[str, str]], 
+                           output_tables_folder: str, logger: logging.Logger) -> Dict[str, pd.DataFrame]:
+    """Main processing orchestrator - only processes valid data."""
+    logger.info("____ Process data ____")
+    
+    logger.info(f"Initial data shape: {data.shape}")
+    
+    # Remove any rows with missing critical data
+    required_columns = ['chosenBigram', 'unchosenBigram', 'sliderValue', 'user_id']
+    clean_data = data.dropna(subset=required_columns)
+    logger.info(f"Removed {len(data) - len(clean_data)} rows with missing critical data")
+    
+    if len(clean_data) == 0:
+        logger.error("No valid data remaining")
+        return {}
+    
+    # Create standardized bigram pairs
+    data_with_pairs = create_standardized_bigram_pairs(clean_data)
+    
+    # Identify probable/improbable choices
+    data_with_choices = identify_probable_improbable_choices(data_with_pairs, easy_choice_pairs)
+    
+    # Calculate consistency
+    bigram_data = calculate_choice_consistency(data_with_choices)
+    
+    if len(bigram_data) == 0:
+        logger.error("No data remaining after processing")
+        return {}
+    
+    # Sort the data
+    bigram_data = bigram_data.sort_values(by=['user_id', 'trialId', 'bigram_pair']).reset_index(drop=True)
+    
+    # Create specific subsets - only from valid data
+    consistent_choices = bigram_data[(bigram_data['is_consistent'] == True) & (bigram_data['group_size'] > 1)]
+    inconsistent_choices = bigram_data[(bigram_data['is_consistent'] == False) & (bigram_data['group_size'] > 1)]
+    probable_choices = bigram_data[bigram_data['is_probable'] == True]
+    improbable_choices = bigram_data[bigram_data['is_improbable'] == True]
+    
+    # Calculate user statistics
+    user_stats = calculate_user_statistics(bigram_data, easy_choice_pairs)
+    
+    # Save all dataframes
+    _save_processed_dataframes({
+        'bigram_data': bigram_data,
+        'consistent_choices': consistent_choices,
+        'inconsistent_choices': inconsistent_choices,
+        'probable_choices': probable_choices,
+        'improbable_choices': improbable_choices,
+        'user_stats': user_stats
+    }, output_tables_folder, logger)
+    
+    return {
+        'bigram_data': bigram_data,
+        'consistent_choices': consistent_choices,
+        'inconsistent_choices': inconsistent_choices,
+        'probable_choices': probable_choices,
+        'improbable_choices': improbable_choices,
+        'user_stats': user_stats
+    }
+
+def _save_processed_dataframes(dataframes: Dict[str, pd.DataFrame], output_folder: str, logger: logging.Logger) -> None:
+    """Save processed dataframes to CSV files."""
+    for name, df in dataframes.items():
+        if name == 'user_stats':
+            filename = 'processed_user_statistics.csv'
+        else:
+            filename = f'processed_{name}.csv'
+        
+        output_path = os.path.join(output_folder, filename)
+        df.to_csv(output_path, index=False)
+        logger.info(f"Saved {name} to {output_path}")
+
+#######################################
 # User Filtering Functions
 #######################################
 def filter_users_by_improbable_choices(data: pd.DataFrame, user_stats: pd.DataFrame, 
                                       easy_choice_pairs: List[Tuple[str, str]], 
                                       threshold: int, logger: logging.Logger) -> Set[str]:
-    """Filter users who consistently make improbable choices."""
+    """
+    ACTUAL BEHAVIOR: Removes users who made exactly 2 improbable choices for the same bigram pair.
+    This means they consistently chose the 'bad' bigram over the 'good' bigram twice.
+    """
     if threshold == np.inf:
         return set()
     
-    problematic_users = set(user_stats[user_stats['improbable_choices_2x'] > threshold]['user_id'])
+    # Only work with users who have this statistic (not NaN)
+    valid_stats = user_stats.dropna(subset=['improbable_choices_2x'])
+    problematic_users = set(valid_stats[valid_stats['improbable_choices_2x'] > threshold]['user_id'])
     
     logger.info(f"Users removed due to improbable choices > {threshold}: {len(problematic_users)}")
-    
-    # Only log details in debug mode
-    if logger.isEnabledFor(logging.DEBUG) and len(problematic_users) > 0 and len(problematic_users) <= 10:
-        logger.debug(f"Removed users: {problematic_users}")
-        _log_improbable_choice_details(data, problematic_users, easy_choice_pairs, logger)
+    if len(problematic_users) > 0:
+        logger.info(problematic_users)
     
     return problematic_users
 
-def filter_users_by_inconsistencies(data: pd.DataFrame, user_stats: pd.DataFrame, 
-                                   threshold: float, filter_strong_only: bool, 
-                                   zero_threshold: int, logger: logging.Logger) -> Set[str]:
-    """Filter users with too many inconsistent choices."""
+def filter_users_by_strong_inconsistencies(data: pd.DataFrame, threshold: float, 
+                                          zero_threshold: int, logger: logging.Logger) -> Set[str]:
+    """
+    BEHAVIOR: 
+    - Groups data by user and bigram pair
+    - For each pair with multiple presentations, checks if choices are inconsistent
+    - If inconsistent AND any slider value is > zero_threshold away from zero, counts as "strong inconsistency"
+    - Removes users where percentage of strong inconsistencies > threshold
+    """
     if threshold == np.inf:
         return set()
-    
-    if filter_strong_only:
-        return _filter_strong_inconsistencies(data, threshold, zero_threshold, logger)
-    else:
-        user_inconsistency_pcts = (user_stats['inconsistent_choices'] / user_stats['total_consistency_choices'] * 100)
-        problematic_users = set(user_stats[user_inconsistency_pcts > threshold]['user_id'])
         
-        logger.info(f"Users removed due to inconsistent choices > {threshold}%: {len(problematic_users)}")
-        if len(problematic_users) > 0 and len(problematic_users) <= 10:
-            logger.debug(f"Removed users: {problematic_users}")
-        
-        return problematic_users
-
-def _filter_strong_inconsistencies(data: pd.DataFrame, threshold: float, 
-                                  zero_threshold: int, logger: logging.Logger) -> Set[str]:
-    """Filter users based on strong inconsistencies (slider values away from zero)."""
     logger.info(f"Filtering by strong inconsistencies (|sliderValue| > {zero_threshold})")
+    
+    # Detect correct column names (handle both raw and processed data)
+    chosen_col = 'chosen_bigram' if 'chosen_bigram' in data.columns else 'chosenBigram'
+    unchosen_col = 'unchosen_bigram' if 'unchosen_bigram' in data.columns else 'unchosenBigram'
+    
+    if chosen_col not in data.columns or unchosen_col not in data.columns:
+        logger.error(f"Required columns not found. Available: {list(data.columns)}")
+        return set()
     
     if 'std_bigram_pair' not in data.columns:
         data = data.copy()
         data['std_bigram_pair'] = data.apply(
-            lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
+            lambda row: tuple(sorted([row[chosen_col], row[unchosen_col]])), axis=1)
     
     problematic_users = set()
     
@@ -305,7 +548,7 @@ def _filter_strong_inconsistencies(data: pd.DataFrame, threshold: float,
                 continue
             
             total_multi_pairs += 1
-            is_consistent = len(set(group['chosenBigram'])) == 1
+            is_consistent = len(set(group[chosen_col])) == 1
             
             if not is_consistent:
                 has_strong_inconsistency = any(abs(val) > zero_threshold for val in group['sliderValue'])
@@ -318,48 +561,65 @@ def _filter_strong_inconsistencies(data: pd.DataFrame, threshold: float,
                 problematic_users.add(user_id)
     
     logger.info(f"Users removed due to strong inconsistent choices > {threshold}%: {len(problematic_users)}")
+    if len(problematic_users) > 0:
+        logger.info(problematic_users)
+
     return problematic_users
 
-def filter_users_by_slider_behavior(data: pd.DataFrame, n_repeat_sides: int, 
+def filter_users_by_slider_behavior(data: pd.DataFrame, streak_side_percent: float, 
                                    percent_close_to_zero: float, distance_close_to_zero: int,
                                    logger: logging.Logger, verbose: bool = False) -> Tuple[Set[str], Dict]:
-    """Filter users with problematic slider patterns."""
+    """
+    ACTUAL BEHAVIOR: Two separate filters:
+    
+    1. "Percentage-based consecutive streaks": 
+       - Calculates streak threshold as streak_side_percent of user's total trials
+       - Looks for streaks of that length or longer where slider > distance_close_to_zero
+       - OR streaks where slider < -distance_close_to_zero  
+       - Removes users with such streaks
+       
+    2. "Frequent zero values":
+       - Counts trials where |slider| <= distance_close_to_zero
+       - Removes users where this percentage >= percent_close_to_zero
+    """
     problematic_users = set()
     stats = {
-        'repeated_side_users': set(),
+        'streak_users': set(),
         'close_to_zero_users': set(),
         'total_problematic_users': 0
     }
     
-    if verbose:
-        logger.debug(f"Checking for streaks >= {n_repeat_sides} with abs(value) > {distance_close_to_zero}")
-    
     for user_id, user_data in data.groupby('user_id'):
         user_data = user_data.sort_values('trialId')
         slider_values = user_data['sliderValue'].values
+        total_trials = len(slider_values)
         
-        # Check for repeated same-side selections
-        if _has_problematic_streaks(slider_values, n_repeat_sides, distance_close_to_zero, logger, verbose, user_id):
-            stats['repeated_side_users'].add(user_id)
+        # Calculate streak threshold as percentage of total trials
+        streak_threshold = max(1, int(total_trials * streak_side_percent / 100))
+        
+        # Check for problematic streaks (percentage-based length)
+        if _has_problematic_streaks_percentage(slider_values, streak_threshold, distance_close_to_zero):
+            stats['streak_users'].add(user_id)
             problematic_users.add(user_id)
         
         # Check for frequent near-zero selections
-        if _has_excessive_zero_values(slider_values, percent_close_to_zero, distance_close_to_zero, logger, verbose, user_id):
+        if _has_excessive_zero_values(slider_values, percent_close_to_zero, distance_close_to_zero):
             stats['close_to_zero_users'].add(user_id)
             problematic_users.add(user_id)
     
     stats['total_problematic_users'] = len(problematic_users)
     
     logger.info(f"Users removed due to problematic slider behavior: {len(problematic_users)}")
-    logger.info(f"  - Same side consecutive selections ({n_repeat_sides}+): {len(stats['repeated_side_users'])}")
+    logger.info(f"  - Consecutive streaks ({streak_side_percent}% of trials): {len(stats['streak_users'])}")
     logger.info(f"  - Frequent zero values ({percent_close_to_zero}%+): {len(stats['close_to_zero_users'])}")
-    
+    if len(problematic_users) > 0:
+        logger.info(problematic_users)
+
     return problematic_users, stats
 
-def _has_problematic_streaks(slider_values: np.ndarray, n_repeat_sides: int, 
-                           distance_close_to_zero: int, logger: logging.Logger, 
-                           verbose: bool, user_id: str) -> bool:
-    """Check if user has problematic streaks of same-side selections."""
+def _has_problematic_streaks_percentage(slider_values: np.ndarray, streak_threshold: int, 
+                                      distance_close_to_zero: int) -> bool:
+    """Check if user has problematic streaks based on percentage of total trials."""
     pos_streak = 0
     neg_streak = 0
     
@@ -374,27 +634,19 @@ def _has_problematic_streaks(slider_values: np.ndarray, n_repeat_sides: int,
             pos_streak = 0
             neg_streak = 0
             
-        if pos_streak >= n_repeat_sides or neg_streak >= n_repeat_sides:
-            if verbose:
-                logger.debug(f"User {user_id} flagged for streaks - pos_streak: {pos_streak}, neg_streak: {neg_streak}")
+        if pos_streak >= streak_threshold or neg_streak >= streak_threshold:
             return True
     
     return False
 
 def _has_excessive_zero_values(slider_values: np.ndarray, percent_close_to_zero: float, 
-                             distance_close_to_zero: int, logger: logging.Logger, 
-                             verbose: bool, user_id: str) -> bool:
+                             distance_close_to_zero: int) -> bool:
     """Check if user has excessive values close to zero."""
     total_trials = len(slider_values)
     close_to_zero_count = sum(abs(value) <= distance_close_to_zero for value in slider_values)
     close_to_zero_pct = (close_to_zero_count / total_trials * 100)
     
-    if close_to_zero_pct >= percent_close_to_zero:
-        if verbose:
-            logger.debug(f"User {user_id} flagged for close-to-zero: {close_to_zero_pct:.1f}% ({close_to_zero_count}/{total_trials})")
-        return True
-    
-    return False
+    return close_to_zero_pct >= percent_close_to_zero
 
 def apply_all_user_filters(data: pd.DataFrame, user_stats: pd.DataFrame, 
                           config: Dict[str, Any], easy_choice_pairs: List[Tuple[str, str]], 
@@ -414,20 +666,19 @@ def apply_all_user_filters(data: pd.DataFrame, user_stats: pd.DataFrame,
         threshold = process_config.get('improbable_threshold', np.inf)
         improbable_users = filter_users_by_improbable_choices(data, user_stats, easy_choice_pairs, threshold, logger)
         valid_users -= improbable_users
-    
-    # Filter by inconsistencies
-    if process_config.get('filter_users_by_percent_inconsistencies', False):
-        threshold = process_config.get('inconsistent_threshold', np.inf)
-        filter_strong = process_config.get('filter_by_strong_inconsistencies', False)
+
+    # Filter by strong inconsistencies
+    if process_config.get('filter_users_by_percent_strong_inconsistencies', False):
+        threshold = process_config.get('strong_inconsistent_threshold', np.inf)
         zero_threshold = process_config.get('zero_threshold', 20)
-        inconsistent_users = filter_users_by_inconsistencies(data, user_stats, threshold, filter_strong, zero_threshold, logger)
+        inconsistent_users = filter_users_by_strong_inconsistencies(data, threshold, zero_threshold, logger)
         valid_users -= inconsistent_users
     
     # Filter by slider behavior
-    n_repeat_sides = process_config.get('n_repeat_sides', 20)
+    streak_side_percent = process_config.get('streak_side_percent', 20)  # Percentage of trials for streak threshold
     percent_close_to_zero = process_config.get('percent_close_to_zero', 25)
     distance_close_to_zero = process_config.get('distance_close_to_zero', 10)
-    slider_users, _ = filter_users_by_slider_behavior(data, n_repeat_sides, percent_close_to_zero, distance_close_to_zero, logger)
+    slider_users, _ = filter_users_by_slider_behavior(data, streak_side_percent, percent_close_to_zero, distance_close_to_zero, logger)
     valid_users -= slider_users
     
     # Filter data to keep only valid users
@@ -444,41 +695,6 @@ def apply_all_user_filters(data: pd.DataFrame, user_stats: pd.DataFrame,
     
     return filtered_data, valid_users
 
-def _log_improbable_choice_details(data: pd.DataFrame, problematic_users: Set[str], 
-                                  easy_choice_pairs: List[Tuple[str, str]], logger: logging.Logger) -> None:
-    """Log detailed information about users' improbable choices."""
-    logger.debug("Details of consistent improbable choices:")
-    
-    if 'std_bigram_pair' not in data.columns:
-        data = data.copy()
-        data['std_bigram_pair'] = data.apply(
-            lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
-    
-    prob_user_data = data[data['user_id'].isin(problematic_users)]
-    
-    for user_id in problematic_users:
-        user_data = prob_user_data[prob_user_data['user_id'] == user_id]
-        logger.debug(f"User {user_id}: {len(user_data)} trials")
-        
-        pair_groups = user_data.groupby('std_bigram_pair')
-        has_improbable_choices = False
-        
-        for pair, group in pair_groups:
-            chosen_bigrams = group['chosenBigram'].tolist()
-            if len(chosen_bigrams) >= 2 and len(set(chosen_bigrams)) == 1:
-                chosen = chosen_bigrams[0]
-                unchosen = group['unchosenBigram'].iloc[0]
-                
-                # Check if this matches any easy choice pair
-                for good, bad in easy_choice_pairs:
-                    if chosen == bad and unchosen == good:
-                        logger.debug(f"  Consistently chose improbable '{chosen}' over '{unchosen}' {len(chosen_bigrams)} times")
-                        has_improbable_choices = True
-                        break
-        
-        if not has_improbable_choices:
-            logger.debug("  No consistent improbable choices found")
-
 #######################################
 # Row Filtering Functions
 #######################################
@@ -492,8 +708,16 @@ def filter_data_rows(data: pd.DataFrame, config: Dict[str, Any], logger: logging
     
     # Create standardized bigram pair representation
     if 'std_bigram_pair' not in data_filtered.columns:
-        data_filtered['std_bigram_pair'] = data_filtered.apply(
-            lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
+        # Detect correct column names (handle both raw and processed data)
+        chosen_col = 'chosen_bigram' if 'chosen_bigram' in data_filtered.columns else 'chosenBigram'
+        unchosen_col = 'unchosen_bigram' if 'unchosen_bigram' in data_filtered.columns else 'unchosenBigram'
+        
+        if chosen_col in data_filtered.columns and unchosen_col in data_filtered.columns:
+            data_filtered['std_bigram_pair'] = data_filtered.apply(
+                lambda row: tuple(sorted([row[chosen_col], row[unchosen_col]])), axis=1)
+        else:
+            logger.error(f"Cannot create std_bigram_pair - missing columns. Available: {list(data_filtered.columns)}")
+            return data_filtered
     
     # Filter by letters
     filter_letters = process_config.get('filter_letters', [])
@@ -519,9 +743,17 @@ def _filter_by_letters(data: pd.DataFrame, filter_letters: List[str], logger: lo
     logger.info(f"Filtering out bigrams containing: {filter_letters}")
     initial_rows = len(data)
     
+    # Detect correct column names (handle both raw and processed data)
+    chosen_col = 'chosen_bigram' if 'chosen_bigram' in data.columns else 'chosenBigram'
+    unchosen_col = 'unchosen_bigram' if 'unchosen_bigram' in data.columns else 'unchosenBigram'
+    
+    if chosen_col not in data.columns or unchosen_col not in data.columns:
+        logger.warning(f"Required columns not found for letter filtering. Available: {list(data.columns)}")
+        return data
+    
     filter_condition = ~(
-        data['chosenBigram'].str.contains('|'.join(filter_letters), case=False) |
-        data['unchosenBigram'].str.contains('|'.join(filter_letters), case=False)
+        data[chosen_col].str.contains('|'.join(filter_letters), case=False) |
+        data[unchosen_col].str.contains('|'.join(filter_letters), case=False)
     )
     
     data_filtered = data[filter_condition].copy()
@@ -550,6 +782,14 @@ def _filter_inconsistent_away_from_zero(data: pd.DataFrame, zero_threshold: int,
     logger.info(f"Filtering inconsistent choices with slider values away from zero (threshold: ±{zero_threshold})")
     initial_rows = len(data)
     
+    # Detect correct column names (handle both raw and processed data)
+    chosen_col = 'chosen_bigram' if 'chosen_bigram' in data.columns else 'chosenBigram'
+    unchosen_col = 'unchosen_bigram' if 'unchosen_bigram' in data.columns else 'unchosenBigram'
+    
+    if chosen_col not in data.columns or unchosen_col not in data.columns:
+        logger.error(f"Required columns not found. Available: {list(data.columns)}")
+        return data
+    
     grouped_data = data.groupby(['user_id', 'std_bigram_pair'])
     valid_groups = []
     
@@ -558,7 +798,7 @@ def _filter_inconsistent_away_from_zero(data: pd.DataFrame, zero_threshold: int,
             valid_groups.append((user_id, std_bigram_pair))
             continue
         
-        is_consistent = len(set(group['chosenBigram'])) == 1
+        is_consistent = len(set(group[chosen_col])) == 1
         
         if is_consistent or all(abs(val) <= zero_threshold for val in group['sliderValue']):
             valid_groups.append((user_id, std_bigram_pair))
@@ -575,430 +815,40 @@ def _filter_inconsistent_away_from_zero(data: pd.DataFrame, zero_threshold: int,
     return data_filtered
 
 #######################################
-# Data Processing Functions
+# Scoring Functions (No Fallbacks)
 #######################################
-def create_standardized_bigram_pairs(data: pd.DataFrame) -> pd.DataFrame:
-    """Create standardized bigram pair representation as tuples."""
-    data = data.copy()
-    data['std_bigram_pair'] = data.apply(
-        lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1)
-    return data
-
-def identify_probable_improbable_choices(data: pd.DataFrame, easy_choice_pairs: List[Tuple[str, str]]) -> pd.DataFrame:
-    """Mark probable/improbable choices in the data."""
-    data = data.copy()
-    
-    # Create dictionaries for quick lookup
-    probable_pairs = {(pair[0], pair[1]): True for pair in easy_choice_pairs}
-    improbable_pairs = {(pair[1], pair[0]): True for pair in easy_choice_pairs}
-    
-    # Apply to each row
-    data['is_probable'] = data.apply(
-        lambda row: probable_pairs.get((row['chosenBigram'], row['unchosenBigram']), False), axis=1)
-    data['is_improbable'] = data.apply(
-        lambda row: improbable_pairs.get((row['chosenBigram'], row['unchosenBigram']), False), axis=1)
-    
-    return data
-
-def calculate_choice_consistency(data_with_choices: pd.DataFrame) -> pd.DataFrame:
-    """Determine if choices are consistent for each group - optimized version."""
-    logger = logging.getLogger(__name__)
-    initial_rows = len(data_with_choices)
-    
-    # Debug: Check initial columns
-    logger.debug(f"Initial columns: {list(data_with_choices.columns)}")
-    
-    # First, let's clean the data and remove any rows with NaN bigrams
-    clean_data = data_with_choices.dropna(subset=['chosenBigram', 'unchosenBigram']).copy()
-    
-    if len(clean_data) < initial_rows:
-        logger.warning(f"Removed {initial_rows - len(clean_data)} rows with NaN bigrams")
-    
-    if len(clean_data) == 0:
-        logger.error("No valid data remaining after removing NaN bigrams")
-        return pd.DataFrame()
-    
-    # Calculate group sizes efficiently
-    group_sizes = clean_data.groupby(['user_id', 'std_bigram_pair']).size()
-    
-    # Calculate consistency efficiently
-    consistency_info = clean_data.groupby(['user_id', 'std_bigram_pair'])['chosenBigram'].apply(
-        lambda x: len(set(x)) == 1 if len(x) > 1 else None
-    ).reset_index()
-    consistency_info.columns = ['user_id', 'std_bigram_pair', 'is_consistent']
-    
-    # Debug: Check columns before merge
-    logger.debug(f"Clean data columns before merge: {list(clean_data.columns)}")
-    logger.debug(f"Consistency info columns: {list(consistency_info.columns)}")
-    
-    # Merge back to original data
-    result = clean_data.merge(consistency_info, on=['user_id', 'std_bigram_pair'], how='left')
-    
-    # Debug: Check columns after first merge
-    logger.debug(f"Columns after consistency merge: {list(result.columns)}")
-    
-    # Add group sizes more efficiently using merge
-    group_size_df = group_sizes.reset_index()
-    group_size_df.columns = ['user_id', 'std_bigram_pair', 'group_size']
-    
-    # Debug: Check for existing group_size column
-    if 'group_size' in result.columns:
-        logger.warning("group_size column already exists, dropping it")
-        result = result.drop(columns=['group_size'])
-    
-    result = result.merge(group_size_df, on=['user_id', 'std_bigram_pair'], how='left')
-    
-    # Debug: Check columns after group size merge
-    logger.debug(f"Columns after group size merge: {list(result.columns)}")
-    
-    # Extract bigram1 and bigram2 from std_bigram_pair safely
-    try:
-        # Check if bigram1, bigram2 already exist
-        if 'bigram1' in result.columns:
-            result = result.drop(columns=['bigram1'])
-        if 'bigram2' in result.columns:
-            result = result.drop(columns=['bigram2'])
-            
-        bigram_pairs_df = pd.DataFrame(result['std_bigram_pair'].tolist(), 
-                                     index=result.index, 
-                                     columns=['bigram1', 'bigram2'])
-        result = pd.concat([result, bigram_pairs_df], axis=1)
-    except Exception as e:
-        logger.error(f"Error extracting bigram pairs: {e}")
-        # Fallback: extract manually
-        result['bigram1'] = result['std_bigram_pair'].apply(lambda x: x[0] if isinstance(x, tuple) and len(x) >= 2 else None)
-        result['bigram2'] = result['std_bigram_pair'].apply(lambda x: x[1] if isinstance(x, tuple) and len(x) >= 2 else None)
-    
-    # Debug: Check columns after bigram extraction
-    logger.debug(f"Columns after bigram extraction: {list(result.columns)}")
-    
-    # Calculate bigram times efficiently with safe lookups
-    def safe_bigram_time(row, bigram_num):
-        try:
-            target_bigram = row[f'bigram{bigram_num}']
-            if pd.isna(target_bigram):
-                return np.nan
-            if row['chosenBigram'] == target_bigram:
-                return row['chosenBigramTime']
-            else:
-                return row['unchosenBigramTime']
-        except:
-            return np.nan
-    
-    # Check if time columns already exist
-    if 'bigram1_time' in result.columns:
-        result = result.drop(columns=['bigram1_time'])
-    if 'bigram2_time' in result.columns:
-        result = result.drop(columns=['bigram2_time'])
-    
-    result['bigram1_time'] = result.apply(lambda row: safe_bigram_time(row, 1), axis=1)
-    result['bigram2_time'] = result.apply(lambda row: safe_bigram_time(row, 2), axis=1)
-    
-    # Add abs_sliderValue
-    if 'abs_sliderValue' in result.columns:
-        result = result.drop(columns=['abs_sliderValue'])
-    result['abs_sliderValue'] = result['sliderValue'].abs()
-    
-    # Rename columns carefully - check for duplicates first
-    rename_mapping = {
-        'chosenBigram': 'chosen_bigram',
-        'unchosenBigram': 'unchosen_bigram',
-        'chosenBigramTime': 'chosen_bigram_time',
-        'unchosenBigramTime': 'unchosen_bigram_time',
-        'chosenBigramCorrect': 'chosen_bigram_correct',
-        'unchosenBigramCorrect': 'unchosen_bigram_correct',
-        'std_bigram_pair': 'bigram_pair'
-    }
-    
-    # Only rename columns that actually exist
-    columns_to_rename = {k: v for k, v in rename_mapping.items() if k in result.columns}
-    result = result.rename(columns=columns_to_rename)
-    
-    # Final debug: Check final columns
-    logger.debug(f"Final columns: {list(result.columns)}")
-    
-    # Check for duplicate columns
-    if len(result.columns) != len(set(result.columns)):
-        logger.error(f"Duplicate columns found: {result.columns.tolist()}")
-        # Remove duplicates by keeping only the first occurrence
-        result = result.loc[:, ~result.columns.duplicated()]
-        logger.warning(f"Removed duplicate columns, final columns: {list(result.columns)}")
-    
-    return result
-
-def calculate_user_statistics(bigram_data: pd.DataFrame, easy_choice_pairs: List[Tuple[str, str]]) -> pd.DataFrame:
-    """Calculate comprehensive user statistics."""
-    user_stats = pd.DataFrame()
-    user_stats['user_id'] = bigram_data['user_id'].unique()
-    user_stats = user_stats.set_index('user_id')
-    
-    # Basic counts
-    user_stats['total_choices'] = bigram_data['user_id'].value_counts()
-    
-    # Filter data for specific choice types
-    consistent_choices = bigram_data[(bigram_data['is_consistent'] == True) & (bigram_data['group_size'] > 1)]
-    inconsistent_choices = bigram_data[(bigram_data['is_consistent'] == False) & (bigram_data['group_size'] > 1)]
-    probable_choices = bigram_data[bigram_data['is_probable'] == True]
-    improbable_choices = bigram_data[bigram_data['is_improbable'] == True]
-    
-    user_stats['consistent_choices'] = consistent_choices['user_id'].value_counts()
-    user_stats['inconsistent_choices'] = inconsistent_choices['user_id'].value_counts()
-    user_stats['probable_choices'] = probable_choices['user_id'].value_counts()
-    user_stats['improbable_choices'] = improbable_choices['user_id'].value_counts()
-    
-    # Calculate improbable choices made twice (consistently)
-    pair_counts = improbable_choices.groupby(['user_id', 'bigram_pair']).size().reset_index(name='count')
-    improbable_choices_2x = pair_counts[pair_counts['count'] == 2].groupby('user_id').size()
-    user_stats['improbable_choices_2x'] = improbable_choices_2x.fillna(0).astype(int)
-    
-    # Additional statistics
-    user_stats['total_consistency_choices'] = bigram_data[bigram_data['group_size'] > 1]['user_id'].value_counts()
-    user_stats['num_easy_choice_pairs'] = len(easy_choice_pairs)
-    
-    # Fill NaN values and ensure integer types
-    user_stats = user_stats.fillna(0).astype(int)
-    return user_stats.reset_index()
-
-def process_experiment_data(data: pd.DataFrame, easy_choice_pairs: List[Tuple[str, str]], 
-                           output_tables_folder: str, logger: logging.Logger) -> Dict[str, pd.DataFrame]:
-    """Main processing orchestrator for experiment data."""
-    logger.info("____ Process data ____")
-    
-    # Temporarily enable debug logging for this function
-    original_level = logger.level
-    logger.setLevel(logging.INFO) #DEBUG)
-    
-    # Check initial data quality
-    logger.info(f"Initial data shape: {data.shape}")
-    logger.info(f"Columns: {list(data.columns)}")
-    
-    # Check for NaN values in key columns
-    for col in ['chosenBigram', 'unchosenBigram']:
-        if col in data.columns:
-            nan_count = data[col].isna().sum()
-            logger.info(f"NaN values in {col}: {nan_count} ({nan_count/len(data)*100:.1f}%)")
-        else:
-            logger.error(f"Required column {col} not found in data!")
-    
-    # Sample some data to see what's wrong
-    logger.debug("Sample of data with potential issues:")
-    sample_data = data[['chosenBigram', 'unchosenBigram']].head(10)
-    logger.debug(f"\n{sample_data}")
-    
-    try:
-        # Create standardized bigram pairs
-        data_with_pairs = create_standardized_bigram_pairs(data)
-        logger.debug(f"Data after creating pairs: {data_with_pairs.shape}")
-        
-        # Identify probable/improbable choices
-        data_with_choices = identify_probable_improbable_choices(data_with_pairs, easy_choice_pairs)
-        logger.debug(f"Data after identifying choices: {data_with_choices.shape}")
-        
-        # Calculate consistency efficiently
-        bigram_data = calculate_choice_consistency(data_with_choices)
-        logger.debug(f"Data after calculating consistency: {bigram_data.shape}")
-        
-        if len(bigram_data) == 0:
-            logger.error("No data remaining after processing!")
-            # Restore original log level
-            logger.setLevel(original_level)
-            return {}
-        
-        # Sort the data - but first check for duplicate columns
-        logger.debug(f"Columns before sorting: {list(bigram_data.columns)}")
-        if len(bigram_data.columns) != len(set(bigram_data.columns)):
-            logger.error(f"Duplicate columns detected: {bigram_data.columns.tolist()}")
-            bigram_data = bigram_data.loc[:, ~bigram_data.columns.duplicated()]
-            logger.warning(f"Removed duplicates, now have: {list(bigram_data.columns)}")
-        
-        # Check if required columns exist
-        required_cols = ['user_id', 'trialId', 'bigram_pair']
-        missing_cols = [col for col in required_cols if col not in bigram_data.columns]
-        if missing_cols:
-            logger.error(f"Missing required columns for sorting: {missing_cols}")
-            logger.error(f"Available columns: {list(bigram_data.columns)}")
-            # Try alternative column names
-            if 'trialId' not in bigram_data.columns and 'trial_id' in bigram_data.columns:
-                bigram_data = bigram_data.rename(columns={'trial_id': 'trialId'})
-                logger.info("Renamed trial_id to trialId")
-        
-        bigram_data = bigram_data.sort_values(by=['user_id', 'trialId', 'bigram_pair']).reset_index(drop=True)
-        
-        # Create specific subsets using vectorized operations
-        consistent_choices = bigram_data[(bigram_data['is_consistent'] == True) & (bigram_data['group_size'] > 1)]
-        inconsistent_choices = bigram_data[(bigram_data['is_consistent'] == False) & (bigram_data['group_size'] > 1)]
-        probable_choices = bigram_data[bigram_data['is_probable'] == True]
-        improbable_choices = bigram_data[bigram_data['is_improbable'] == True]
-        
-        # Calculate user statistics
-        user_stats = calculate_user_statistics(bigram_data, easy_choice_pairs)
-        
-        # Save all dataframes
-        _save_processed_dataframes({
-            'bigram_data': bigram_data,
-            'consistent_choices': consistent_choices,
-            'inconsistent_choices': inconsistent_choices,
-            'probable_choices': probable_choices,
-            'improbable_choices': improbable_choices,
-            'user_stats': user_stats
-        }, output_tables_folder, logger)
-        
-        # Restore original log level
-        logger.setLevel(original_level)
-        
-        return {
-            'bigram_data': bigram_data,
-            'consistent_choices': consistent_choices,
-            'inconsistent_choices': inconsistent_choices,
-            'probable_choices': probable_choices,
-            'improbable_choices': improbable_choices,
-            'user_stats': user_stats
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in process_experiment_data: {e}")
-        # Restore original log level
-        logger.setLevel(original_level)
-        raise
-
-def _save_processed_dataframes(dataframes: Dict[str, pd.DataFrame], output_folder: str, logger: logging.Logger) -> None:
-    """Save processed dataframes to CSV files."""
-    for name, df in dataframes.items():
-        if name == 'user_stats':
-            filename = 'processed_user_statistics.csv'
-        else:
-            filename = f'processed_{name}.csv'
-        
-        output_path = os.path.join(output_folder, filename)
-        df.to_csv(output_path, index=False)
-        logger.info(f"Saved {name} to {output_path}")
-
-#######################################
-# Scoring Functions
-#######################################
-def calculate_consistency_score(slider_values: List[float]) -> float:
-    """Calculate score when choices are consistent."""
-    valid_values = [abs(x) for x in slider_values if not np.isnan(x)]
-    return np.median(valid_values) if valid_values else np.nan
-
-def calculate_mixed_choice_score(group: pd.DataFrame, bigram1: str, bigram2: str) -> Tuple[float, str, str]:
-    """
-    Calculate score when choices are mixed between bigrams.
-    
-    Returns:
-    - score: calculated score
-    - winner: winning bigram
-    - loser: losing bigram
-    """
-    scores = group['sliderValue']
-    chosen_bigrams = group['chosen_bigram']
-    group_size = len(group)
-    
-    # Calculate sums for each bigram
-    valid_scores1 = [abs(x) for i, x in enumerate(scores) if chosen_bigrams.iloc[i] == bigram1 and not np.isnan(x)]
-    valid_scores2 = [abs(x) for i, x in enumerate(scores) if chosen_bigrams.iloc[i] == bigram2 and not np.isnan(x)]
-    
-    sum1 = sum(valid_scores1)
-    sum2 = sum(valid_scores2)
-    
-    score = abs(sum1 - sum2) / group_size if group_size > 0 else np.nan
-    
-    if sum1 >= sum2:
-        winner, loser = bigram1, bigram2
-    else:
-        winner, loser = bigram2, bigram1
-    
-    return score, winner, loser
-
-def determine_score(group: pd.DataFrame) -> pd.Series:
-    """
-    Determine the score and chosen/unchosen bigrams for a group of trials.
-    
-    Scoring algorithm:
-    - If consistent choices: take median absolute slider value
-    - If mixed choices: subtract sums of absolute values, divide by group size
-    - Final score is absolute value divided by 100 (max slider value)
-    """
-    if len(group) == 0:
-        return _create_empty_score_series()
-    
-    bigram1, bigram2 = group['bigram1'].iloc[0], group['bigram2'].iloc[0]
-    chosen_bigrams = group['chosen_bigram']
-    slider_values = group['sliderValue']
-    group_size = len(group)
-    
-    # Check for invalid bigrams
-    if pd.isna(bigram1) or pd.isna(bigram2):
-        return _create_empty_score_series()
-    
-    # Determine scoring method based on choice consistency
-    if len(set(chosen_bigrams)) == 1:
-        # Consistent choices
-        median_abs_slider_value = calculate_consistency_score(slider_values)
-        chosen_bigram_winner = chosen_bigrams.iloc[0]
-        unchosen_bigram_winner = bigram2 if chosen_bigram_winner == bigram1 else bigram1
-    else:
-        # Mixed choices
-        median_abs_slider_value, chosen_bigram_winner, unchosen_bigram_winner = calculate_mixed_choice_score(
-            group, bigram1, bigram2)
-    
-    # Calculate final score (normalized to 0-1 range)
-    score = median_abs_slider_value / 100 if not np.isnan(median_abs_slider_value) else np.nan
-    
-    return pd.Series({
-        'bigram1': bigram1,
-        'bigram2': bigram2,
-        'chosen_bigram_winner': chosen_bigram_winner,
-        'unchosen_bigram_winner': unchosen_bigram_winner,
-        'chosen_bigram_time_median': _safe_median(group['chosen_bigram_time']),
-        'unchosen_bigram_time_median': _safe_median(group['unchosen_bigram_time']),
-        'chosen_bigram_correct_total': group['chosen_bigram_correct'].sum(skipna=True),
-        'unchosen_bigram_correct_total': group['unchosen_bigram_correct'].sum(skipna=True),
-        'score': score,
-        'text': tuple(group['text'].unique()),
-        'is_consistent': (len(set(chosen_bigrams)) == 1),
-        'is_probable': group['is_probable'].iloc[0],
-        'is_improbable': group['is_improbable'].iloc[0],
-        'group_size': group_size
-    })
-
-def _create_empty_score_series() -> pd.Series:
-    """Create an empty score series for invalid groups."""
-    return pd.Series({
-        'bigram1': np.nan, 'bigram2': np.nan,
-        'chosen_bigram_winner': np.nan, 'unchosen_bigram_winner': np.nan,
-        'chosen_bigram_time_median': np.nan, 'unchosen_bigram_time_median': np.nan,
-        'chosen_bigram_correct_total': 0, 'unchosen_bigram_correct_total': 0,
-        'score': np.nan, 'text': (), 'is_consistent': False,
-        'is_probable': False, 'is_improbable': False, 'group_size': 0
-    })
-
-def _safe_median(series: pd.Series) -> float:
-    """Safely calculate median, handling NaN values."""
-    clean_series = series.dropna()
-    return clean_series.median() if len(clean_series) > 0 else np.nan
-
 def score_user_choices_by_slider_values(filtered_users_data: Dict[str, pd.DataFrame], 
                                        output_tables_folder: str, logger: logging.Logger) -> pd.DataFrame:
-    """
-    Score each user's choices by slider values and create a modified copy of bigram_data.
-    
-    Algorithm:
-    - Consistent choices: median absolute slider value
-    - Mixed choices: difference of sums divided by number of choices
-    - Final score: absolute value normalized to 0-1 range
-    """
+    """Score each user's choices - only from valid data."""
     logger.info("____ Score choices by slider values ____")
     bigram_data = filtered_users_data['bigram_data']
     
-    # Check for null values
-    null_counts = bigram_data.isnull().sum()
-    if null_counts.sum() > 0:
-        logger.warning(f"Found null values in data: {null_counts[null_counts > 0].to_dict()}")
+    # Only work with complete rows
+    required_cols = ['user_id', 'bigram_pair', 'bigram1', 'bigram2', 'chosen_bigram', 'sliderValue']
+    valid_data = bigram_data.dropna(subset=required_cols)
+    
+    logger.info(f"Removed {len(bigram_data) - len(valid_data)} rows with missing scoring data")
+    
+    if len(valid_data) == 0:
+        logger.error("No valid data for scoring")
+        return pd.DataFrame()
     
     # Group by user_id and bigram_pair and apply scoring
-    grouped = bigram_data.groupby(['user_id', 'bigram_pair'], group_keys=False)
-    scored_bigram_data = grouped.apply(determine_score, include_groups=False).reset_index()
+    grouped = valid_data.groupby(['user_id', 'bigram_pair'], group_keys=False)
+    scored_results = []
+    
+    for (user_id, bigram_pair), group in grouped:
+        result = determine_score(group)
+        if result is not None:  # Only add if scoring succeeded
+            result['user_id'] = user_id
+            result['bigram_pair'] = bigram_pair
+            scored_results.append(result)
+    
+    if not scored_results:
+        logger.error("No valid scoring results")
+        return pd.DataFrame()
+    
+    scored_bigram_data = pd.DataFrame(scored_results)
     
     # Reorder columns
     column_order = [
@@ -1008,10 +858,12 @@ def score_user_choices_by_slider_values(filtered_users_data: Dict[str, pd.DataFr
         'chosen_bigram_correct_total', 'unchosen_bigram_correct_total', 
         'score', 'text', 'is_consistent', 'is_probable', 'is_improbable', 'group_size'
     ]
-    scored_bigram_data = scored_bigram_data[column_order]
     
-    logger.info(f"Original bigram_data rows: {len(bigram_data)}")
-    logger.info(f"Scored data rows (unique user_id and bigram_pair combinations): {len(scored_bigram_data)}")
+    # Only include columns that exist
+    available_columns = [col for col in column_order if col in scored_bigram_data.columns]
+    scored_bigram_data = scored_bigram_data[available_columns]
+    
+    logger.info(f"Successfully scored {len(scored_bigram_data)} user-bigram combinations")
     
     # Save scored data
     output_file = os.path.join(output_tables_folder, 'scored_bigram_data.csv')
@@ -1020,50 +872,159 @@ def score_user_choices_by_slider_values(filtered_users_data: Dict[str, pd.DataFr
     
     return scored_bigram_data
 
-#######################################
-# Winner Determination Functions  
-#######################################
-def determine_overall_winner(group: pd.DataFrame) -> pd.Series:
-    """
-    Determine the winning bigram across all users for a bigram pair.
-    
-    Algorithm:
-    - If all users chose same bigram: median score
-    - If mixed user choices: difference of score sums divided by number of users
-    """
+def determine_score(group: pd.DataFrame) -> Optional[Dict]:
+    """Determine the score for a group - return None if invalid."""
     if len(group) == 0:
-        return _create_empty_winner_series()
+        return None
+    
+    # Ensure we have required data
+    required_cols = ['bigram1', 'bigram2', 'chosen_bigram', 'sliderValue']
+    if not all(col in group.columns for col in required_cols):
+        return None
+    
+    if group[required_cols].isna().any().any():
+        return None
     
     bigram1, bigram2 = group['bigram1'].iloc[0], group['bigram2'].iloc[0]
+    chosen_bigrams = group['chosen_bigram']
+    slider_values = group['sliderValue']
+    group_size = len(group)
     
-    if pd.isna(bigram1) or pd.isna(bigram2):
-        return _create_empty_winner_series()
+    # Determine scoring method based on choice consistency
+    if len(set(chosen_bigrams)) == 1:
+        # Consistent choices - median absolute slider value
+        valid_values = [abs(x) for x in slider_values if not np.isnan(x)]
+        if not valid_values:
+            return None
+        median_abs_slider_value = np.median(valid_values)
+        chosen_bigram_winner = chosen_bigrams.iloc[0]
+        unchosen_bigram_winner = bigram2 if chosen_bigram_winner == bigram1 else bigram1
+    else:
+        # Mixed choices - difference of sums
+        valid_scores1 = [abs(x) for i, x in enumerate(slider_values) if chosen_bigrams.iloc[i] == bigram1 and not np.isnan(x)]
+        valid_scores2 = [abs(x) for i, x in enumerate(slider_values) if chosen_bigrams.iloc[i] == bigram2 and not np.isnan(x)]
+        
+        sum1 = sum(valid_scores1)
+        sum2 = sum(valid_scores2)
+        
+        median_abs_slider_value = abs(sum1 - sum2) / group_size
+        
+        if sum1 >= sum2:
+            chosen_bigram_winner, unchosen_bigram_winner = bigram1, bigram2
+        else:
+            chosen_bigram_winner, unchosen_bigram_winner = bigram2, bigram1
     
+    # Calculate final score (normalized to 0-1 range)
+    score = median_abs_slider_value / 100
+    
+    # Get additional stats (with safe access)
+    def safe_median(series):
+        clean_series = series.dropna()
+        return clean_series.median() if len(clean_series) > 0 else np.nan
+    
+    result = {
+        'bigram1': bigram1,
+        'bigram2': bigram2,
+        'chosen_bigram_winner': chosen_bigram_winner,
+        'unchosen_bigram_winner': unchosen_bigram_winner,
+        'score': score,
+        'is_consistent': (len(set(chosen_bigrams)) == 1),
+        'group_size': group_size
+    }
+    
+    # Add optional columns if they exist
+    if 'chosen_bigram_time' in group.columns:
+        result['chosen_bigram_time_median'] = safe_median(group['chosen_bigram_time'])
+    if 'unchosen_bigram_time' in group.columns:
+        result['unchosen_bigram_time_median'] = safe_median(group['unchosen_bigram_time'])
+    if 'chosen_bigram_correct' in group.columns:
+        result['chosen_bigram_correct_total'] = group['chosen_bigram_correct'].sum(skipna=True)
+    if 'unchosen_bigram_correct' in group.columns:
+        result['unchosen_bigram_correct_total'] = group['unchosen_bigram_correct'].sum(skipna=True)
+    if 'text' in group.columns:
+        result['text'] = tuple(group['text'].unique())
+    if 'is_probable' in group.columns:
+        result['is_probable'] = group['is_probable'].iloc[0]
+    if 'is_improbable' in group.columns:
+        result['is_improbable'] = group['is_improbable'].iloc[0]
+    
+    return result
+
+#######################################
+# Winner Determination (No Fallbacks)
+#######################################
+def choose_bigram_winners(scored_bigram_data: pd.DataFrame, output_tables_folder: str, logger: logging.Logger) -> pd.DataFrame:
+    """Determine winning bigram for each bigram pair - only from valid data."""
+    logger.info("____ Choose bigram winners ____")
+    
+    # Only work with complete data
+    required_cols = ['bigram_pair', 'bigram1', 'bigram2', 'chosen_bigram_winner', 'score']
+    valid_data = scored_bigram_data.dropna(subset=required_cols)
+    
+    logger.info(f"Removed {len(scored_bigram_data) - len(valid_data)} rows with missing winner data")
+    
+    if len(valid_data) == 0:
+        logger.error("No valid data for winner determination")
+        return pd.DataFrame()
+    
+    # Group by bigram_pair and determine winners
+    grouped = valid_data.groupby(['bigram_pair'])
+    winner_results = []
+    
+    for bigram_pair, group in grouped:
+        result = determine_overall_winner(group)
+        if result is not None:
+            result['bigram_pair'] = bigram_pair
+            winner_results.append(result)
+    
+    if not winner_results:
+        logger.error("No valid winner results")
+        return pd.DataFrame()
+    
+    bigram_winner_data = pd.DataFrame(winner_results)
+    
+    logger.info(f"Successfully determined winners for {len(bigram_winner_data)} bigram pairs")
+    
+    # Save results
+    output_file = os.path.join(output_tables_folder, 'bigram_winner_data.csv')
+    bigram_winner_data.to_csv(output_file, index=False)
+    logger.info(f"Bigram winner data saved to {output_file}")
+    
+    return bigram_winner_data
+
+def determine_overall_winner(group: pd.DataFrame) -> Optional[Dict]:
+    """Determine the winning bigram across all users - return None if invalid."""
+    if len(group) == 0:
+        return None
+    
+    # Ensure we have required data
+    required_cols = ['bigram1', 'bigram2', 'score', 'chosen_bigram_winner']
+    if not all(col in group.columns for col in required_cols):
+        return None
+    
+    if group[required_cols].isna().any().any():
+        return None
+    
+    bigram1, bigram2 = group['bigram1'].iloc[0], group['bigram2'].iloc[0]
     scores = group['score']
     chosen_bigrams = group['chosen_bigram_winner']
-    
-    # Check if any bigram was chosen
-    bigram1_chosen = any(chosen_bigrams == bigram1)
-    bigram2_chosen = any(chosen_bigrams == bigram2)
-    
-    if not bigram1_chosen and not bigram2_chosen:
-        return _create_empty_winner_series()
     
     unique_chosen_bigrams = chosen_bigrams.unique()
     
     if len(unique_chosen_bigrams) == 1:
         # All users chose the same bigram
         valid_scores = [abs(x) for x in scores if not np.isnan(x)]
-        median_score = np.median(valid_scores) if valid_scores else np.nan
-        mad_score = median_abs_deviation(valid_scores) if valid_scores else np.nan
+        if not valid_scores:
+            return None
+        median_score = np.median(valid_scores)
+        mad_score = median_abs_deviation(valid_scores) if len(valid_scores) > 1 else 0
         winner_bigram = unique_chosen_bigrams[0]
         loser_bigram = bigram2 if winner_bigram == bigram1 else bigram1
-        bigram1_wins = (winner_bigram == bigram1)
     else:
         # Mixed choices across users
         sum1 = sum(abs(x) for i, x in enumerate(scores) if chosen_bigrams.iloc[i] == bigram1 and not np.isnan(x))
         sum2 = sum(abs(x) for i, x in enumerate(scores) if chosen_bigrams.iloc[i] == bigram2 and not np.isnan(x))
-        median_score = abs(sum1 - sum2) / len(group) if len(group) > 0 else np.nan
+        median_score = abs(sum1 - sum2) / len(group)
         
         # Calculate MAD for mixed choices
         mad_list = []
@@ -1074,127 +1035,31 @@ def determine_overall_winner(group: pd.DataFrame) -> pd.Series:
                 elif chosen_bigrams.iloc[i] == bigram2:
                     mad_list.append(-abs(x))
         
-        mad_score = median_abs_deviation(mad_list) if mad_list else np.nan
+        mad_score = median_abs_deviation(mad_list) if len(mad_list) > 1 else 0
         
         if sum1 >= sum2:
             winner_bigram, loser_bigram = bigram1, bigram2
-            bigram1_wins = True
         else:
             winner_bigram, loser_bigram = bigram2, bigram1
-            bigram1_wins = False
     
-    # Calculate aggregate statistics
-    winner_stats = _calculate_winner_statistics(group, bigram1_wins)
-    
-    return pd.Series({
+    result = {
         'winner_bigram': winner_bigram,
         'loser_bigram': loser_bigram,
         'median_score': median_score,
         'mad_score': mad_score,
-        'chosen_bigram_time_median': winner_stats['time_median'],
-        'unchosen_bigram_time_median': winner_stats['unchosen_time_median'],
-        'chosen_bigram_correct_total': winner_stats['correct_total'],
-        'unchosen_bigram_correct_total': winner_stats['unchosen_correct_total'],
-        'is_consistent': group['is_consistent'].all(),
-        'is_probable': group['is_probable'].iloc[0],
-        'is_improbable': group['is_improbable'].iloc[0],
-        'group_size': group['group_size'].sum(),
-        'text': tuple(group['text'].unique())
-    })
-
-def _create_empty_winner_series() -> pd.Series:
-    """Create an empty winner series for invalid groups."""
-    return pd.Series({
-        'winner_bigram': np.nan, 'loser_bigram': np.nan,
-        'median_score': np.nan, 'mad_score': np.nan,
-        'chosen_bigram_time_median': np.nan, 'unchosen_bigram_time_median': np.nan,
-        'chosen_bigram_correct_total': 0, 'unchosen_bigram_correct_total': 0,
-        'is_consistent': False, 'is_probable': False, 'is_improbable': False,
-        'group_size': 0, 'text': ()
-    })
-
-def _calculate_winner_statistics(group: pd.DataFrame, bigram1_wins: bool) -> Dict[str, float]:
-    """Calculate aggregate statistics for the winning bigram."""
-    bigram1, bigram2 = group['bigram1'].iloc[0], group['bigram2'].iloc[0]
-    chosen_bigrams = group['chosen_bigram_winner']
+        'is_consistent': group['is_consistent'].all() if 'is_consistent' in group.columns else False,
+        'group_size': group['group_size'].sum() if 'group_size' in group.columns else len(group)
+    }
     
-    # Calculate medians for each bigram
-    time_median1 = _safe_median_for_bigram(group, 'chosen_bigram_time_median', chosen_bigrams, bigram1)
-    time_median2 = _safe_median_for_bigram(group, 'chosen_bigram_time_median', chosen_bigrams, bigram2)
-    unchosen_time_median1 = _safe_median_for_bigram(group, 'unchosen_bigram_time_median', chosen_bigrams, bigram1)
-    unchosen_time_median2 = _safe_median_for_bigram(group, 'unchosen_bigram_time_median', chosen_bigrams, bigram2)
+    # Add optional columns if they exist
+    if 'is_probable' in group.columns:
+        result['is_probable'] = group['is_probable'].iloc[0]
+    if 'is_improbable' in group.columns:
+        result['is_improbable'] = group['is_improbable'].iloc[0]
+    if 'text' in group.columns:
+        result['text'] = tuple(group['text'].unique())
     
-    # Calculate totals for each bigram
-    correct_total1 = _sum_for_bigram(group, 'chosen_bigram_correct_total', chosen_bigrams, bigram1)
-    correct_total2 = _sum_for_bigram(group, 'chosen_bigram_correct_total', chosen_bigrams, bigram2)
-    unchosen_correct_total1 = _sum_for_bigram(group, 'unchosen_bigram_correct_total', chosen_bigrams, bigram1)
-    unchosen_correct_total2 = _sum_for_bigram(group, 'unchosen_bigram_correct_total', chosen_bigrams, bigram2)
-    
-    if bigram1_wins:
-        return {
-            'time_median': time_median1,
-            'unchosen_time_median': unchosen_time_median1,
-            'correct_total': correct_total1,
-            'unchosen_correct_total': unchosen_correct_total1
-        }
-    else:
-        return {
-            'time_median': time_median2,
-            'unchosen_time_median': unchosen_time_median2,
-            'correct_total': correct_total2,
-            'unchosen_correct_total': unchosen_correct_total2
-        }
-
-def _safe_median_for_bigram(group: pd.DataFrame, column: str, chosen_bigrams: pd.Series, target_bigram: str) -> float:
-    """Calculate median for a specific bigram choice."""
-    values = [x for i, x in enumerate(group[column]) if chosen_bigrams.iloc[i] == target_bigram and not np.isnan(x)]
-    return np.median(values) if values else np.nan
-
-def _sum_for_bigram(group: pd.DataFrame, column: str, chosen_bigrams: pd.Series, target_bigram: str) -> float:
-    """Calculate sum for a specific bigram choice."""
-    values = [x for i, x in enumerate(group[column]) if chosen_bigrams.iloc[i] == target_bigram]
-    return np.sum(values)
-
-def choose_bigram_winners(scored_bigram_data: pd.DataFrame, output_tables_folder: str, logger: logging.Logger) -> pd.DataFrame:
-    """
-    Determine winning bigram for each bigram pair across all users.
-    
-    Algorithm:
-    - All users same choice: median score
-    - Mixed user choices: difference of score sums divided by number of users
-    """
-    logger.info("____ Choose bigram winners ____")
-    
-    initial_pairs = len(scored_bigram_data['bigram_pair'].unique())
-    logger.info(f"Initial number of unique bigram pairs: {initial_pairs}")
-    
-    # Clean data before processing
-    scored_data_clean = scored_bigram_data.dropna(subset=['bigram1', 'bigram2', 'chosen_bigram_winner'])
-    logger.info(f"Rows before cleaning: {len(scored_bigram_data)}")
-    logger.info(f"Rows after cleaning: {len(scored_data_clean)}")
-    
-    # Group by bigram_pair and determine winners
-    grouped = scored_data_clean.groupby(['bigram_pair'], group_keys=False)
-    bigram_winner_data = grouped.apply(determine_overall_winner, include_groups=False).reset_index()
-    
-    # Reorder columns
-    column_order = [
-        'bigram_pair', 'winner_bigram', 'loser_bigram', 'median_score', 'mad_score', 
-        'chosen_bigram_time_median', 'unchosen_bigram_time_median',
-        'chosen_bigram_correct_total', 'unchosen_bigram_correct_total',
-        'is_consistent', 'is_probable', 'is_improbable', 'text'
-    ]
-    bigram_winner_data = bigram_winner_data[column_order]
-    
-    logger.info(f"Total rows in scored_bigram_data: {len(scored_bigram_data)}")
-    logger.info(f"Total rows in bigram_winner_data (unique bigram_pairs): {len(bigram_winner_data)}")
-    
-    # Save results
-    output_file = os.path.join(output_tables_folder, 'bigram_winner_data.csv')
-    bigram_winner_data.to_csv(output_file, index=False)
-    logger.info(f"Bigram winner data saved to {output_file}")
-    
-    return bigram_winner_data
+    return result
 
 #######################################
 # Visualization Functions
@@ -1212,12 +1077,19 @@ def create_user_choice_visualizations(user_stats: pd.DataFrame, output_plots_fol
     # Set matplotlib style
     plt.style.use(viz_config.get('style', 'default'))
     
+    # Only visualize users with valid data
+    valid_stats = user_stats.dropna(subset=['consistent_choices']).copy()
+    
+    if len(valid_stats) == 0:
+        logger.warning("No valid user statistics for visualization")
+        return
+    
     # Sort users by consistent choices
-    user_order = user_stats.sort_values('consistent_choices', ascending=False)['user_id']
+    user_order = valid_stats.sort_values('consistent_choices', ascending=False)['user_id']
     
     # Create consistent vs inconsistent choices plot
     _create_choice_comparison_plot(
-        user_stats, user_order, 
+        valid_stats, user_order, 
         ['consistent_choices', 'inconsistent_choices'],
         ['Consistent Choices', 'Inconsistent Choices'],
         [colors.get('primary', '#1f77b4'), colors.get('secondary', '#ff7f0e')],
@@ -1228,7 +1100,7 @@ def create_user_choice_visualizations(user_stats: pd.DataFrame, output_plots_fol
     
     # Create probable vs improbable choices plot
     _create_choice_comparison_plot(
-        user_stats, user_order,
+        valid_stats, user_order,
         ['probable_choices', 'improbable_choices'],
         ['Probable Choices', 'Improbable Choices'],
         [colors.get('primary', '#1f77b4'), '#d62728'],
@@ -1243,7 +1115,8 @@ def _create_choice_comparison_plot(user_stats: pd.DataFrame, user_order: pd.Seri
                                   columns: List[str], labels: List[str], colors: List[str],
                                   title: str, filename: str, figsize: List[int], dpi: int) -> None:
     """Create a horizontal stacked bar plot comparing two choice types."""
-    data = user_stats.set_index('user_id').loc[user_order, columns]
+    # Only plot users with valid data
+    data = user_stats.set_index('user_id').loc[user_order, columns].fillna(0)
     users = data.index
     
     # Dynamic height based on number of users
@@ -1316,30 +1189,65 @@ def main():
     
     initial_users = len(raw_data['user_id'].unique())
     initial_trials = len(raw_data)
-    initial_bigram_pairs = len(raw_data.apply(lambda row: tuple(sorted([row['chosenBigram'], row['unchosenBigram']])), axis=1).unique())
     
-    logger.info(f"Initial data - Users: {initial_users}, Trials: {initial_trials}, Unique bigram pairs: {initial_bigram_pairs}")
+    logger.info(f"Initial data - Users: {initial_users}, Trials: {initial_trials}")
     
     # Step 2: Process data without filtering
     processed_data = process_experiment_data(raw_data, easy_choice_pairs, output_tables_folder, logger)
     
+    if not processed_data:
+        logger.error("Processing failed")
+        return 1
+    
     # Initial visualizations
     create_user_choice_visualizations(processed_data['user_stats'], output_plots_folder, config, "initial_", logger)
     
-    # Step 3: Filter users
-    filtered_users_data, valid_users = apply_all_user_filters(raw_data, processed_data['user_stats'], config, easy_choice_pairs, logger)
+    # Step 3: Filter users using processed data
+    filtered_users_data, valid_users = apply_all_user_filters(processed_data['bigram_data'], processed_data['user_stats'], config, easy_choice_pairs, logger)
     
     # Step 4: Filter rows
     filtered_data = filter_data_rows(filtered_users_data, config, logger)
     
-    # Step 5: Process filtered data
-    final_processed_data = process_experiment_data(filtered_data, easy_choice_pairs, output_tables_folder, logger)
+    # Step 5: Create final processed data from already-processed filtered data
+    logger.info("____ Creating final processed data from filtered data ____")
+    
+    if len(filtered_data) == 0:
+        logger.error("No data remaining after filtering")
+        return 1
+    
+    # Create subsets from filtered data (data is already processed)
+    consistent_choices = filtered_data[(filtered_data['is_consistent'] == True) & (filtered_data['group_size'] > 1)]
+    inconsistent_choices = filtered_data[(filtered_data['is_consistent'] == False) & (filtered_data['group_size'] > 1)]
+    probable_choices = filtered_data[filtered_data['is_probable'] == True]
+    improbable_choices = filtered_data[filtered_data['is_improbable'] == True]
+    
+    # Recalculate user statistics for filtered data
+    final_user_stats = calculate_user_statistics(filtered_data, easy_choice_pairs)
+    
+    # Create final processed data structure
+    final_processed_data = {
+        'bigram_data': filtered_data,
+        'consistent_choices': consistent_choices,
+        'inconsistent_choices': inconsistent_choices,
+        'probable_choices': probable_choices,
+        'improbable_choices': improbable_choices,
+        'user_stats': final_user_stats
+    }
+    
+    # Save final dataframes
+    _save_processed_dataframes({
+        'bigram_data': filtered_data,
+        'consistent_choices': consistent_choices,
+        'inconsistent_choices': inconsistent_choices,
+        'probable_choices': probable_choices,
+        'improbable_choices': improbable_choices,
+        'user_stats': final_user_stats
+    }, output_tables_folder, logger)
     
     final_trials = len(final_processed_data['bigram_data'])
-    final_pairs = len(final_processed_data['bigram_data']['bigram_pair'].unique())
     final_users = len(final_processed_data['bigram_data']['user_id'].unique())
     
-    logger.info(f"Final data after filtering - Users: {final_users}, Trials: {final_trials}, Unique bigram pairs: {final_pairs}")
+    logger.info(f"Final data after filtering - Users: {final_users}, Trials: {final_trials}")
     logger.info(f"Trials removed: {initial_trials - final_trials}")
     
     # Generate final visualizations
@@ -1348,8 +1256,16 @@ def main():
     # Step 6: Score choices by slider values
     scored_data = score_user_choices_by_slider_values(final_processed_data, output_tables_folder, logger)
     
+    if len(scored_data) == 0:
+        logger.error("Scoring failed")
+        return 1
+    
     # Step 7: Choose winning bigrams
     bigram_winner_data = choose_bigram_winners(scored_data, output_tables_folder, logger)
+    
+    if len(bigram_winner_data) == 0:
+        logger.error("Winner determination failed")
+        return 1
     
     logger.info("Bigram data processing completed successfully")
     return 0
