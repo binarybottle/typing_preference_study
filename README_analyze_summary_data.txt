@@ -1,17 +1,14 @@
-# README for analyze/analyze_data.py
-Bigram typing analysis pipeline documentation
+Typing Preference Study summary data analysis
 
 Author: Arno Klein (arnoklein.info)
-
 GitHub repository: binarybottle/bigram-typing-preference-study
-
 License: Apache v2.0 
 
 ## Overview
 
 This pipeline analyzes relationships between bigram typing times, user preferences, 
 frequency patterns, and keyboard ergonomics principles. 
-The analysis is implemented in `analyze_data.py` 
+The analysis is implemented in `analyze_speed_frequencies_choices.py` 
 and consists of four main components:
 
 1. Typing Time vs. User Preference Analysis
@@ -398,7 +395,7 @@ The pipeline generates the following files in the configured output directories:
 
 ```bash
 # Run complete analysis including ergonomics tests
-python analyze_data.py --config config.yaml
+python analyze_speed_frequencies_choices.py --config config.yaml
 
 # Configuration file should include:
 # analysis:

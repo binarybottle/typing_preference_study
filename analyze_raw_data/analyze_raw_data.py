@@ -1,17 +1,11 @@
 """
 Bigram Typing Analysis Script
 
-Analyzes relationships between bigram typing times, frequencies and user choices,
-combining both legacy and enhanced analysis approaches.
-
-Features:
-- Per-participant normalization and robust statistics
-- Recreation of original plots with enhanced statistical methods
-- Comprehensive logging
-- Configurable analysis parameters
+Analyzes raw Typing Preference Study data to determine relationships 
+between bigram typing times, errors, and frequencies.
 
 Usage:
-    python analyze_data.py [--config config.yaml]
+    python analyze_raw_data.py [--config config.yaml]
 """
 import numpy as np
 import pandas as pd
@@ -2157,8 +2151,8 @@ def main():
 
     # Get all CSV files in the directory
     csv_path = 'input/raws_nonProlific/*.csv' # 'input/raws_Prolific/*.csv'  
-    letter_freq_path = 'input/letter_frequencies_english.csv'
-    bigram_freq_path = 'input/letter_pair_frequencies_english.csv'
+    letter_freq_path = 'input/english-letter-counts-google-ngrams.csv'
+    bigram_freq_path = 'input/english-letter-pair-counts-google-ngrams.csv'
 
     # Load frequency data
     letter_frequencies, bigram_frequencies = load_frequency_data(letter_freq_path, bigram_freq_path)

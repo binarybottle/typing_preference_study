@@ -4,11 +4,11 @@
 # Data settings
 #-------------------------------------------------------------------------------
 data:
-  input_dir: "/Users/arno/Software/typing/typing_preference_study/analyze/"
-  filtered_data_file: "output/tables/processed_bigram_data.csv"
+  input_dir: "input/Prolific_studies"
+  filtered_data_file: "output/tables/processed_consistent_choices.csv"
 
 #-------------------------------------------------------------------------------
-# process_data.py settings
+# process_summary_data.py settings
 #-------------------------------------------------------------------------------
 process:
   # Filter users by inconsistent or improbable choice thresholds:
@@ -27,25 +27,25 @@ process:
   filter_users_by_percent_inconsistencies: False 
   filter_by_strong_inconsistencies: False # only works if filter_users_by_percent_inconsistencies is True
   # if filter_users_by_num_improbable_choices:
-  improbable_threshold: 0 # at least one improbable choice
+  improbable_threshold: np.inf # if 0, at least one improbable choice
   # if filter_users_by_percent_inconsistencies:
   inconsistent_threshold: 50  # Flag users with at least this percent of inconsistent choices
  
   # Filter users by improbable slider behavior (streaks or close-to-zeros):
-  n_repeat_sides: 20  # Flag users with consecutive same-side selections ((1/2)^10 ~= 0.0977%; (1/2)^20 = 1/1,048,576)
+  n_repeat_sides: 100  # Flag users with consecutive same-side selections ((1/2)^10 ~= 0.0977%; (1/2)^20 = 1/1,048,576)
   percent_close_to_zero: 90  # Flag users with this percent of selections close to zero
   distance_close_to_zero: 10  # Consider values within this distance of zero as "close to zero" (max 100)
 
   # Filter rows with *per user* single-presentation bigram pairs or inconsistent bigram pair choices away from zero:
   filter_single_presentations: False
-  filter_inconsistent_choices_away_from_zero: True
+  filter_inconsistent_choices_away_from_zero: False
   zero_threshold: 50  # Consider values within this distance of zero as "close to zero" (max 100)
 
   # Filter rows with bigrams containing any of the following letters:
   filter_letters: [] #['t', 'g', 'b']
 
 #-------------------------------------------------------------------------------
-# analyze_data.py settings
+# analyze_speed_frequencies_choices.py settings (main analysis)
 #-------------------------------------------------------------------------------
 analysis:
   # Participant-level settings
@@ -65,25 +65,6 @@ analysis:
   # Frequency analysis
   frequency_transform: "log10"  # Options: log10, log2, none
 
-  #- - - - - - - - - - - - - - - - - - - -
-  # Keyboard ergonomics analysis settings
-  #- - - - - - - - - - - - - - - - - - - -
-  run_ergonomics_tests: true          # Descriptive statistical approach
-  run_mixed_effects_ergonomics: true  # Mixed-effects statistical approach
-  alpha_level: 0.05  # Significance level
-  correction_method: 'fdr_bh'  # Multiple comparison correction: 'fdr_bh' or 'bonferroni'
-  n_bootstrap: 1000
-  
-  # Minimum sample sizes for reliable testing
-  min_comparisons_per_test: 10  # Minimum number of comparisons needed for a test
-  
-  # Effect size thresholds for practical significance
-  effect_size_threshold: 0.1  # Minimum effect size to consider meaningful
-  
-  # Reporting options
-  report_all_tests: true  # Include all tests in report, even non-significant ones
-  detailed_finger_analysis: true  # Include detailed per-finger analysis
-
 # Subdirectory names
   subdirs:
     typing_time_vs_preference: "typing_time_vs_preference"
@@ -91,13 +72,79 @@ analysis:
     preference_prediction: "preference_prediction"
     keyboard_ergonomics: "keyboard_ergonomics"
 
+#-------------------------------------------------------------------------------
+# analyze_preferred_positions_transitions.py settings (Bradley-Terry analysis)
+#-------------------------------------------------------------------------------
+position_transition_analysis:
+  # Enable/disable the new Bradley-Terry position and transition analysis
+  enabled: true
+  
+  # Statistical settings
+  alpha_level: 0.05                    # Significance level for statistical tests
+  correction_method: 'fdr_bh'          # Multiple comparison correction: 'fdr_bh' or 'bonferroni'
+  bootstrap_iterations: 1000           # For bootstrap validation
+  confidence_level: 0.95               # For confidence intervals
+  
+  # Bradley-Terry model settings
+  max_iterations: 1000                 # Maximum iterations for model fitting
+  convergence_tolerance: 1e-6          # Convergence criterion
+  regularization: 1e-10                # Small value to prevent numerical issues
+  
+  # Minimum sample size requirements
+  min_key_comparisons: 5               # Minimum comparisons needed for key analysis
+  min_transition_comparisons: 10       # Minimum comparisons needed for transition analysis
+  min_finger_comparisons: 3            # Minimum comparisons per finger for reliable ranking
+  
+  # Practical significance thresholds
+  key_effect_thresholds:
+    negligible: 0.05                   # < 5 percentage points difference
+    small: 0.15                        # 5-15 percentage points difference
+    medium: 0.30                       # 15-30 percentage points difference
+    # large: > 30 percentage points
+    
+  transition_effect_thresholds:
+    negligible: 0.03                   # < 3 percentage points difference
+    small: 0.10                        # 3-10 percentage points difference  
+    medium: 0.25                       # 10-25 percentage points difference
+    # large: > 25 percentage points
+  
+  # Confidence level assessment criteria
+  confidence_criteria:
+    definitive:
+      min_significant_pairs: 0.70      # At least 70% of pairs statistically significant
+      min_large_effects: 0.50          # At least 50% of pairs show large effects
+    probable:
+      min_significant_pairs: 0.50      # At least 50% of pairs statistically significant
+      min_large_effects: 0.30          # At least 30% of pairs show large effects
+    suggestive:
+      min_significant_pairs: 0.30      # At least 30% of pairs statistically significant
+      min_large_effects: 0.20          # At least 20% of pairs show large effects
+    # inconclusive: below suggestive thresholds
+  
+  # Key selection settings
+  analyze_keys: 'left_hand_15'         # Options: 'home_block_12', 'left_hand_15', 'all_letters'
+  # left_hand_15: QWERTASDFGZXCVB (recommended)
+  # home_block_12: QWERASDFZXCV (original)
+  # all_letters: All 26 letters (if you want full coverage)
+  
+  # Output settings
+  generate_visualizations: true        # Create plots and figures
+  generate_detailed_report: true       # Create comprehensive text report
+  save_raw_results: true              # Save complete JSON results
+  
+  # Visualization settings
+  figure_dpi: 300                     # Resolution for saved figures
+  figure_format: ['png', 'pdf']       # Output formats for figures
+  heatmap_colormap: 'RdYlGn'          # Colormap for preference heatmaps
+  ranking_plot_style: 'horizontal'    # 'horizontal' or 'vertical' bar plots
+
 # Logging settings
 logging:
   level: "INFO"
   file: "bigram_analysis.log"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-# Visualization settings
+# Visualization settings (for main analysis script)
 visualization:
   dpi: 300
   figsize: [10, 6]

@@ -1,4 +1,8 @@
-Keyboard Typing Analysis
+Typing Preference Study raw data analysis
+
+Author: Arno Klein (arnoklein.info)
+GitHub repository: binarybottle/bigram-typing-preference-study
+License: Apache v2.0 
 
 This script analyzes typing data to evaluate performance differences between keys and key-pairs
 on the left home block keys ('Q', 'W', 'E', 'R', 'A', 'S', 'D', 'F', 'Z', 'X', 'C', 'V') 

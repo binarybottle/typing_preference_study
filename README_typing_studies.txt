@@ -1,6 +1,5 @@
 This file contains information about specific studies run with this 
-software to prepare data for typing_preferences_to_comfort_scores 
-and optimize_layouts (for optimization of keyboard layouts).
+software (for optimization of keyboard layouts).
 
 Studies 1-5 were run exclusively on the Prolific recruitment platform.
 
