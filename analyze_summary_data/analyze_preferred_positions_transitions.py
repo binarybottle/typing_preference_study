@@ -82,6 +82,9 @@ class BradleyTerryModel:
         Args:
             pairwise_data: Dict mapping (item1, item2) -> {'wins_item1': int, 'total': int}
         """
+        #logger.info(f"Fitting Bradley-Terry model with {len(pairwise_data)} pairwise comparisons")
+        #logger.info(f"Sample pairwise data: {dict(list(pairwise_data.items())[:3])}")
+        
         # Build comparison matrix
         wins = np.zeros((self.n_items, self.n_items))
         totals = np.zeros((self.n_items, self.n_items))
@@ -89,27 +92,56 @@ class BradleyTerryModel:
         for (item1, item2), data in pairwise_data.items():
             if item1 in self.item_to_idx and item2 in self.item_to_idx:
                 i, j = self.item_to_idx[item1], self.item_to_idx[item2]
-                wins[i, j] = data['wins_item1']
-                wins[j, i] = data['total'] - data['wins_item1']
-                totals[i, j] = totals[j, i] = data['total']
+                
+        # Build comparison matrix
+        wins = np.zeros((self.n_items, self.n_items))
+        totals = np.zeros((self.n_items, self.n_items))
         
+        pair_count = 0
+        for (item1, item2), data in pairwise_data.items():
+            if item1 in self.item_to_idx and item2 in self.item_to_idx:
+                i, j = self.item_to_idx[item1], self.item_to_idx[item2]
+                
+                try:
+                    # Debug the first few data types
+                    #if pair_count < 3:
+                    #    logger.info(f"Processing pair {pair_count}: ({item1}, {item2}): data = {data}")
+                    #    logger.info(f"Data types: wins_item1={type(data['wins_item1'])}, total={type(data['total'])}")
+                    
+                    # Ensure data values are integers
+                    wins_item1 = int(data['wins_item1'])
+                    total = int(data['total'])
+                    
+                    wins[i, j] = wins_item1
+                    wins[j, i] = total - wins_item1
+                    totals[i, j] = totals[j, i] = total
+                    
+                    pair_count += 1
+                    
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid data for pair ({item1}, {item2}): {data}. Error: {e}")
+                    continue
+        
+        #logger.info("Comparison matrices built, starting ML fitting...")
         # Fit using maximum likelihood
         self.strengths = self._fit_ml(wins, totals)
         self.fitted = True
+        #logger.info("Bradley-Terry model fitting completed")
     
     def _fit_ml(self, wins: np.ndarray, totals: np.ndarray) -> np.ndarray:
         """Fit Bradley-Terry model using maximum likelihood estimation."""
         
         def negative_log_likelihood(strengths):
-            # Add regularization to prevent overflow
-            reg = self.config.get('regularization', 1e-10)
+            # Add regularization to prevent overflow - ensure it's numeric
+            reg = float(self.config.get('regularization', 1e-10))
+            
             strengths = np.clip(strengths, -10, 10)
             ll = 0
             for i in range(self.n_items):
                 for j in range(i + 1, self.n_items):
                     if totals[i, j] > 0:
                         p_ij = np.exp(strengths[i]) / (np.exp(strengths[i]) + np.exp(strengths[j]))
-                        p_ij = np.clip(p_ij, reg, 1 - reg)  # Avoid log(0)
+                        p_ij = np.clip(p_ij, reg, 1.0 - reg)  # Avoid log(0), ensure 1.0 is float
                         ll += wins[i, j] * np.log(p_ij) + wins[j, i] * np.log(1 - p_ij)
             return -ll
         
@@ -123,12 +155,13 @@ class BradleyTerryModel:
         constraint = {'type': 'eq', 'fun': constraint_func}
         
         # Optimize
+        max_iter = int(self.config.get('max_iterations', 1000))  # Ensure integer
         result = minimize(
             negative_log_likelihood,
             initial_strengths,
             method='SLSQP',
             constraints=constraint,
-            options={'maxiter': self.config.get('max_iterations', 1000)}
+            options={'maxiter': max_iter}
         )
         
         if not result.success:
@@ -177,7 +210,36 @@ class PreferenceAnalyzer:
         if config_path and os.path.exists(config_path):
             with open(config_path, 'r') as f:
                 config = yaml.safe_load(f)
-            return config.get('position_transition_analysis', {})
+            config = config.get('position_transition_analysis', {})
+            
+            # Ensure numeric values are properly typed
+            numeric_fields = [
+                'alpha_level', 'bootstrap_iterations', 'confidence_level', 
+                'max_iterations', 'convergence_tolerance', 'regularization',
+                'min_key_comparisons', 'min_transition_comparisons', 'figure_dpi'
+            ]
+            
+            for field in numeric_fields:
+                if field in config:
+                    try:
+                        if field in ['max_iterations', 'min_key_comparisons', 'min_transition_comparisons', 
+                                   'bootstrap_iterations', 'figure_dpi']:
+                            config[field] = int(config[field])
+                        else:
+                            config[field] = float(config[field])
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not convert config field '{field}' to number: {config[field]}")
+            
+            # Ensure threshold dictionaries have numeric values
+            for threshold_key in ['key_effect_thresholds', 'transition_effect_thresholds']:
+                if threshold_key in config and isinstance(config[threshold_key], dict):
+                    for k, v in config[threshold_key].items():
+                        try:
+                            config[threshold_key][k] = float(v)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert threshold '{k}' to float: {v}")
+            
+            return config
         else:
             # Default configuration if no file provided
             return {
@@ -407,7 +469,6 @@ class PreferenceAnalyzer:
                 'total_observations': sum(comp['total'] for comp in key_comparisons.values())
             }
         }
-    
     def _calculate_bt_confidence_intervals(self, bt_model: BradleyTerryModel, 
                                          key_comparisons: Dict, 
                                          confidence: float = None) -> Dict[str, Tuple[float, float]]:
@@ -478,25 +539,34 @@ class PreferenceAnalyzer:
         
         key_comparisons = defaultdict(lambda: {'wins_item1': 0, 'total': 0})
         
-        for _, row in data.iterrows():
-            chosen = row['chosen_bigram']
-            unchosen = row['unchosen_bigram']
-            
-            # Extract individual keys from bigrams
-            chosen_keys = [c for c in chosen if c in self.left_hand_keys]
-            unchosen_keys = [c for c in unchosen if c in self.left_hand_keys]
-            
-            # Count key-level preferences
-            for c_key in chosen_keys:
-                for u_key in unchosen_keys:
-                    if c_key != u_key:
-                        # Order keys consistently (alphabetically)
-                        key1, key2 = sorted([c_key, u_key])
-                        pair = (key1, key2)
-                        
-                        key_comparisons[pair]['total'] += 1
-                        if c_key == key1:  # key1 was chosen
-                            key_comparisons[pair]['wins_item1'] += 1
+        for idx, row in data.iterrows():
+            try:
+                chosen = str(row['chosen_bigram']).lower()
+                unchosen = str(row['unchosen_bigram']).lower()
+                
+                # Extract individual keys from bigrams
+                chosen_keys = [c for c in chosen if c in self.left_hand_keys]
+                unchosen_keys = [c for c in unchosen if c in self.left_hand_keys]
+                
+                # Count key-level preferences
+                for c_key in chosen_keys:
+                    for u_key in unchosen_keys:
+                        if c_key != u_key:
+                            # Order keys consistently (alphabetically)
+                            key1, key2 = sorted([c_key, u_key])
+                            pair = (key1, key2)
+                            
+                            key_comparisons[pair]['total'] += 1
+                            if c_key == key1:  # key1 was chosen
+                                key_comparisons[pair]['wins_item1'] += 1
+            except Exception as e:
+                logger.warning(f"Error processing row {idx}: {e}")
+                continue
+        
+        # Ensure all values are integers
+        for pair in key_comparisons:
+            key_comparisons[pair]['wins_item1'] = int(key_comparisons[pair]['wins_item1'])
+            key_comparisons[pair]['total'] = int(key_comparisons[pair]['total'])
         
         return dict(key_comparisons)
     
@@ -668,17 +738,20 @@ class PreferenceAnalyzer:
         """Determine the transition type between two key positions."""
         
         # Row pattern
-        if pos1.row == pos2.row:
+        row_separation = abs(pos1.row - pos2.row)
+        if row_separation == 0:
             row_pattern = 'same'
-        elif abs(pos1.row - pos2.row) == 1:
-            row_pattern = 'adjacent'
+        elif row_separation == 1:
+            row_pattern = 'reach'  # Adjacent rows (previously "adjacent")
         else:
-            row_pattern = 'hurdle'
+            row_pattern = 'hurdle'  # Skipping rows (previously "hurdle")
         
         # Finger separation
         finger_separation = abs(pos1.finger - pos2.finger)
         
         # Direction (for same row only)
+        # Note: "cross_row" in old system meant any transition between different rows
+        # Now we distinguish between "reach" (adjacent rows) and "hurdle" (skip rows)
         if pos1.row == pos2.row:
             if pos2.finger > pos1.finger:
                 direction = 'inner_roll'
@@ -687,13 +760,10 @@ class PreferenceAnalyzer:
             else:
                 direction = 'same_finger'
         else:
-            direction = 'cross_row'
+            direction = 'cross_row'  # Any cross-row transition
         
-        # Combine into transition type name
-        if finger_separation == 0:
-            return f"{row_pattern}_same_finger"
-        else:
-            return f"{row_pattern}_{finger_separation}finger_{direction}"
+        # Create new format: Δ#-finger [pattern] using actual delta symbol
+        return f"Δ{finger_separation}-finger {row_pattern}"
     
     def _extract_transition_comparisons(self, data: pd.DataFrame, 
                                       classifications: Dict[str, str]) -> Dict[Tuple[str, str], Dict[str, int]]:
@@ -1062,6 +1132,73 @@ class PreferenceAnalyzer:
         
         transition_df = pd.DataFrame(transition_rankings)
         transition_df.to_csv(os.path.join(output_folder, 'transition_preference_statistics.csv'), index=False)
+        
+        # Create specialized transition table with Δfinger, Δrow format
+        transition_table = self._create_transition_delta_table(results['transition_preferences'])
+        transition_table.to_csv(os.path.join(output_folder, 'transition_delta_analysis.csv'), index=False)
+    
+    def _create_transition_delta_table(self, transition_results: Dict[str, Any]) -> pd.DataFrame:
+        """Create specialized transition table with Δfinger, Δrow, in/out format."""
+        
+        rankings = transition_results['overall_rankings']
+        bt_cis = transition_results['bt_confidence_intervals']
+        transition_classifications = transition_results['transition_classifications']
+        
+        table_data = []
+        
+        # Create mapping from transition names back to position data
+        transition_details = {}
+        for bigram, transition_type in transition_classifications.items():
+            if len(bigram) >= 2:
+                char1, char2 = bigram[0], bigram[1]
+                if char1 in self.key_positions and char2 in self.key_positions:
+                    pos1 = self.key_positions[char1]
+                    pos2 = self.key_positions[char2]
+                    
+                    finger_delta = abs(pos1.finger - pos2.finger)
+                    row_delta = abs(pos1.row - pos2.row)
+                    
+                    # Determine in/out direction
+                    if pos1.row == pos2.row:  # Same row
+                        if pos2.finger > pos1.finger:
+                            in_out = 1  # Inward roll
+                        elif pos2.finger < pos1.finger:
+                            in_out = -1  # Outward roll
+                        else:
+                            in_out = 0  # Same finger
+                    else:
+                        in_out = 0  # Cross-row transitions don't have in/out
+                    
+                    transition_details[transition_type] = {
+                        'delta_finger': finger_delta,
+                        'delta_row': row_delta,
+                        'in_out': in_out
+                    }
+        
+        # Process each ranked transition
+        for rank, (transition_type, strength) in enumerate(rankings, 1):
+            details = transition_details.get(transition_type, {
+                'delta_finger': np.nan,
+                'delta_row': np.nan,
+                'in_out': np.nan
+            })
+            
+            ci_lower, ci_upper = bt_cis.get(transition_type, (np.nan, np.nan))
+            ci_str = f"[{ci_lower:.3f}, {ci_upper:.3f}]" if not np.isnan(ci_lower) else "[---, ---]"
+            
+            table_data.append({
+                'Rank': rank,
+                'Transition_Type': transition_type,
+                'Δfinger': details['delta_finger'],
+                'Δrow': details['delta_row'],
+                'in_out': details['in_out'],
+                'BT_Strength': strength,
+                'BT_CI_Lower': ci_lower,
+                'BT_CI_Upper': ci_upper,
+                'BT_CI_String': ci_str
+            })
+        
+        return pd.DataFrame(table_data)
 
     # =========================================================================
     # VISUALIZATION METHODS
@@ -1144,14 +1281,20 @@ class PreferenceAnalyzer:
         ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
         ax.grid(True, alpha=0.3)
         
-        # Add finger labels
-        finger_colors = {1: 'purple', 2: 'blue', 3: 'orange', 4: 'green'}
+        # Add finger labels - positioned further right and all black
+        x_max = max(strengths)
+        x_range = max(strengths) - min(strengths)
+        finger_x_pos = x_max + (x_range * 0.2)  # 20% beyond the maximum value
+        
         for i, (key, _) in enumerate(rankings):
             if key in self.key_positions:
                 finger = self.key_positions[key].finger
-                ax.text(max(strengths) * 1.1, i, f'F{finger}', 
-                       color=finger_colors.get(finger, 'black'), 
-                       fontweight='bold', va='center')
+                ax.text(finger_x_pos, i, f'F{finger}', 
+                       color='black', fontweight='bold', va='center', ha='left')
+        
+        # Extend x-axis to accommodate finger labels
+        ax.set_xlim(left=min(strengths) - (x_range * 0.1), 
+                    right=finger_x_pos + (x_range * 0.1))
         
         plt.tight_layout()
         plt.savefig(os.path.join(output_folder, 'key_strengths_with_cis.png'), 
@@ -1159,7 +1302,7 @@ class PreferenceAnalyzer:
         plt.close()
     
     def _plot_transition_strengths_with_cis(self, transition_results: Dict[str, Any], output_folder: str) -> None:
-        """Create forest plot showing transition strengths with confidence intervals."""
+        """Create forest plots showing transition strengths with confidence intervals."""
         
         rankings = transition_results['overall_rankings']
         bt_cis = transition_results['bt_confidence_intervals']
@@ -1167,12 +1310,34 @@ class PreferenceAnalyzer:
         if not rankings:
             return
         
-        # Prepare data (show top 15 for readability)
-        top_rankings = rankings[:15]
-        transition_types = [t.replace('_', ' ').title() for t, _ in top_rankings]
-        strengths = [float(strength) for _, strength in top_rankings]  # Ensure numeric
-        ci_lowers = [float(bt_cis.get(t, (np.nan, np.nan))[0]) for t, _ in top_rankings]
-        ci_uppers = [float(bt_cis.get(t, (np.nan, np.nan))[1]) for t, _ in top_rankings]
+        # Create top 15 plot
+        self._create_transition_forest_plot(rankings[:15], bt_cis, output_folder, 
+                                          'transition_strengths_with_cis_top15.png',
+                                          'Top 15 Transition Type Preferences with Confidence Intervals')
+        
+        # Create all transitions plot
+        self._create_transition_forest_plot(rankings, bt_cis, output_folder,
+                                          'transition_strengths_with_cis_all.png', 
+                                          'All Transition Type Preferences with Confidence Intervals')
+    
+    def _create_transition_forest_plot(self, rankings: List[Tuple[str, float]], 
+                                     bt_cis: Dict[str, Tuple[float, float]], 
+                                     output_folder: str, filename: str, title: str) -> None:
+        """Create a single transition forest plot."""
+        
+        if not rankings:
+            return
+        
+        # Prepare data with proper delta formatting
+        transition_types = []
+        for t, _ in rankings:
+            # Convert to proper format with delta symbol
+            formatted_name = t.replace('Δ', 'Δ')  # Ensure proper delta symbol
+            transition_types.append(formatted_name)
+        
+        strengths = [float(strength) for _, strength in rankings]
+        ci_lowers = [float(bt_cis.get(t, (np.nan, np.nan))[0]) for t, _ in rankings]
+        ci_uppers = [float(bt_cis.get(t, (np.nan, np.nan))[1]) for t, _ in rankings]
         
         # Calculate error bars, handling NaN values
         lower_errs = []
@@ -1185,8 +1350,9 @@ class PreferenceAnalyzer:
                 lower_errs.append(abs(strength - ci_lower))
                 upper_errs.append(abs(ci_upper - strength))
         
-        # Create figure
-        fig, ax = plt.subplots(figsize=(12, 10))
+        # Determine figure size based on number of items
+        height = max(8, len(transition_types) * 0.4)
+        fig, ax = plt.subplots(figsize=(14, height))
         
         # Create horizontal error bar plot
         y_pos = np.arange(len(transition_types))
@@ -1197,18 +1363,18 @@ class PreferenceAnalyzer:
         
         # Color the points
         for i, (strength, color) in enumerate(zip(strengths, colors)):
-            ax.scatter(strength, i, c=color, s=80, alpha=0.7, zorder=5)
+            ax.scatter(strength, i, c=color, s=60, alpha=0.7, zorder=5)
         
         # Customize
         ax.set_yticks(y_pos)
-        ax.set_yticklabels(transition_types, fontsize=10)
+        ax.set_yticklabels(transition_types, fontsize=9)
         ax.set_xlabel('Bradley-Terry Strength (95% CI)')
-        ax.set_title('top 15 transition type preferences with confidence intervals')
+        ax.set_title(title.lower())
         ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
         ax.grid(True, alpha=0.3)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'transition_strengths_with_cis.png'), 
+        plt.savefig(os.path.join(output_folder, filename), 
                    dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
         plt.close()
     
@@ -1387,7 +1553,12 @@ class PreferenceAnalyzer:
         
         # Prepare data (top 15 for readability)
         top_rankings = rankings[:15]
-        transition_types = [t.replace('_', ' ').title() for t, _ in top_rankings]
+        # Format transition names with proper delta symbols
+        transition_types = []
+        for t, _ in top_rankings:
+            formatted_name = t.replace('Δ', 'Δ')  # Ensure proper delta symbol
+            transition_types.append(formatted_name)
+        
         strengths = [s for _, s in top_rankings]
         
         # Create figure
@@ -1720,7 +1891,8 @@ def main():
             data_config = full_config.get('data', {})
             input_dir = data_config.get('input_dir', '')
             filtered_data_file = data_config.get('filtered_data_file', None)
-            
+            print("Loading filtered data file: ", os.path.join(input_dir, filtered_data_file))
+
             if filtered_data_file and input_dir:
                 # Join input_dir with filtered_data_file
                 default_data_file = os.path.join(input_dir, filtered_data_file)

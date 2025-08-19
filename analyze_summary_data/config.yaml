@@ -1,11 +1,13 @@
-# Bigram Typing Processing and Analysis Configuration
+# Bigram Typing Preference Study processing and analysis configuration
 
 #-------------------------------------------------------------------------------
-# Data settings
+# Input/output settings
 #-------------------------------------------------------------------------------
 data:
-  input_dir: "input/summary_data/nonProlific_studies"
-  filtered_data_file: "output/tables/processed_consistent_choices.csv"
+  # input / output directory:
+  input_dir: "input/summary_data/Prolific_studies"
+  # process_data.py output / analyze_...py input:
+  filtered_data_file: "output/tables/processed_consistent_choices.csv" 
 
 #-------------------------------------------------------------------------------
 # process_summary_data.py settings
@@ -41,10 +43,10 @@ process:
   zero_threshold: 50  # Consider absolute values greater than this as "away from zero" (max 100)
 
   # Filter rows with bigrams containing any of the following letters:
-  filter_letters: [] #['t', 'g', 'b']
+  filter_letters: ['t', 'g', 'b']
 
 #-------------------------------------------------------------------------------
-# analyze_frequency_speed_preference.py settings (main analysis)
+# analyze_frequency_speed_preference.py settings
 #-------------------------------------------------------------------------------
 analysis:
   # Participant-level settings
@@ -86,8 +88,8 @@ position_transition_analysis:
   
   # Bradley-Terry model settings
   max_iterations: 1000                 # Maximum iterations for model fitting
-  convergence_tolerance: 1e-6          # Convergence criterion (not currently used)
-  regularization: 1e-10                # Small value to prevent numerical issues
+  convergence_tolerance: 0.000001      # Convergence criterion (not currently used)
+  regularization: 0.0000000001         # Small value to prevent numerical issues (1e-10)
   
   # Minimum sample size requirements
   min_key_comparisons: 5               # Minimum comparisons needed for key analysis
@@ -137,13 +139,17 @@ position_transition_analysis:
   heatmap_colormap: 'RdYlGn'          # Colormap for preference heatmaps
   ranking_plot_style: 'horizontal'    # 'horizontal' or 'vertical' bar plots
 
+#-------------------------------------------------------------------------------
 # Logging settings
+#-------------------------------------------------------------------------------
 logging:
   level: "INFO"
   file: "input/logs/bigram_analysis.log"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-# Visualization settings (for main analysis script)
+#-------------------------------------------------------------------------------
+# Visualization settings
+#-------------------------------------------------------------------------------
 visualization:
   dpi: 300
   figsize: [10, 6]
