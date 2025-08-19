@@ -5,7 +5,7 @@
 #-------------------------------------------------------------------------------
 data:
   # input / output directory:
-  input_dir: "input/summary_data/Prolific_studies"
+  input_dir: "input/summary_data/nonProlific_studies"
   # process_data.py output / analyze_...py input:
   filtered_data_file: "output/tables/processed_consistent_choices.csv" 
 
@@ -43,7 +43,7 @@ process:
   zero_threshold: 50  # Consider absolute values greater than this as "away from zero" (max 100)
 
   # Filter rows with bigrams containing any of the following letters:
-  filter_letters: ['t', 'g', 'b']
+  filter_letters: [] #['t', 'g', 'b']
 
 #-------------------------------------------------------------------------------
 # analyze_frequency_speed_preference.py settings
