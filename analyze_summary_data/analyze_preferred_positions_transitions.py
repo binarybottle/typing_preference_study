@@ -146,12 +146,15 @@ class FocusedHypothesisAnalyzer:
         
         # Define the core hypotheses (excluding column 5 by default)
         self.hypotheses = {
-            # Column separation effects (NOT finger separation) - 5 tests
+            # Column separation effects (NOT finger separation) - 3 tests
+            #'same_row_column_sep_1v2or3': {'description': 'Same-row: 1 vs >1 columns apart', 'category': 'same_row_column_separation_binary', 'values': ['1', '>1']},
             'same_row_column_sep_1v2': {'description': 'Same-row: 1 vs 2 columns apart', 'category': 'same_row_column_separation', 'values': ['1', '2']},
-            'same_row_column_sep_1v3': {'description': 'Same-row: 1 vs 3 columns apart', 'category': 'same_row_column_separation', 'values': ['1', '3']},
+            'same_row_column_sep_2v3': {'description': 'Same-row: 2 vs 3 columns apart', 'category': 'same_row_column_separation', 'values': ['2', '3']},
+            #'cross_row_1row_sep_column_sep_1v2or3': {'description': 'Cross-row (1 row): 1 vs >1 columns apart', 'category': 'cross_row_1row_column_separation_binary', 'values': ['1', '>1']},
             'cross_row_column_sep_1v2': {'description': 'Cross-row: 1 vs 2 columns apart', 'category': 'cross_row_column_separation', 'values': ['1', '2']},
-            'cross_row_column_sep_1v3': {'description': 'Cross-row: 1 vs 3 columns apart', 'category': 'cross_row_column_separation', 'values': ['1', '3']},
-            'cross_row_same_vs_diff_column': {'description': 'Cross-row: same vs different column', 'category': 'cross_row_same_column', 'values': ['True', 'False']},
+            'cross_row_column_sep_2v3': {'description': 'Cross-row: 2 vs 3 columns apart', 'category': 'cross_row_column_separation', 'values': ['2', '3']},
+            'cross_row_1row_sep_same_vs_diff_col': {'description': 'Cross-row (1 row): same vs different column', 'category': 'cross_row_1row_same_vs_diff', 'values': ['same', 'different']},
+            'cross_row_2row_sep_same_vs_diff_col': {'description': 'Cross-row (2 rows): same vs different column', 'category': 'cross_row_2row_same_vs_diff', 'values': ['same', 'different']},
             
             # Movement effects - 1 test  
             'home_vs_other_keys': {'description': 'Home keys: home vs other keys', 'category': 'involves_home_keys', 'values': ['home', 'other']},
@@ -195,7 +198,11 @@ class FocusedHypothesisAnalyzer:
                 # Return minimal classification excluding this bigram from most tests
                 return {
                     'same_row_column_separation': None,
+                    'same_row_column_separation_binary': None,
                     'cross_row_column_separation': None, 
+                    'cross_row_1row_column_separation_binary': None,
+                    'cross_row_1row_same_vs_diff': None,
+                    'cross_row_2row_same_vs_diff': None,
                     'cross_row_same_column': None,
                     'home_key_count': None,
                     'row_separation': None,
@@ -294,10 +301,13 @@ class FocusedHypothesisAnalyzer:
                 column_row_prefs[f'column{column}_row_pref'] = None
         
         return {
-            # Column separation hypotheses (CORRECTED from finger separation)
+            # Column separation hypotheses
+            'same_row_column_separation_binary': ('1' if column_separation == 1 else '>1') if (row_separation == 0 and column_separation > 0) else None,
+            'cross_row_1row_column_separation_binary': ('1' if column_separation == 1 else '>1') if (row_separation == 1 and column_separation > 0) else None,
             'same_row_column_separation': str(column_separation) if row_separation == 0 else None,
             'cross_row_column_separation': str(column_separation) if row_separation > 0 else None,
-            'cross_row_same_column': str(column_separation == 0) if row_separation > 0 else None,
+            'cross_row_1row_same_vs_diff': 'same' if (row_separation == 1 and column_separation == 0) else ('different' if (row_separation == 1 and column_separation > 0) else None),
+            'cross_row_2row_same_vs_diff': 'same' if (row_separation == 2 and column_separation == 0) else ('different' if (row_separation == 2 and column_separation > 0) else None),
             
             # Movement hypothesis
             'home_key_count': str(home_key_count),
@@ -730,7 +740,7 @@ class PreferenceAnalyzer:
         results = {}
 
         # PART I: FOCUSED HYPOTHESIS TESTING (Confirmatory Analysis)
-        logger.info("=== PART I: FOCUSED HYPOTHESIS TESTING (20 hypotheses) ===")
+        logger.info("=== PART I: FOCUSED HYPOTHESIS TESTING ===")
         focused_results = self.focused_analyzer.analyze_hypotheses(self.data)
         results['focused_hypotheses'] = focused_results
         
@@ -1679,8 +1689,8 @@ class PreferenceAnalyzer:
         if not rankings:
             return
         
-        # Prepare data (top 15 for readability)
-        top_rankings = rankings[:15]
+        # Prepare data
+        top_rankings = rankings
         transition_types = [t.replace('Δ', 'Δ') for t, _ in top_rankings]
         strengths = [s for _, s in top_rankings]
         
@@ -1701,7 +1711,7 @@ class PreferenceAnalyzer:
         ax.set_yticks(y_pos)
         ax.set_yticklabels(transition_types, fontsize=10)
         ax.set_xlabel('Bradley-Terry Strength')
-        ax.set_title('top 15 bigram transition type preferences')
+        ax.set_title('top bigram transition type preferences')
         ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
         
         plt.tight_layout()
@@ -1717,11 +1727,6 @@ class PreferenceAnalyzer:
         
         if not rankings:
             return
-        
-        # Create top 15 plot
-        self._create_transition_forest_plot(rankings[:15], bt_cis, output_folder, 
-                                          'transition_strengths_with_cis_top15.png',
-                                          'Top 15 Transition Type Preferences with Confidence Intervals')
         
         # Create all transitions plot
         self._create_transition_forest_plot(rankings, bt_cis, output_folder,
@@ -1801,7 +1806,8 @@ class PreferenceAnalyzer:
                 ci_lower, ci_upper = key_cis.get(key, (strength, strength))
                 key_ci_widths.append(ci_upper - ci_lower)
             
-            ax1.boxplot([key_strengths], labels=['Keys'])
+            # FIX: Use tick_labels instead of labels
+            ax1.boxplot([key_strengths], tick_labels=['Keys'])
             ax1.set_ylabel('Bradley-Terry Strength')
             ax1.set_title('distribution of key strengths')
             ax1.grid(True, alpha=0.3)
@@ -1817,7 +1823,8 @@ class PreferenceAnalyzer:
             transition_strengths = [strength for _, strength in transition_rankings]
             transition_cis = results['transition_preferences']['bt_confidence_intervals']
             
-            ax2.boxplot([transition_strengths], labels=['Transitions'])
+            # FIX: Use tick_labels instead of labels
+            ax2.boxplot([transition_strengths], tick_labels=['Transitions'])
             ax2.set_ylabel('Bradley-Terry Strength')
             ax2.set_title('distribution of transition strengths')
             ax2.grid(True, alpha=0.3)
@@ -1834,7 +1841,7 @@ class PreferenceAnalyzer:
             ax3.set_ylabel('Frequency')
             ax3.set_title('key preference confidence interval widths')
             ax3.axvline(np.mean(key_ci_widths), color='red', linestyle='--', 
-                       label=f'Mean: {np.mean(key_ci_widths):.3f}')
+                    label=f'Mean: {np.mean(key_ci_widths):.3f}')
             ax3.legend()
             ax3.grid(True, alpha=0.3)
         
@@ -1844,11 +1851,11 @@ class PreferenceAnalyzer:
         
         # Count significant results
         key_significant = sum(1 for stats in key_stats.values() 
-                             if stats.get('significant_corrected', False))
+                            if stats.get('significant_corrected', False))
         key_total = len(key_stats)
         
         transition_significant = sum(1 for stats in transition_stats.values() 
-                                   if stats.get('significant_corrected', False))
+                                if stats.get('significant_corrected', False))
         transition_total = len(transition_stats)
         
         categories = ['Key\nComparisons', 'Transition\nComparisons']
@@ -1877,9 +1884,9 @@ class PreferenceAnalyzer:
         
         plt.tight_layout()
         plt.savefig(os.path.join(output_folder, 'statistical_comparisons.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
+                dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
         plt.close()
-    
+        
     def _plot_effect_size_distributions(self, results: Dict[str, Any], output_folder: str) -> None:
         """Plot distributions of effect sizes."""
         
@@ -2133,59 +2140,152 @@ class PreferenceAnalyzer:
             f"Significant results (after FDR correction): {len(summary['significant_results'])}",
             f"Large practical effects (>30% preference): {len(summary['large_effects'])}",
             "",
-            "SIGNIFICANT RESULTS (after global FDR correction):",
-            "=" * 55
+            "DETAILED RESULTS (with directions and significance):",
+            "=" * 60
         ]
         
-        if summary['significant_results']:
-            for result in summary['significant_results']:
-                val1, val2 = result['values_compared']
-                winner = val1 if result['proportion'] > 0.5 else val2
+        # Helper function to get descriptive comparison values
+        def get_descriptive_comparison(hyp_name, val1, val2):
+            """Convert generic values to descriptive ones."""
+            if 'column1_upper_vs_lower' in hyp_name:
+                return ('Q (upper)', 'Z (lower)') if val1 == '1' else ('Z (lower)', 'Q (upper)')
+            elif 'column2_upper_vs_lower' in hyp_name:
+                return ('W (upper)', 'X (lower)') if val1 == '1' else ('X (lower)', 'W (upper)')
+            elif 'column3_upper_vs_lower' in hyp_name:
+                return ('E (upper)', 'C (lower)') if val1 == '1' else ('C (lower)', 'E (upper)')
+            elif 'column4_upper_vs_lower' in hyp_name:
+                return ('R (upper)', 'V (lower)') if val1 == '1' else ('V (lower)', 'R (upper)')
+            elif 'column5_upper_vs_lower' in hyp_name:
+                return ('T (upper)', 'B (lower)') if val1 == '1' else ('B (lower)', 'T (upper)')
+            elif 'finger_f4_vs_f3' in hyp_name:
+                return ('F4 (index)', 'F3 (middle)') if val1 == '4' else ('F3 (middle)', 'F4 (index)')
+            elif 'finger_f3_vs_f2' in hyp_name:
+                return ('F3 (middle)', 'F2 (ring)') if val1 == '3' else ('F2 (ring)', 'F3 (middle)')
+            elif 'finger_f2_vs_f1' in hyp_name:
+                return ('F2 (ring)', 'F1 (pinky)') if val1 == '2' else ('F1 (pinky)', 'F2 (ring)')
+            elif 'finger_f1_vs_other' in hyp_name:
+                return ('F1 (pinky)', 'other fingers') if val1 == '1' else ('other fingers', 'F1 (pinky)')
+            elif 'same_row_direction' in hyp_name:
+                return ('inner roll', 'outer roll') if val1 == 'inner_roll' else ('outer roll', 'inner roll')
+            elif 'cross_row_direction' in hyp_name:
+                return ('inner roll', 'outer roll') if val1 == 'inner_roll_cross' else ('outer roll', 'inner roll')
+            elif 'cross_row_1row_same_vs_diff' in hyp_name:
+                return ('same column (1 row)', 'different column (1 row)') if val1 == 'same' else ('different column (1 row)', 'same column (1 row)')
+            elif 'cross_row_2row_same_vs_diff' in hyp_name:
+                return ('same column (2 rows)', 'different column (2 rows)') if val1 == 'same' else ('different column (2 rows)', 'same column (2 rows)')
+            elif 'home_vs_other' in hyp_name:
+                return ('home keys', 'other keys') if val1 == 'home' else ('other keys', 'home keys')
+            elif 'column5_vs_other' in hyp_name:
+                return ('column 5', 'other columns') if val1 == 'column5' else ('other columns', 'column 5')
+            elif 'involves_finger_1' in hyp_name:
+                return ('with F1', 'without F1') if val1 == '1' else ('without F1', 'with F1')
+            elif 'column_separation' in hyp_name:
+                return (f'{val1} columns apart', f'{val2} columns apart')
+            elif 'row_separation' in hyp_name:
+                return (f'{val1} rows apart', f'{val2} rows apart')
+            elif 'home_key_count' in hyp_name:
+                return (f'{val1} home keys', f'{val2} home keys')
+            else:
+                return (val1, val2)
+        
+        # Process each hypothesis and show detailed results
+        for hyp_name, result in focused_results['hypothesis_results'].items():
+            # FIX: Safely get description with fallback
+            description = result.get('description', hyp_name.replace('_', ' ').title())
+            
+            if 'statistics' not in result:
+                # Failed test
+                report_lines.append(f"❌ {hyp_name}: {description}")
+                report_lines.append(f"   ERROR: {result.get('error', 'Unknown error')}")
+                report_lines.append("")
+                continue
+            
+            stats = result['statistics']
+            val1, val2 = stats.get('values_compared', ('unknown', 'unknown'))
+            
+            # Get descriptive comparison
+            desc_val1, desc_val2 = get_descriptive_comparison(hyp_name, val1, val2)
+            
+            # Determine winner and format
+            proportion = stats.get('proportion_val1_wins', 0.5)
+            if proportion > 0.5:
+                winner = desc_val1
+                loser = desc_val2
+                preference_pct = proportion * 100
+            else:
+                winner = desc_val2
+                loser = desc_val1
+                preference_pct = (1 - proportion) * 100
+            
+            # Significance indicators
+            is_significant = stats.get('significant_corrected', False)
+            sig_indicator = "✓" if is_significant else "✗"
+            
+            # Effect size classification
+            effect_size = stats.get('effect_size', 0)
+            practical_sig = stats.get('practical_significance', 'negligible')
+            
+            # P-value info
+            p_value = stats.get('p_value_corrected', stats.get('p_value', np.nan))
+            p_value_str = f"p={p_value:.4f}" if not np.isnan(p_value) else "p=N/A"
+            
+            # Main result line
+            report_lines.append(f"{sig_indicator} {hyp_name}: {description}")
+            
+            # Direction and effect line
+            if preference_pct != 50.0:
                 report_lines.append(
-                    f"✓ {result['description']}: {winner} preferred "
-                    f"(effect: {result['effect_size']:.3f}, p: {result['p_value_corrected']:.4f})"
+                    f"   → {winner} preferred over {loser} "
+                    f"({preference_pct:.1f}% vs {100-preference_pct:.1f}%)"
                 )
-        else:
-            report_lines.append("No statistically significant results after correction.")
-        
-        report_lines.extend([
-            "",
-            "LARGE PRACTICAL EFFECTS (>30% preference difference):",
-            "=" * 60
-        ])
-        
-        if summary['large_effects']:
-            for effect in summary['large_effects']:
-                val1, val2 = effect['values_compared']
-                winner = val1 if effect['proportion'] > 0.5 else val2
-                report_lines.append(
-                    f"• {effect['description']}: {winner} preferred "
-                    f"(effect: {effect['effect_size']:.3f}, proportion: {effect['proportion']:.3f})"
-                )
-        else:
-            report_lines.append("No large practical effects found.")
-        
-        report_lines.extend([
-            "",
-            "HYPOTHESIS OVERVIEW:",
-            "=" * 25
-        ])
-        
-        for hyp_name, overview in summary['hypothesis_overview'].items():
-            sig_indicator = "✓" if overview['significant'] else "✗"
+            else:
+                report_lines.append("   → No clear preference (50/50)")
+            
+            # Statistical details line
             report_lines.append(
-                f"{sig_indicator} {hyp_name}: {overview['description']}"
+                f"   → Effect: {effect_size:.3f} ({practical_sig}), "
+                f"{p_value_str}, N={stats.get('n_comparisons', 0)}"
             )
-            report_lines.append(
-                f"   Effect: {overview['effect_size']:.3f} ({overview['practical_significance']}), "
-                f"N: {overview['n_comparisons']}"
-            )
+            
             report_lines.append("")
+        
+        # Summary section
+        report_lines.extend([
+            "",
+            "SUMMARY:",
+            "=" * 15,
+            f"Significant after FDR correction: {len(summary['significant_results'])}/{focused_results['total_hypotheses']}",
+            f"Large practical effects (>30%): {len(summary['large_effects'])}",
+            ""
+        ])
+        
+        # Quick wins summary
+        if summary['significant_results']:
+            report_lines.extend([
+                "Key Findings:",
+                "-" * 15
+            ])
+            for i, result in enumerate(summary['significant_results'][:5], 1):
+                val1, val2 = result['values_compared']
+                desc_val1, desc_val2 = get_descriptive_comparison(result['hypothesis'], val1, val2)
+                
+                proportion = result['proportion']
+                if proportion > 0.5:
+                    winner = desc_val1
+                else:
+                    winner = desc_val2
+                
+                report_lines.append(
+                    f"{i}. {result['description']}: {winner} preferred "
+                    f"(effect={result['effect_size']:.3f})"
+                )
+        else:
+            report_lines.append("No statistically significant findings after FDR correction.")
         
         # Save report
         with open(os.path.join(output_folder, 'focused_hypothesis_report.txt'), 'w') as f:
             f.write('\n'.join(report_lines))
-    
+                            
     def _save_combined_report(self, results: Dict[str, Any], output_folder: str) -> None:
         """Save comprehensive combined report."""
         
@@ -2297,7 +2397,6 @@ class PreferenceAnalyzer:
             "  • key_preference_heatmap.png - Spatial preference visualization",
             "  • key_strengths_with_cis.png - Forest plot with confidence intervals",
             "  • transition_rankings.png - Top transition preferences",
-            "  • transition_strengths_with_cis_top15.png - Top 15 transition forest plot",
             "  • transition_strengths_with_cis_all.png - All transitions forest plot",
             "  • statistical_comparisons.png - Statistical summary comparisons",
             "  • effect_size_distributions.png - Distribution of effect sizes",
