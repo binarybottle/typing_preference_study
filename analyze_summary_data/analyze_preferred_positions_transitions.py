@@ -1,32 +1,40 @@
 """
-Comprehensive Keyboard Position and Transition Preference Analysis
+Combined Keyboard Preference Analysis
 
-This standalone script analyzes typing preferences using Bradley-Terry models to rank:
-1. Left key preferences (QWERTASDFGZXCVB) - replaces individual finger/column tests
-2. Bigram transition type preferences - replaces individual spatial/directional tests
+This script provides comprehensive keyboard preference analysis using Bradley-Terry models:
+
+1. EXPLORATORY ANALYSIS:
+   - Individual key preferences with confidence intervals
+   - Transition type preferences and categorization
+   - Comprehensive visualizations and statistical tables
+   - Bootstrap validation and effect size analysis
+
+2. FOCUSED HYPOTHESIS TESTING:
+   - 20 pre-specified ergonomic hypotheses
+   - Finger separation, movement, direction, and finger preference effects
+   - Global multiple testing correction (FDR)
+   - Column-specific row preferences
 
 Features:
-- Bradley-Terry models for robust ranking from pairwise comparisons
-- Multi-level statistical significance testing with effect sizes
-- Practical significance thresholds for interpretable results
-- Hierarchical confidence assessment (definitive/probable/suggestive/inconclusive)
-- Bootstrap validation and sensitivity analysis
-- Comprehensive reporting with actionable insights
-- Detailed statistical tables with confidence intervals
-- Clear visualization of strength differences
+- Dual analysis approach (confirmatory + exploratory)
+- Rigorous statistical testing with proper corrections
+- Comprehensive reporting and visualization
+- Cross-validation between approaches
 
 Usage:
-    python analyze_preferred_positions_transitions.py --data data/filtered_data.csv --output results/ --config config.yaml
+    python combined_analyzer.py --data data/filtered_data.csv --output results/ --config config.yaml
 """
 
 import os
 import argparse
 import logging
 import yaml
+import copy
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional, Set
 from dataclasses import dataclass
 from itertools import combinations
+from collections import defaultdict, Counter
 
 import numpy as np
 import pandas as pd
@@ -35,7 +43,6 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import seaborn as sns
 import json
-from collections import defaultdict, Counter
 
 # Set up logging
 logging.basicConfig(
@@ -48,24 +55,12 @@ logger = logging.getLogger(__name__)
 class KeyPosition:
     """Represents a key's position on the keyboard."""
     key: str
-    row: int  # 1=upper, 2=middle/home, 3=lower
-    column: int  # 1=leftmost, 5=middle
-    finger: int  # 1=pinky, 4=index
-
-@dataclass
-class TransitionType:
-    """Represents a type of bigram transition."""
-    name: str
-    row_pattern: str  # 'same', 'adjacent', 'hurdle'
-    finger_separation: int  # 1, 2, or 3 finger distance
-    direction: str  # 'inner_roll', 'outer_roll', 'neutral'
+    row: int      # 1=upper, 2=home, 3=lower
+    column: int   # 1=leftmost, 5=index center
+    finger: int   # 1=pinky, 2=ring, 3=middle, 4=index
 
 class BradleyTerryModel:
-    """
-    Bradley-Terry model for ranking items from pairwise comparison data.
-    
-    Models P(item_i beats item_j) = exp(strength_i) / (exp(strength_i) + exp(strength_j))
-    """
+    """Bradley-Terry model for ranking items from pairwise comparison data."""
     
     def __init__(self, items: List[str], config: Dict[str, Any]):
         self.items = list(items)
@@ -76,24 +71,7 @@ class BradleyTerryModel:
         self.config = config
     
     def fit(self, pairwise_data: Dict[Tuple[str, str], Dict[str, int]]) -> None:
-        """
-        Fit Bradley-Terry model to pairwise comparison data.
-        
-        Args:
-            pairwise_data: Dict mapping (item1, item2) -> {'wins_item1': int, 'total': int}
-        """
-        #logger.info(f"Fitting Bradley-Terry model with {len(pairwise_data)} pairwise comparisons")
-        #logger.info(f"Sample pairwise data: {dict(list(pairwise_data.items())[:3])}")
-        
-        # Build comparison matrix
-        wins = np.zeros((self.n_items, self.n_items))
-        totals = np.zeros((self.n_items, self.n_items))
-        
-        for (item1, item2), data in pairwise_data.items():
-            if item1 in self.item_to_idx and item2 in self.item_to_idx:
-                i, j = self.item_to_idx[item1], self.item_to_idx[item2]
-                
-        # Build comparison matrix
+        """Fit Bradley-Terry model to pairwise comparison data."""
         wins = np.zeros((self.n_items, self.n_items))
         totals = np.zeros((self.n_items, self.n_items))
         
@@ -103,59 +81,40 @@ class BradleyTerryModel:
                 i, j = self.item_to_idx[item1], self.item_to_idx[item2]
                 
                 try:
-                    # Debug the first few data types
-                    #if pair_count < 3:
-                    #    logger.info(f"Processing pair {pair_count}: ({item1}, {item2}): data = {data}")
-                    #    logger.info(f"Data types: wins_item1={type(data['wins_item1'])}, total={type(data['total'])}")
-                    
-                    # Ensure data values are integers
                     wins_item1 = int(data['wins_item1'])
                     total = int(data['total'])
                     
                     wins[i, j] = wins_item1
                     wins[j, i] = total - wins_item1
                     totals[i, j] = totals[j, i] = total
-                    
                     pair_count += 1
                     
                 except (ValueError, TypeError) as e:
-                    logger.warning(f"Invalid data for pair ({item1}, {item2}): {data}. Error: {e}")
+                    logger.warning(f"Invalid data for pair ({item1}, {item2}): {data}")
                     continue
         
-        #logger.info("Comparison matrices built, starting ML fitting...")
-        # Fit using maximum likelihood
         self.strengths = self._fit_ml(wins, totals)
         self.fitted = True
-        #logger.info("Bradley-Terry model fitting completed")
     
     def _fit_ml(self, wins: np.ndarray, totals: np.ndarray) -> np.ndarray:
         """Fit Bradley-Terry model using maximum likelihood estimation."""
         
         def negative_log_likelihood(strengths):
-            # Add regularization to prevent overflow - ensure it's numeric
             reg = float(self.config.get('regularization', 1e-10))
-            
             strengths = np.clip(strengths, -10, 10)
             ll = 0
             for i in range(self.n_items):
                 for j in range(i + 1, self.n_items):
                     if totals[i, j] > 0:
                         p_ij = np.exp(strengths[i]) / (np.exp(strengths[i]) + np.exp(strengths[j]))
-                        p_ij = np.clip(p_ij, reg, 1.0 - reg)  # Avoid log(0), ensure 1.0 is float
+                        p_ij = np.clip(p_ij, reg, 1.0 - reg)
                         ll += wins[i, j] * np.log(p_ij) + wins[j, i] * np.log(1 - p_ij)
             return -ll
         
-        # Initialize with zeros (equal strength)
         initial_strengths = np.zeros(self.n_items)
+        constraint = {'type': 'eq', 'fun': lambda x: x[0]}
         
-        # Constrain first item strength to 0 for identifiability
-        def constraint_func(x):
-            return x[0]
-        
-        constraint = {'type': 'eq', 'fun': constraint_func}
-        
-        # Optimize
-        max_iter = int(self.config.get('max_iterations', 1000))  # Ensure integer
+        max_iter = int(self.config.get('max_iterations', 1000))
         result = minimize(
             negative_log_likelihood,
             initial_strengths,
@@ -176,31 +135,381 @@ class BradleyTerryModel:
         
         ranked_indices = np.argsort(self.strengths)[::-1]
         return [(self.items[i], self.strengths[i]) for i in ranked_indices]
+
+class FocusedHypothesisAnalyzer:
+    """Analyzer for testing 20 specific keyboard ergonomic hypotheses."""
     
-    def get_win_probabilities(self) -> np.ndarray:
-        """Get matrix of win probabilities P(item_i beats item_j)."""
-        if not self.fitted:
-            raise ValueError("Model must be fitted before getting probabilities")
+    def __init__(self, config: Dict[str, Any], key_positions: Dict[str, KeyPosition]):
+        self.config = config
+        self.key_positions = key_positions
         
-        probs = np.zeros((self.n_items, self.n_items))
-        for i in range(self.n_items):
-            for j in range(self.n_items):
-                if i != j:
-                    probs[i, j] = np.exp(self.strengths[i]) / (
-                        np.exp(self.strengths[i]) + np.exp(self.strengths[j])
-                    )
-        return probs
+        # Define the 20 focused hypotheses
+        self.hypotheses = {
+            # Finger separation effects (5 tests)
+            'same_row_finger_sep_1v2': {'description': 'Same-row: 1 vs 2 fingers apart', 'category': 'same_row_finger_separation', 'values': ['1', '2']},
+            'same_row_finger_sep_2v3': {'description': 'Same-row: 2 vs 3 fingers apart', 'category': 'same_row_finger_separation', 'values': ['2', '3']},
+            'cross_row_finger_sep_1v2': {'description': 'Cross-row: 1 vs 2 fingers apart', 'category': 'cross_row_finger_separation', 'values': ['1', '2']},
+            'cross_row_finger_sep_2v3': {'description': 'Cross-row: 2 vs 3 fingers apart', 'category': 'cross_row_finger_separation', 'values': ['2', '3']},
+            'cross_row_same_vs_diff': {'description': 'Cross-row: same vs different finger', 'category': 'cross_row_same_finger', 'values': ['True', 'False']},
+            
+            # Movement effects (2 tests)
+            'home_keys_2v1': {'description': 'Home keys: 2 vs 1', 'category': 'home_key_count', 'values': ['2', '1']},
+            'home_keys_1v0': {'description': 'Home keys: 1 vs 0', 'category': 'home_key_count', 'values': ['1', '0']},
+            
+            # Vertical separation effects (2 tests)
+            'row_sep_0v1': {'description': 'Row separation: 0 vs 1', 'category': 'row_separation', 'values': ['0', '1']},
+            'row_sep_1v2': {'description': 'Row separation: 1 vs 2', 'category': 'row_separation', 'values': ['1', '2']},
+            
+            # Horizontal reach effects (2 tests)
+            'column5_0v1': {'description': 'Column 5: 0 vs 1 key', 'category': 'column5_count', 'values': ['0', '1']},
+            'column5_1v2': {'description': 'Column 5: 1 vs 2 keys', 'category': 'column5_count', 'values': ['1', '2']},
+            
+            # Finger preferences (3 tests)
+            'finger_f4_vs_f3': {'description': 'Finger: F4 vs F3', 'category': 'dominant_finger', 'values': ['4', '3']},
+            'finger_f3_vs_f2': {'description': 'Finger: F3 vs F2', 'category': 'dominant_finger', 'values': ['3', '2']},
+            'finger_f2_vs_f1': {'description': 'Finger: F2 vs F1', 'category': 'dominant_finger', 'values': ['2', '1']},
+            
+            # Direction effects (2 tests)
+            'same_row_direction': {'description': 'Same-row: inner vs outer roll', 'category': 'same_row_direction', 'values': ['inner_roll', 'outer_roll']},
+            'cross_row_direction': {'description': 'Cross-row: inner vs outer roll', 'category': 'cross_row_direction', 'values': ['inner_roll_cross', 'outer_roll_cross']},
+            
+            # Column-specific row preferences (4 tests) 
+            'column1_upper_vs_lower': {'description': 'Column 1: Q vs Z (F1)', 'category': 'column1_row_pref', 'values': ['1', '3']},
+            'column2_upper_vs_lower': {'description': 'Column 2: W vs X (F2)', 'category': 'column2_row_pref', 'values': ['1', '3']},
+            'column3_upper_vs_lower': {'description': 'Column 3: E vs C (F3)', 'category': 'column3_row_pref', 'values': ['1', '3']},
+            'column4_upper_vs_lower': {'description': 'Column 4: R vs V (F4)', 'category': 'column4_row_pref', 'values': ['1', '3']},
+        }
+        
+        logger.info(f"Initialized focused hypothesis testing with {len(self.hypotheses)} hypotheses")
+    
+    def analyze_hypotheses(self, data: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze all 20 focused hypotheses."""
+        logger.info("Running focused hypothesis testing (20 hypotheses)...")
+        
+        # Classify all bigrams
+        bigram_classifications = self._classify_bigrams_for_hypotheses(data)
+        
+        # Test each hypothesis
+        hypothesis_results = {}
+        all_p_values = []
+        p_value_info = []
+        
+        for hyp_name, hyp_config in self.hypotheses.items():
+            logger.info(f"Testing {hyp_name}: {hyp_config['description']}")
+            
+            # Extract comparisons for this hypothesis
+            comparisons = self._extract_comparisons_for_hypothesis(
+                data, bigram_classifications, hyp_config
+            )
+            
+            if not comparisons:
+                logger.warning(f"No comparisons found for {hyp_name}")
+                hypothesis_results[hyp_name] = {'error': 'No comparisons found'}
+                continue
+            
+            # Calculate statistics for this specific comparison
+            pairwise_stats = self._calculate_hypothesis_stats(comparisons, hyp_config)
+            
+            hypothesis_results[hyp_name] = {
+                'description': hyp_config['description'],
+                'comparison_values': hyp_config['values'],
+                'statistics': pairwise_stats,
+                'n_comparisons': sum(comp['total'] for comp in comparisons.values())
+            }
+            
+            # Collect p-values for global correction
+            if pairwise_stats and not np.isnan(pairwise_stats.get('p_value', np.nan)):
+                all_p_values.append(pairwise_stats['p_value'])
+                p_value_info.append({
+                    'hypothesis': hyp_name,
+                    'comparison': f"{hyp_config['values'][0]} vs {hyp_config['values'][1]}"
+                })
+        
+        # Apply global multiple testing correction
+        hypothesis_results = self._apply_global_correction(
+            hypothesis_results, all_p_values, p_value_info
+        )
+        
+        # Generate summary
+        summary = self._generate_hypothesis_summary(hypothesis_results)
+        
+        return {
+            'hypothesis_results': hypothesis_results,
+            'summary': summary,
+            'total_hypotheses': len(self.hypotheses),
+            'total_comparisons': len(all_p_values)
+        }
+    
+    def _classify_bigrams_for_hypotheses(self, data: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+        """Classify each bigram according to all hypothesis dimensions."""
+        classifications = {}
+        
+        # Get all unique bigrams
+        all_bigrams = set()
+        for col in ['chosen_bigram', 'unchosen_bigram']:
+            all_bigrams.update(data[col].unique())
+        
+        for bigram in all_bigrams:
+            if len(bigram) >= 2:
+                char1, char2 = bigram[0], bigram[1]
+                
+                if char1 in self.key_positions and char2 in self.key_positions:
+                    pos1 = self.key_positions[char1]
+                    pos2 = self.key_positions[char2]
+                    
+                    classifications[bigram] = self._classify_single_bigram(pos1, pos2)
+        
+        return classifications
+    
+    def _classify_single_bigram(self, pos1: KeyPosition, pos2: KeyPosition) -> Dict[str, Any]:
+        """Classify a single bigram according to all hypothesis dimensions."""
+        
+        # Basic measurements
+        finger_separation = abs(pos1.finger - pos2.finger)
+        row_separation = abs(pos1.row - pos2.row)
+        
+        # Home keys (finger-column home keys: A,S,D,F)
+        home_keys = {'a', 's', 'd', 'f'}
+        home_key_count = sum(1 for pos in [pos1, pos2] if pos.key in home_keys)
+        
+        # Column 5 keys (index finger extended position: T,G,B)
+        column5_keys = {'t', 'g', 'b'}
+        column5_count = sum(1 for pos in [pos1, pos2] if pos.key in column5_keys)
+        
+        # Direction calculation
+        if row_separation == 0:  # Same row
+            if pos2.finger > pos1.finger:
+                direction = 'inner_roll'
+            elif pos2.finger < pos1.finger:
+                direction = 'outer_roll'
+            else:
+                direction = 'same_finger'
+        else:  # Cross row
+            if pos2.finger > pos1.finger:
+                direction = 'inner_roll_cross'
+            elif pos2.finger < pos1.finger:
+                direction = 'outer_roll_cross'
+            else:
+                direction = 'same_finger_cross'
+        
+        # Dominant finger (higher finger number for finger preference tests)
+        dominant_finger = max(pos1.finger, pos2.finger)
+        
+        # Column-specific row preferences
+        column_row_prefs = {}
+        for column in [1, 2, 3, 4]:
+            if pos1.column == column and pos2.column == column:
+                # Both keys in same column, compare rows
+                column_row_prefs[f'column{column}_row_pref'] = f"{pos1.row}" if pos1.row != pos2.row else None
+            else:
+                column_row_prefs[f'column{column}_row_pref'] = None
+        
+        return {
+            # Finger separation hypotheses
+            'same_row_finger_separation': str(finger_separation) if row_separation == 0 else None,
+            'cross_row_finger_separation': str(finger_separation) if row_separation > 0 else None,
+            'cross_row_same_finger': str(finger_separation == 0) if row_separation > 0 else None,
+            
+            # Movement hypothesis
+            'home_key_count': str(home_key_count),
+            
+            # Vertical separation hypothesis
+            'row_separation': str(row_separation),
+            
+            # Horizontal reach hypothesis
+            'column5_count': str(column5_count),
+            
+            # Finger preference hypothesis
+            'dominant_finger': str(dominant_finger) if finger_separation > 0 else None,
+            
+            # Direction hypotheses
+            'same_row_direction': direction if row_separation == 0 and direction != 'same_finger' else None,
+            'cross_row_direction': direction if row_separation > 0 and direction != 'same_finger_cross' else None,
+            
+            # Column-specific row preferences
+            **column_row_prefs
+        }
+    
+    def _extract_comparisons_for_hypothesis(self, data: pd.DataFrame, 
+                                          classifications: Dict[str, Dict[str, Any]], 
+                                          hyp_config: Dict[str, Any]) -> Dict[Tuple[str, str], Dict[str, int]]:
+        """Extract pairwise comparisons for a specific hypothesis."""
+        
+        comparisons = defaultdict(lambda: {'wins_item1': 0, 'total': 0})
+        category = hyp_config['category']
+        target_values = set(hyp_config['values'])
+        
+        for _, row in data.iterrows():
+            chosen = str(row['chosen_bigram']).lower()
+            unchosen = str(row['unchosen_bigram']).lower()
+            
+            chosen_class = classifications.get(chosen, {})
+            unchosen_class = classifications.get(unchosen, {})
+            
+            chosen_val = chosen_class.get(category)
+            unchosen_val = unchosen_class.get(category)
+            
+            # Only include comparisons between the target values
+            if (chosen_val in target_values and unchosen_val in target_values and 
+                chosen_val != unchosen_val):
+                
+                # Create comparison pair (ordered consistently)
+                val1, val2 = sorted([chosen_val, unchosen_val])
+                pair = (val1, val2)
+                
+                comparisons[pair]['total'] += 1
+                if chosen_val == val1:
+                    comparisons[pair]['wins_item1'] += 1
+        
+        return dict(comparisons)
+    
+    def _calculate_hypothesis_stats(self, comparisons: Dict[Tuple[str, str], Dict[str, int]], 
+                                  hyp_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate statistics for a single hypothesis test."""
+        
+        if not comparisons:
+            return {}
+        
+        # Should only be one comparison for focused hypotheses
+        if len(comparisons) != 1:
+            logger.warning(f"Expected 1 comparison for {hyp_config['description']}, got {len(comparisons)}")
+        
+        # Get the single comparison
+        (val1, val2), data = list(comparisons.items())[0]
+        wins1 = data['wins_item1']
+        total = data['total']
+        proportion1 = wins1 / total if total > 0 else 0.5
+        
+        # Effect size (deviation from chance)
+        effect_size = abs(proportion1 - 0.5)
+        
+        # Statistical significance (binomial test)
+        min_comparisons = self.config.get('min_transition_comparisons', 10)
+        if total >= min_comparisons:
+            binom_result = stats.binomtest(wins1, total, 0.5, alternative='two-sided')
+            p_value = binom_result.pvalue
+        else:
+            p_value = np.nan
+        
+        # Practical significance
+        thresholds = self.config.get('transition_effect_thresholds', {
+            'negligible': 0.05, 'small': 0.15, 'medium': 0.30
+        })
+        
+        if effect_size >= thresholds.get('medium', 0.30):
+            practical_sig = 'large'
+        elif effect_size >= thresholds.get('small', 0.15):
+            practical_sig = 'medium'
+        elif effect_size >= thresholds.get('negligible', 0.05):
+            practical_sig = 'small'
+        else:
+            practical_sig = 'negligible'
+        
+        return {
+            'values_compared': (val1, val2),
+            'proportion_val1_wins': proportion1,
+            'effect_size': effect_size,
+            'p_value': p_value,
+            'n_comparisons': total,
+            'practical_significance': practical_sig
+        }
+    
+    def _apply_global_correction(self, hypothesis_results: Dict[str, Any], 
+                               all_p_values: List[float], 
+                               p_value_info: List[Dict]) -> Dict[str, Any]:
+        """Apply global multiple testing correction across all 20 hypotheses."""
+        
+        if not all_p_values:
+            return hypothesis_results
+        
+        try:
+            from statsmodels.stats.multitest import multipletests
+            alpha_level = self.config.get('alpha_level', 0.05)
+            correction_method = self.config.get('correction_method', 'fdr_bh')
+            
+            _, p_corrected, _, _ = multipletests(
+                all_p_values, method=correction_method, alpha=alpha_level
+            )
+            
+            # Update results with corrected p-values
+            for i, p_info in enumerate(p_value_info):
+                hyp_name = p_info['hypothesis']
+                if hyp_name in hypothesis_results and 'statistics' in hypothesis_results[hyp_name]:
+                    stats = hypothesis_results[hyp_name]['statistics']
+                    stats['p_value_corrected'] = p_corrected[i]
+                    stats['significant_corrected'] = p_corrected[i] < alpha_level
+            
+            logger.info(f"Applied {correction_method} correction to {len(all_p_values)} hypotheses")
+            
+        except ImportError:
+            logger.warning("statsmodels not available for multiple comparison correction")
+        
+        return hypothesis_results
+    
+    def _generate_hypothesis_summary(self, hypothesis_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate summary of hypothesis test results."""
+        
+        summary = {
+            'significant_results': [],
+            'large_effects': [],
+            'hypothesis_overview': {}
+        }
+        
+        for hyp_name, result in hypothesis_results.items():
+            if 'statistics' not in result:
+                continue
+            
+            stats = result['statistics']
+            
+            # Count significant results
+            if stats.get('significant_corrected', False):
+                summary['significant_results'].append({
+                    'hypothesis': hyp_name,
+                    'description': result['description'],
+                    'effect_size': stats['effect_size'],
+                    'p_value_corrected': stats['p_value_corrected'],
+                    'values_compared': stats['values_compared'],
+                    'proportion': stats['proportion_val1_wins']
+                })
+            
+            # Count large effects
+            if stats.get('practical_significance') == 'large':
+                summary['large_effects'].append({
+                    'hypothesis': hyp_name,
+                    'description': result['description'],
+                    'effect_size': stats['effect_size'],
+                    'values_compared': stats['values_compared'],
+                    'proportion': stats['proportion_val1_wins']
+                })
+            
+            # Overview
+            summary['hypothesis_overview'][hyp_name] = {
+                'description': result['description'],
+                'significant': stats.get('significant_corrected', False),
+                'effect_size': stats['effect_size'],
+                'practical_significance': stats['practical_significance'],
+                'n_comparisons': stats['n_comparisons']
+            }
+        
+        # Sort by effect size
+        summary['significant_results'].sort(key=lambda x: x['effect_size'], reverse=True)
+        summary['large_effects'].sort(key=lambda x: x['effect_size'], reverse=True)
+        
+        return summary
 
 class PreferenceAnalyzer:
-    """Main class for analyzing keyboard position and transition preferences."""
+    """Main class for comprehensive keyboard preference analysis (exploratory + focused)."""
     
     def __init__(self, config_path: str = None):
         # Load configuration
         self.config = self._load_config(config_path)
         
-        # Define keyboard layout based on config
+        # Define keyboard layout
         self.key_positions = self._define_keyboard_layout()
         self.left_hand_keys = set(self.key_positions.keys())
+        
+        # Initialize focused hypothesis analyzer
+        self.focused_analyzer = FocusedHypothesisAnalyzer(self.config, self.key_positions)
         
         # Store data for access in other methods
         self.data = None
@@ -324,51 +633,65 @@ class PreferenceAnalyzer:
             raise ValueError(f"Unsupported analyze_keys option: {analyze_keys}")
     
     def analyze_preferences(self, data_path: str, output_folder: str) -> Dict[str, Any]:
-        """
-        Run complete preference analysis.
-        
-        Args:
-            data_path: Path to CSV file with bigram choice data
-            output_folder: Directory to save results
-            
-        Returns:
-            Dictionary containing all analysis results
-        """
-        logger.info("Starting comprehensive preference analysis...")
+        """Run complete preference analysis (exploratory + focused hypotheses)."""
+        logger.info("Starting comprehensive preference analysis (exploratory + focused)...")
         
         # Load and validate data
         self.data = self._load_and_validate_data(data_path)
         logger.info(f"Loaded {len(self.data)} rows from {self.data['user_id'].nunique()} participants")
         
-        # Create output directory
+        # Create output directories
         os.makedirs(output_folder, exist_ok=True)
+        os.makedirs(os.path.join(output_folder, 'exploratory'), exist_ok=True)
+        os.makedirs(os.path.join(output_folder, 'focused_hypotheses'), exist_ok=True)
         
-        # Run analyses
         results = {}
 
-        # 1. Left-hand key rankings
-        logger.info("Analyzing key preferences...")
+        # PART I: FOCUSED HYPOTHESIS TESTING (Confirmatory Analysis)
+        logger.info("=== PART I: FOCUSED HYPOTHESIS TESTING (20 hypotheses) ===")
+        focused_results = self.focused_analyzer.analyze_hypotheses(self.data)
+        results['focused_hypotheses'] = focused_results
+        
+        # PART II: EXPLORATORY ANALYSIS
+        logger.info("=== PART II: EXPLORATORY ANALYSIS ===")
+        
+        # 1. Individual key preferences
+        logger.info("Analyzing individual key preferences...")
         results['key_preferences'] = self._analyze_key_preferences(self.data)
         
-        # 2. Transition type rankings
+        # 2. Transition type preferences 
         logger.info("Analyzing bigram transition preferences...")
         results['transition_preferences'] = self._analyze_transition_preferences(self.data)
         
-        # 3. Generate comprehensive reports and exports
-        logger.info("Generating reports and visualizations...")
+        # PART III: COMBINED INSIGHTS
+        logger.info("=== PART III: GENERATING COMBINED INSIGHTS ===")
+        results['combined_insights'] = self._generate_combined_insights(
+            focused_results, results['key_preferences'], results['transition_preferences']
+        )
+        
+        # PART IV: SAVE RESULTS AND REPORTS
+        logger.info("=== PART IV: GENERATING OUTPUTS ===")
+        
+        # Save exploratory results
         if self.config.get('save_raw_results', True):
-            self._export_statistical_tables(results, output_folder)
+            self._export_statistical_tables(results, os.path.join(output_folder, 'exploratory'))
         
         if self.config.get('generate_detailed_report', True):
-            self._generate_comprehensive_report(results, output_folder)
+            self._generate_comprehensive_report(results, os.path.join(output_folder, 'exploratory'))
         
         if self.config.get('generate_visualizations', True):
-            self._create_visualizations(results, output_folder)
+            self._create_visualizations(results, os.path.join(output_folder, 'exploratory'))
+        
+        # Save focused hypothesis results
+        self._save_focused_results(focused_results, os.path.join(output_folder, 'focused_hypotheses'))
+        
+        # Save combined report
+        self._save_combined_report(results, output_folder)
         
         # Save full results
         if self.config.get('save_raw_results', True):
             try:
-                results_path = os.path.join(output_folder, 'complete_preference_analysis.json')
+                results_path = os.path.join(output_folder, 'complete_combined_analysis.json')
                 with open(results_path, 'w') as f:
                     json_results = self._convert_for_json(results)
                     json.dump(json_results, f, indent=2, default=str)
@@ -376,25 +699,8 @@ class PreferenceAnalyzer:
             except Exception as e:
                 logger.warning(f"Could not save JSON results: {e}")
 
-        logger.info(f"Analysis complete! Results saved to {output_folder}")
+        logger.info(f"Combined analysis complete! Results saved to {output_folder}")
         return results
-    
-    def _convert_for_json(self, obj):
-        """Convert numpy types to native Python types for JSON serialization."""
-        if isinstance(obj, dict):
-            return {key: self._convert_for_json(value) for key, value in obj.items()}
-        elif isinstance(obj, list):
-            return [self._convert_for_json(item) for item in obj]
-        elif isinstance(obj, tuple):
-            return [self._convert_for_json(item) for item in obj]
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.integer, np.floating)):
-            return obj.item()
-        elif pd.isna(obj):
-            return None
-        else:
-            return obj
     
     def _load_and_validate_data(self, data_path: str) -> pd.DataFrame:
         """Load and validate the input data."""
@@ -432,7 +738,7 @@ class PreferenceAnalyzer:
             raise
     
     def _analyze_key_preferences(self, data: pd.DataFrame) -> Dict[str, Any]:
-        """Analyze preferences for individual home block keys."""
+        """Analyze preferences for individual keys."""
         
         # Extract all pairwise key comparisons
         key_comparisons = self._extract_key_comparisons(data)
@@ -443,7 +749,6 @@ class PreferenceAnalyzer:
         
         # Get rankings and statistics
         rankings = bt_model.get_rankings()
-        win_probs = bt_model.get_win_probabilities()
         
         # Calculate bootstrap confidence intervals for BT strengths
         bt_confidence_intervals = self._calculate_bt_confidence_intervals(
@@ -469,70 +774,6 @@ class PreferenceAnalyzer:
                 'total_observations': sum(comp['total'] for comp in key_comparisons.values())
             }
         }
-    def _calculate_bt_confidence_intervals(self, bt_model: BradleyTerryModel, 
-                                         key_comparisons: Dict, 
-                                         confidence: float = None) -> Dict[str, Tuple[float, float]]:
-        """Calculate confidence intervals for Bradley-Terry strengths using bootstrap."""
-        
-        if confidence is None:
-            confidence = self.config.get('confidence_level', 0.95)
-        
-        n_bootstrap = self.config.get('bootstrap_iterations', 1000)
-        n_items = len(bt_model.items)
-        bootstrap_strengths = np.zeros((n_bootstrap, n_items))
-        
-        # Convert comparisons to list for resampling
-        comparison_list = []
-        for (key1, key2), data in key_comparisons.items():
-            wins1 = int(data['wins_item1'])  # Ensure integer
-            total = int(data['total'])       # Ensure integer
-            # Add individual comparison records
-            for _ in range(wins1):
-                comparison_list.append((key1, key2, 1))  # key1 wins
-            for _ in range(total - wins1):
-                comparison_list.append((key1, key2, 0))  # key2 wins
-        
-        if not comparison_list:
-            # Return empty CIs if no comparisons
-            return {item: (np.nan, np.nan) for item in bt_model.items}
-        
-        # Bootstrap resampling
-        for b in range(n_bootstrap):
-            # Resample comparisons
-            resampled = np.random.choice(len(comparison_list), 
-                                       size=len(comparison_list), 
-                                       replace=True)
-            
-            # Reconstruct comparison counts
-            bootstrap_comparisons = defaultdict(lambda: {'wins_item1': 0, 'total': 0})
-            for idx in resampled:
-                key1, key2, outcome = comparison_list[idx]
-                pair = tuple(sorted([key1, key2]))
-                bootstrap_comparisons[pair]['total'] += 1
-                if (outcome == 1 and key1 == pair[0]) or (outcome == 0 and key2 == pair[0]):
-                    bootstrap_comparisons[pair]['wins_item1'] += 1
-            
-            # Fit bootstrap model
-            bootstrap_model = BradleyTerryModel(bt_model.items, self.config)
-            try:
-                bootstrap_model.fit(dict(bootstrap_comparisons))
-                if bootstrap_model.strengths is not None:
-                    bootstrap_strengths[b, :] = bootstrap_model.strengths
-                else:
-                    bootstrap_strengths[b, :] = bt_model.strengths
-            except:
-                # If fitting fails, use original strengths
-                bootstrap_strengths[b, :] = bt_model.strengths
-        
-        # Calculate confidence intervals
-        alpha = 1 - confidence
-        ci_dict = {}
-        for i, item in enumerate(bt_model.items):
-            lower = float(np.percentile(bootstrap_strengths[:, i], 100 * alpha/2))
-            upper = float(np.percentile(bootstrap_strengths[:, i], 100 * (1 - alpha/2)))
-            ci_dict[item] = (lower, upper)
-        
-        return ci_dict
     
     def _extract_key_comparisons(self, data: pd.DataFrame) -> Dict[Tuple[str, str], Dict[str, int]]:
         """Extract pairwise key comparisons from bigram choice data."""
@@ -569,6 +810,69 @@ class PreferenceAnalyzer:
             key_comparisons[pair]['total'] = int(key_comparisons[pair]['total'])
         
         return dict(key_comparisons)
+    
+    def _calculate_bt_confidence_intervals(self, bt_model: BradleyTerryModel, 
+                                         key_comparisons: Dict, 
+                                         confidence: float = None) -> Dict[str, Tuple[float, float]]:
+        """Calculate confidence intervals for Bradley-Terry strengths using bootstrap."""
+        
+        if confidence is None:
+            confidence = self.config.get('confidence_level', 0.95)
+        
+        n_bootstrap = self.config.get('bootstrap_iterations', 1000)
+        n_items = len(bt_model.items)
+        bootstrap_strengths = np.zeros((n_bootstrap, n_items))
+        
+        # Convert comparisons to list for resampling
+        comparison_list = []
+        for (key1, key2), data in key_comparisons.items():
+            wins1 = int(data['wins_item1'])
+            total = int(data['total'])
+            # Add individual comparison records
+            for _ in range(wins1):
+                comparison_list.append((key1, key2, 1))  # key1 wins
+            for _ in range(total - wins1):
+                comparison_list.append((key1, key2, 0))  # key2 wins
+        
+        if not comparison_list:
+            return {item: (np.nan, np.nan) for item in bt_model.items}
+        
+        # Bootstrap resampling
+        for b in range(n_bootstrap):
+            # Resample comparisons
+            resampled = np.random.choice(len(comparison_list), 
+                                       size=len(comparison_list), 
+                                       replace=True)
+            
+            # Reconstruct comparison counts
+            bootstrap_comparisons = defaultdict(lambda: {'wins_item1': 0, 'total': 0})
+            for idx in resampled:
+                key1, key2, outcome = comparison_list[idx]
+                pair = tuple(sorted([key1, key2]))
+                bootstrap_comparisons[pair]['total'] += 1
+                if (outcome == 1 and key1 == pair[0]) or (outcome == 0 and key2 == pair[0]):
+                    bootstrap_comparisons[pair]['wins_item1'] += 1
+            
+            # Fit bootstrap model
+            bootstrap_model = BradleyTerryModel(bt_model.items, self.config)
+            try:
+                bootstrap_model.fit(dict(bootstrap_comparisons))
+                if bootstrap_model.strengths is not None:
+                    bootstrap_strengths[b, :] = bootstrap_model.strengths
+                else:
+                    bootstrap_strengths[b, :] = bt_model.strengths
+            except:
+                bootstrap_strengths[b, :] = bt_model.strengths
+        
+        # Calculate confidence intervals
+        alpha = 1 - confidence
+        ci_dict = {}
+        for i, item in enumerate(bt_model.items):
+            lower = float(np.percentile(bootstrap_strengths[:, i], 100 * alpha/2))
+            upper = float(np.percentile(bootstrap_strengths[:, i], 100 * (1 - alpha/2)))
+            ci_dict[item] = (lower, upper)
+        
+        return ci_dict
     
     def _calculate_pairwise_key_stats(self, comparisons: Dict[Tuple[str, str], Dict[str, int]], 
                                     bt_model: BradleyTerryModel) -> Dict[Tuple[str, str], Dict[str, Any]]:
@@ -742,27 +1046,13 @@ class PreferenceAnalyzer:
         if row_separation == 0:
             row_pattern = 'same'
         elif row_separation == 1:
-            row_pattern = 'reach'  # Adjacent rows (previously "adjacent")
+            row_pattern = 'reach'
         else:
-            row_pattern = 'hurdle'  # Skipping rows (previously "hurdle")
+            row_pattern = 'hurdle'
         
         # Finger separation
         finger_separation = abs(pos1.finger - pos2.finger)
         
-        # Direction (for same row only)
-        # Note: "cross_row" in old system meant any transition between different rows
-        # Now we distinguish between "reach" (adjacent rows) and "hurdle" (skip rows)
-        if pos1.row == pos2.row:
-            if pos2.finger > pos1.finger:
-                direction = 'inner_roll'
-            elif pos2.finger < pos1.finger:
-                direction = 'outer_roll'
-            else:
-                direction = 'same_finger'
-        else:
-            direction = 'cross_row'  # Any cross-row transition
-        
-        # Create new format: Δ#-finger [pattern] using actual delta symbol
         return f"Δ{finger_separation}-finger {row_pattern}"
     
     def _extract_transition_comparisons(self, data: pd.DataFrame, 
@@ -976,9 +1266,8 @@ class PreferenceAnalyzer:
         """Categorize transition results by type."""
         
         categories = {
-            'row_patterns': {'same': [], 'adjacent': [], 'hurdle': []},
-            'finger_separations': {'1': [], '2': [], '3': []},
-            'directions': {'inner_roll': [], 'outer_roll': [], 'cross_row': []}
+            'row_patterns': {'same': [], 'reach': [], 'hurdle': []},
+            'finger_separations': {'1': [], '2': [], '3': []}
         }
         
         for transition_type, strength in rankings:
@@ -988,8 +1277,8 @@ class PreferenceAnalyzer:
             # Row pattern
             if 'same' in parts:
                 categories['row_patterns']['same'].append((transition_type, strength))
-            elif 'adjacent' in parts:
-                categories['row_patterns']['adjacent'].append((transition_type, strength))
+            elif 'reach' in parts:
+                categories['row_patterns']['reach'].append((transition_type, strength))
             elif 'hurdle' in parts:
                 categories['row_patterns']['hurdle'].append((transition_type, strength))
             
@@ -997,14 +1286,6 @@ class PreferenceAnalyzer:
             for sep in ['1', '2', '3']:
                 if f'{sep}finger' in transition_type:
                     categories['finger_separations'][sep].append((transition_type, strength))
-            
-            # Direction
-            if 'inner_roll' in parts:
-                categories['directions']['inner_roll'].append((transition_type, strength))
-            elif 'outer_roll' in parts:
-                categories['directions']['outer_roll'].append((transition_type, strength))
-            elif 'cross_row' in parts:
-                categories['directions']['cross_row'].append((transition_type, strength))
         
         # Sort each category by strength
         for category in categories.values():
@@ -1013,9 +1294,420 @@ class PreferenceAnalyzer:
         
         return categories
 
+    def _generate_combined_insights(self, focused_results: Dict[str, Any], 
+                                  key_results: Dict[str, Any], 
+                                  transition_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate insights combining focused and exploratory results."""
+        
+        insights = {
+            'validation_summary': {},
+            'convergent_findings': [],
+            'divergent_findings': [],
+            'practical_recommendations': []
+        }
+        
+        # Validate finger preference hypothesis against individual key rankings
+        finger_validation = self._validate_finger_preferences(focused_results, key_results)
+        insights['validation_summary']['finger_preferences'] = finger_validation
+        
+        # Generate practical recommendations
+        insights['practical_recommendations'] = self._generate_practical_recommendations(
+            focused_results, key_results, transition_results
+        )
+        
+        return insights
+    
+    def _validate_finger_preferences(self, focused_results: Dict[str, Any], 
+                                   key_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Cross-validate focused finger hypothesis with individual key rankings."""
+        
+        # Get finger preference results from focused analysis
+        finger_hypotheses = ['finger_f4_vs_f3', 'finger_f3_vs_f2', 'finger_f2_vs_f1']
+        focused_finger_results = {}
+        
+        for hyp in finger_hypotheses:
+            if hyp in focused_results['hypothesis_results']:
+                result = focused_results['hypothesis_results'][hyp]
+                if 'statistics' in result:
+                    focused_finger_results[hyp] = result['statistics']
+        
+        # Analyze individual key rankings by finger
+        finger_strengths = {1: [], 2: [], 3: [], 4: []}
+        for key, strength in key_results['overall_rankings']:
+            if key in self.key_positions:
+                finger = self.key_positions[key].finger
+                finger_strengths[finger].append(strength)
+        
+        # Calculate average strength per finger
+        finger_averages = {}
+        for finger, strengths in finger_strengths.items():
+            if strengths:
+                finger_averages[finger] = np.mean(strengths)
+        
+        # Compare rankings
+        exploratory_finger_ranking = sorted(finger_averages.items(), key=lambda x: x[1], reverse=True)
+        
+        validation = {
+            'exploratory_finger_ranking': exploratory_finger_ranking,
+            'focused_finger_results': focused_finger_results,
+            'consistency_analysis': self._analyze_finger_consistency(focused_finger_results, finger_averages)
+        }
+        
+        return validation
+    
+    def _analyze_finger_consistency(self, focused_results: Dict[str, Any], 
+                                  finger_averages: Dict[int, float]) -> str:
+        """Analyze consistency between focused and exploratory finger results."""
+        
+        # Check if exploratory rankings match focused hypothesis predictions
+        if len(finger_averages) < 4:
+            return "Insufficient data for consistency analysis"
+        
+        # Exploratory ranking order
+        exp_order = [finger for finger, _ in sorted(finger_averages.items(), key=lambda x: x[1], reverse=True)]
+        
+        # Check specific comparisons from focused hypotheses
+        consistencies = []
+        
+        # F4 vs F3
+        if 'finger_f4_vs_f3' in focused_results:
+            focused_f4_better = focused_results['finger_f4_vs_f3'].get('proportion_val1_wins', 0.5) > 0.5
+            exp_f4_better = finger_averages.get(4, 0) > finger_averages.get(3, 0)
+            consistencies.append(f"F4 vs F3: {'Consistent' if focused_f4_better == exp_f4_better else 'Inconsistent'}")
+        
+        # F3 vs F2
+        if 'finger_f3_vs_f2' in focused_results:
+            focused_f3_better = focused_results['finger_f3_vs_f2'].get('proportion_val1_wins', 0.5) > 0.5
+            exp_f3_better = finger_averages.get(3, 0) > finger_averages.get(2, 0)
+            consistencies.append(f"F3 vs F2: {'Consistent' if focused_f3_better == exp_f3_better else 'Inconsistent'}")
+        
+        # F2 vs F1
+        if 'finger_f2_vs_f1' in focused_results:
+            focused_f2_better = focused_results['finger_f2_vs_f1'].get('proportion_val1_wins', 0.5) > 0.5
+            exp_f2_better = finger_averages.get(2, 0) > finger_averages.get(1, 0)
+            consistencies.append(f"F2 vs F1: {'Consistent' if focused_f2_better == exp_f2_better else 'Inconsistent'}")
+        
+        consistency_summary = "; ".join(consistencies)
+        return f"Exploratory order: {exp_order}. Focused comparisons: {consistency_summary}"
+    
+    def _generate_practical_recommendations(self, focused_results: Dict[str, Any], 
+                                          key_results: Dict[str, Any], 
+                                          transition_results: Dict[str, Any]) -> List[str]:
+        """Generate practical keyboard layout recommendations."""
+        
+        recommendations = []
+        
+        # Based on significant focused hypotheses
+        significant_hypotheses = focused_results['summary']['significant_results']
+        
+        for result in significant_hypotheses:
+            hyp_name = result['hypothesis']
+            effect_size = result['effect_size']
+            
+            if 'finger' in hyp_name and effect_size > 0.20:
+                recommendations.append(f"FINGER PREFERENCE: {result['description']} - prioritize this in layout design")
+            elif 'home' in hyp_name and effect_size > 0.15:
+                recommendations.append(f"HOME ROW: {result['description']} - maximize home row usage")
+            elif 'direction' in hyp_name and effect_size > 0.15:
+                recommendations.append(f"DIRECTION: {result['description']} - optimize roll directions")
+        
+        # Based on exploratory key rankings
+        top_keys = key_results['overall_rankings'][:3]
+        bottom_keys = key_results['overall_rankings'][-3:]
+        
+        recommendations.append(f"KEY PLACEMENT: Prioritize keys {[k.upper() for k, _ in top_keys]} in frequent positions")
+        recommendations.append(f"KEY PLACEMENT: Avoid placing frequent letters on keys {[k.upper() for k, _ in bottom_keys]}")
+        
+        return recommendations
+
     # =========================================================================
-    # STATISTICAL TABLES AND EXPORTS
+    # VISUALIZATION AND OUTPUT METHODS
     # =========================================================================
+    
+    def _create_visualizations(self, results: Dict[str, Any], output_folder: str) -> None:
+        """Create comprehensive visualizations."""
+        
+        # Set style
+        plt.style.use('seaborn-v0_8-whitegrid')
+        dpi = self.config.get('figure_dpi', 300)
+        plt.rcParams.update({'font.size': 12, 'figure.dpi': dpi})
+        
+        # 1. Key preference heatmap
+        self._plot_key_preference_heatmap(results['key_preferences'], output_folder)
+        
+        # 2. Key strength differences with confidence intervals
+        self._plot_key_strengths_with_cis(results['key_preferences'], output_folder)
+        
+        # 3. Transition preference rankings
+        self._plot_transition_rankings(results['transition_preferences'], output_folder)
+        
+        # 4. Effect size distributions
+        self._plot_effect_size_distributions(results, output_folder)
+    
+    def _plot_key_preference_heatmap(self, key_results: Dict[str, Any], output_folder: str) -> None:
+        """Create heatmap showing key preferences."""
+        
+        plot_data = []
+        for key, strength in key_results['overall_rankings']:
+            if key in self.key_positions:
+                pos = self.key_positions[key]
+                plot_data.append({
+                    'row': pos.row,
+                    'column': pos.column,
+                    'finger': pos.finger,
+                    'key': key.upper(),
+                    'strength': strength
+                })
+        
+        if not plot_data:
+            return
+        
+        df = pd.DataFrame(plot_data)
+        
+        # Create pivot tables for strength and key labels
+        pivot_strength = df.pivot(index='row', columns='column', values='strength')
+        pivot_keys = df.pivot(index='row', columns='column', values='key').fillna('')
+        
+        # Determine the full range of columns and rows for a consistent grid
+        all_columns = sorted(df['column'].unique())
+        all_rows = sorted(df['row'].unique())
+
+        # Reindex pivots to ensure all rows and columns are present, filling with NaN
+        pivot_strength = pivot_strength.reindex(index=all_rows, columns=all_columns)
+        pivot_keys = pivot_keys.reindex(index=all_rows, columns=all_columns).fillna('')
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Create heatmap
+        colormap = self.config.get('heatmap_colormap', 'RdYlGn')
+        sns.heatmap(pivot_strength, cmap=colormap, center=0, 
+                    cbar_kws={'label': 'Bradley-Terry Strength'},
+                    linewidths=.5, linecolor='lightgray', ax=ax,
+                    mask=pivot_strength.isnull()
+                )
+        
+        # Add key and finger labels manually
+        for text in ax.texts:
+            text.set_visible(False)
+            
+        for (j, i), key_label in np.ndenumerate(pivot_keys):
+            row_idx = all_rows[j]
+            col_idx = all_columns[i]
+            
+            # Find the original data point to get the finger
+            original_entry = df[(df['row'] == row_idx) & (df['column'] == col_idx)]
+            if not original_entry.empty:
+                finger_label = f"F{original_entry['finger'].iloc[0]}"
+                full_label = f"{key_label}\n({finger_label})"
+                ax.text(i + 0.5, j + 0.5, full_label, 
+                        ha='center', va='center', color='black', fontsize=10)
+        
+        ax.set_title('key preferences by keyboard position (strength and finger)')
+        ax.set_xlabel('Column (1=Leftmost, 5=Index Center)')
+        ax.set_ylabel('Row (1=Upper, 2=Home, 3=Lower)')
+        
+        # Set tick labels to match actual row/column numbers
+        ax.set_xticks(np.arange(len(all_columns)) + 0.5, labels=[str(col) for col in all_columns])
+        ax.set_yticks(np.arange(len(all_rows)) + 0.5, labels=[str(row) for row in all_rows])
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, 'key_preference_heatmap.png'), 
+                dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
+        plt.close()
+    
+    def _plot_key_strengths_with_cis(self, key_results: Dict[str, Any], output_folder: str) -> None:
+        """Create forest plot showing key strengths with confidence intervals."""
+        
+        rankings = key_results['overall_rankings']
+        bt_cis = key_results['bt_confidence_intervals']
+        
+        if not rankings:
+            return
+        
+        # Prepare data
+        keys = [key.upper() for key, _ in rankings]
+        strengths = [float(strength) for _, strength in rankings]
+        ci_lowers = [float(bt_cis.get(key.lower(), (np.nan, np.nan))[0]) for key, _ in rankings]
+        ci_uppers = [float(bt_cis.get(key.lower(), (np.nan, np.nan))[1]) for key, _ in rankings]
+        
+        # Calculate error bars, handling NaN values
+        lower_errs = []
+        upper_errs = []
+        for strength, ci_lower, ci_upper in zip(strengths, ci_lowers, ci_uppers):
+            if np.isnan(ci_lower) or np.isnan(ci_upper):
+                lower_errs.append(0)
+                upper_errs.append(0)
+            else:
+                lower_errs.append(abs(strength - ci_lower))
+                upper_errs.append(abs(ci_upper - strength))
+        
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 10))
+        
+        # Create horizontal error bar plot
+        y_pos = np.arange(len(keys))
+        colors = ['green' if s > 0 else 'red' for s in strengths]
+        
+        ax.errorbar(strengths, y_pos, xerr=[lower_errs, upper_errs], 
+                   fmt='o', color='black', ecolor='gray', capsize=3, capthick=1)
+        
+        # Color the points
+        for i, (strength, color) in enumerate(zip(strengths, colors)):
+            ax.scatter(strength, i, c=color, s=100, alpha=0.7, zorder=5)
+        
+        # Customize
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(keys)
+        ax.set_xlabel('Bradley-Terry Strength (95% CI)')
+        ax.set_title('key preference strengths with confidence intervals')
+        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
+        ax.grid(True, alpha=0.3)
+        
+        # Add finger labels
+        x_max = max(strengths)
+        x_range = max(strengths) - min(strengths)
+        finger_x_pos = x_max + (x_range * 0.2)
+        
+        for i, (key, _) in enumerate(rankings):
+            if key in self.key_positions:
+                finger = self.key_positions[key].finger
+                ax.text(finger_x_pos, i, f'F{finger}', 
+                       color='black', fontweight='bold', va='center', ha='left')
+        
+        # Extend x-axis to accommodate finger labels
+        ax.set_xlim(left=min(strengths) - (x_range * 0.1), 
+                    right=finger_x_pos + (x_range * 0.1))
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, 'key_strengths_with_cis.png'), 
+                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
+        plt.close()
+    
+    def _plot_transition_rankings(self, transition_results: Dict[str, Any], output_folder: str) -> None:
+        """Create bar plot of transition type rankings."""
+        
+        rankings = transition_results['overall_rankings']
+        if not rankings:
+            return
+        
+        # Prepare data (top 15 for readability)
+        top_rankings = rankings[:15]
+        transition_types = [t.replace('Δ', 'Δ') for t, _ in top_rankings]
+        strengths = [s for _, s in top_rankings]
+        
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        # Create horizontal bar plot
+        y_pos = np.arange(len(transition_types))
+        bars = ax.barh(y_pos, strengths, alpha=0.7)
+        
+        # Color bars based on strength
+        for i, bar in enumerate(bars):
+            if strengths[i] > 0:
+                bar.set_color('green')
+            else:
+                bar.set_color('red')
+        
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(transition_types, fontsize=10)
+        ax.set_xlabel('Bradley-Terry Strength')
+        ax.set_title('top 15 bigram transition type preferences')
+        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, 'transition_rankings.png'), 
+                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
+        plt.close()
+    
+    def _plot_effect_size_distributions(self, results: Dict[str, Any], output_folder: str) -> None:
+        """Plot distributions of effect sizes."""
+        
+        # Collect effect sizes
+        key_effects = []
+        transition_effects = []
+        
+        # Key effect sizes
+        for stats in results['key_preferences']['pairwise_statistics'].values():
+            if not np.isnan(stats['effect_size']):
+                key_effects.append(stats['effect_size'])
+        
+        # Transition effect sizes
+        for stats in results['transition_preferences']['pairwise_statistics'].values():
+            if not np.isnan(stats['effect_size']):
+                transition_effects.append(stats['effect_size'])
+        
+        # Create figure
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # Key effect sizes
+        if key_effects:
+            ax1.hist(key_effects, bins=20, alpha=0.7, color='blue', edgecolor='black')
+            ax1.axvline(np.mean(key_effects), color='red', linestyle='--', 
+                       label=f'Mean: {np.mean(key_effects):.3f}')
+            ax1.set_xlabel('Effect Size')
+            ax1.set_ylabel('Frequency')
+            ax1.set_title('key preference effect sizes')
+            ax1.legend()
+        
+        # Transition effect sizes
+        if transition_effects:
+            ax2.hist(transition_effects, bins=20, alpha=0.7, color='green', edgecolor='black')
+            ax2.axvline(np.mean(transition_effects), color='red', linestyle='--',
+                       label=f'Mean: {np.mean(transition_effects):.3f}')
+            ax2.set_xlabel('Effect Size')
+            ax2.set_ylabel('Frequency')
+            ax2.set_title('transition preference effect sizes')
+            ax2.legend()
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, 'effect_size_distributions.png'), 
+                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
+        plt.close()
+
+    def _export_statistical_tables(self, results: Dict[str, Any], output_folder: str) -> None:
+        """Export detailed statistical tables to CSV."""
+        
+        # Key statistics table
+        key_table = self._create_comprehensive_key_table(results['key_preferences'])
+        key_table.to_csv(os.path.join(output_folder, 'key_preference_statistics.csv'), index=False)
+        
+        # Pairwise key comparison details
+        pairwise_data = []
+        for (key1, key2), stats in results['key_preferences']['pairwise_statistics'].items():
+            pairwise_data.append({
+                'Key1': key1.upper(),
+                'Key2': key2.upper(),
+                'Key1_Win_Rate': stats['proportion_key1_wins'],
+                'Effect_Size': stats['effect_size'],
+                'Cohens_H': stats['cohens_h'],
+                'P_Value': stats.get('p_value', np.nan),
+                'P_Value_Corrected': stats.get('p_value_corrected', np.nan),
+                'CI_Lower': stats['ci_lower'],
+                'CI_Upper': stats['ci_upper'],
+                'N_Comparisons': stats['n_comparisons'],
+                'Practical_Significance': stats['practical_significance'],
+                'Statistically_Significant': stats.get('significant_corrected', False)
+            })
+        
+        pairwise_df = pd.DataFrame(pairwise_data)
+        pairwise_df.to_csv(os.path.join(output_folder, 'pairwise_key_comparisons.csv'), index=False)
+        
+        # Transition rankings with confidence intervals
+        transition_rankings = []
+        bt_cis = results['transition_preferences']['bt_confidence_intervals']
+        for transition_type, strength in results['transition_preferences']['overall_rankings']:
+            ci_lower, ci_upper = bt_cis.get(transition_type, (np.nan, np.nan))
+            transition_rankings.append({
+                'Transition_Type': transition_type,
+                'BT_Strength': strength,
+                'BT_CI_Lower': ci_lower,
+                'BT_CI_Upper': ci_upper
+            })
+        
+        transition_df = pd.DataFrame(transition_rankings)
+        transition_df.to_csv(os.path.join(output_folder, 'transition_preference_statistics.csv'), index=False)
     
     def _create_comprehensive_key_table(self, key_results: Dict[str, Any]) -> pd.DataFrame:
         """Create comprehensive statistical table for all keys."""
@@ -1090,790 +1782,289 @@ class PreferenceAnalyzer:
         
         return pd.DataFrame(table_data)
     
-    def _export_statistical_tables(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Export detailed statistical tables to CSV."""
-        
-        # Key statistics table
-        key_table = self._create_comprehensive_key_table(results['key_preferences'])
-        key_table.to_csv(os.path.join(output_folder, 'key_preference_statistics.csv'), index=False)
-        
-        # Pairwise key comparison details
-        pairwise_data = []
-        for (key1, key2), stats in results['key_preferences']['pairwise_statistics'].items():
-            pairwise_data.append({
-                'Key1': key1.upper(),
-                'Key2': key2.upper(),
-                'Key1_Win_Rate': stats['proportion_key1_wins'],
-                'Effect_Size': stats['effect_size'],
-                'Cohens_H': stats['cohens_h'],
-                'P_Value': stats.get('p_value', np.nan),
-                'P_Value_Corrected': stats.get('p_value_corrected', np.nan),
-                'CI_Lower': stats['ci_lower'],
-                'CI_Upper': stats['ci_upper'],
-                'N_Comparisons': stats['n_comparisons'],
-                'Practical_Significance': stats['practical_significance'],
-                'Statistically_Significant': stats.get('significant_corrected', False)
-            })
-        
-        pairwise_df = pd.DataFrame(pairwise_data)
-        pairwise_df.to_csv(os.path.join(output_folder, 'pairwise_key_comparisons.csv'), index=False)
-        
-        # Transition rankings with confidence intervals
-        transition_rankings = []
-        bt_cis = results['transition_preferences']['bt_confidence_intervals']
-        for transition_type, strength in results['transition_preferences']['overall_rankings']:
-            ci_lower, ci_upper = bt_cis.get(transition_type, (np.nan, np.nan))
-            transition_rankings.append({
-                'Transition_Type': transition_type,
-                'BT_Strength': strength,
-                'BT_CI_Lower': ci_lower,
-                'BT_CI_Upper': ci_upper
-            })
-        
-        transition_df = pd.DataFrame(transition_rankings)
-        transition_df.to_csv(os.path.join(output_folder, 'transition_preference_statistics.csv'), index=False)
-        
-        # Create specialized transition table with Δfinger, Δrow format
-        transition_table = self._create_transition_delta_table(results['transition_preferences'])
-        transition_table.to_csv(os.path.join(output_folder, 'transition_delta_analysis.csv'), index=False)
-    
-    def _create_transition_delta_table(self, transition_results: Dict[str, Any]) -> pd.DataFrame:
-        """Create specialized transition table with Δfinger, Δrow, in/out format."""
-        
-        rankings = transition_results['overall_rankings']
-        bt_cis = transition_results['bt_confidence_intervals']
-        transition_classifications = transition_results['transition_classifications']
-        
-        table_data = []
-        
-        # Create mapping from transition names back to position data
-        transition_details = {}
-        for bigram, transition_type in transition_classifications.items():
-            if len(bigram) >= 2:
-                char1, char2 = bigram[0], bigram[1]
-                if char1 in self.key_positions and char2 in self.key_positions:
-                    pos1 = self.key_positions[char1]
-                    pos2 = self.key_positions[char2]
-                    
-                    finger_delta = abs(pos1.finger - pos2.finger)
-                    row_delta = abs(pos1.row - pos2.row)
-                    
-                    # Determine in/out direction
-                    if pos1.row == pos2.row:  # Same row
-                        if pos2.finger > pos1.finger:
-                            in_out = 1  # Inward roll
-                        elif pos2.finger < pos1.finger:
-                            in_out = -1  # Outward roll
-                        else:
-                            in_out = 0  # Same finger
-                    else:
-                        in_out = 0  # Cross-row transitions don't have in/out
-                    
-                    transition_details[transition_type] = {
-                        'delta_finger': finger_delta,
-                        'delta_row': row_delta,
-                        'in_out': in_out
-                    }
-        
-        # Process each ranked transition
-        for rank, (transition_type, strength) in enumerate(rankings, 1):
-            details = transition_details.get(transition_type, {
-                'delta_finger': np.nan,
-                'delta_row': np.nan,
-                'in_out': np.nan
-            })
-            
-            ci_lower, ci_upper = bt_cis.get(transition_type, (np.nan, np.nan))
-            ci_str = f"[{ci_lower:.3f}, {ci_upper:.3f}]" if not np.isnan(ci_lower) else "[---, ---]"
-            
-            table_data.append({
-                'Rank': rank,
-                'Transition_Type': transition_type,
-                'Δfinger': details['delta_finger'],
-                'Δrow': details['delta_row'],
-                'in_out': details['in_out'],
-                'BT_Strength': strength,
-                'BT_CI_Lower': ci_lower,
-                'BT_CI_Upper': ci_upper,
-                'BT_CI_String': ci_str
-            })
-        
-        return pd.DataFrame(table_data)
-
-    # =========================================================================
-    # VISUALIZATION METHODS
-    # =========================================================================
-    
-    def _create_visualizations(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Create comprehensive visualizations including statistical plots."""
-        
-        # Set style
-        plt.style.use('seaborn-v0_8-whitegrid')
-        dpi = self.config.get('figure_dpi', 300)
-        plt.rcParams.update({'font.size': 12, 'figure.dpi': dpi})
-        
-        # 1. Key preference heatmap by finger
-        self._plot_key_preference_heatmap(results['key_preferences'], output_folder)
-        
-        # 2. Key strength differences with confidence intervals
-        self._plot_key_strengths_with_cis(results['key_preferences'], output_folder)
-        
-        # 3. Transition preference rankings
-        self._plot_transition_rankings(results['transition_preferences'], output_folder)
-        
-        # 4. Transition strength differences with confidence intervals
-        self._plot_transition_strengths_with_cis(results['transition_preferences'], output_folder)
-        
-        # 5. Effect size distributions
-        self._plot_effect_size_distributions(results, output_folder)
-        
-        # 6. Confidence assessment summary
-        self._plot_confidence_summary(results, output_folder)
-        
-        # 7. Statistical comparison plots
-        self._plot_statistical_comparisons(results, output_folder)
-    
-    def _plot_key_strengths_with_cis(self, key_results: Dict[str, Any], output_folder: str) -> None:
-        """Create forest plot showing key strengths with confidence intervals."""
-        
-        rankings = key_results['overall_rankings']
-        bt_cis = key_results['bt_confidence_intervals']
-        
-        if not rankings:
-            return
-        
-        # Prepare data
-        keys = [key.upper() for key, _ in rankings]
-        strengths = [float(strength) for _, strength in rankings]  # Ensure numeric
-        ci_lowers = [float(bt_cis.get(key.lower(), (np.nan, np.nan))[0]) for key, _ in rankings]
-        ci_uppers = [float(bt_cis.get(key.lower(), (np.nan, np.nan))[1]) for key, _ in rankings]
-        
-        # Calculate error bars, handling NaN values
-        lower_errs = []
-        upper_errs = []
-        for strength, ci_lower, ci_upper in zip(strengths, ci_lowers, ci_uppers):
-            if np.isnan(ci_lower) or np.isnan(ci_upper):
-                lower_errs.append(0)
-                upper_errs.append(0)
-            else:
-                lower_errs.append(abs(strength - ci_lower))
-                upper_errs.append(abs(ci_upper - strength))
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(12, 10))
-        
-        # Create horizontal error bar plot
-        y_pos = np.arange(len(keys))
-        colors = ['green' if s > 0 else 'red' for s in strengths]
-        
-        ax.errorbar(strengths, y_pos, xerr=[lower_errs, upper_errs], 
-                   fmt='o', color='black', ecolor='gray', capsize=3, capthick=1)
-        
-        # Color the points
-        for i, (strength, color) in enumerate(zip(strengths, colors)):
-            ax.scatter(strength, i, c=color, s=100, alpha=0.7, zorder=5)
-        
-        # Customize
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(keys)
-        ax.set_xlabel('Bradley-Terry Strength (95% CI)')
-        ax.set_title('key preference strengths with confidence intervals')
-        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
-        ax.grid(True, alpha=0.3)
-        
-        # Add finger labels - positioned further right and all black
-        x_max = max(strengths)
-        x_range = max(strengths) - min(strengths)
-        finger_x_pos = x_max + (x_range * 0.2)  # 20% beyond the maximum value
-        
-        for i, (key, _) in enumerate(rankings):
-            if key in self.key_positions:
-                finger = self.key_positions[key].finger
-                ax.text(finger_x_pos, i, f'F{finger}', 
-                       color='black', fontweight='bold', va='center', ha='left')
-        
-        # Extend x-axis to accommodate finger labels
-        ax.set_xlim(left=min(strengths) - (x_range * 0.1), 
-                    right=finger_x_pos + (x_range * 0.1))
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'key_strengths_with_cis.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
-    def _plot_transition_strengths_with_cis(self, transition_results: Dict[str, Any], output_folder: str) -> None:
-        """Create forest plots showing transition strengths with confidence intervals."""
-        
-        rankings = transition_results['overall_rankings']
-        bt_cis = transition_results['bt_confidence_intervals']
-        
-        if not rankings:
-            return
-        
-        # Create top 15 plot
-        self._create_transition_forest_plot(rankings[:15], bt_cis, output_folder, 
-                                          'transition_strengths_with_cis_top15.png',
-                                          'Top 15 Transition Type Preferences with Confidence Intervals')
-        
-        # Create all transitions plot
-        self._create_transition_forest_plot(rankings, bt_cis, output_folder,
-                                          'transition_strengths_with_cis_all.png', 
-                                          'All Transition Type Preferences with Confidence Intervals')
-    
-    def _create_transition_forest_plot(self, rankings: List[Tuple[str, float]], 
-                                     bt_cis: Dict[str, Tuple[float, float]], 
-                                     output_folder: str, filename: str, title: str) -> None:
-        """Create a single transition forest plot."""
-        
-        if not rankings:
-            return
-        
-        # Prepare data with proper delta formatting
-        transition_types = []
-        for t, _ in rankings:
-            # Convert to proper format with delta symbol
-            formatted_name = t.replace('Δ', 'Δ')  # Ensure proper delta symbol
-            transition_types.append(formatted_name)
-        
-        strengths = [float(strength) for _, strength in rankings]
-        ci_lowers = [float(bt_cis.get(t, (np.nan, np.nan))[0]) for t, _ in rankings]
-        ci_uppers = [float(bt_cis.get(t, (np.nan, np.nan))[1]) for t, _ in rankings]
-        
-        # Calculate error bars, handling NaN values
-        lower_errs = []
-        upper_errs = []
-        for strength, ci_lower, ci_upper in zip(strengths, ci_lowers, ci_uppers):
-            if np.isnan(ci_lower) or np.isnan(ci_upper):
-                lower_errs.append(0)
-                upper_errs.append(0)
-            else:
-                lower_errs.append(abs(strength - ci_lower))
-                upper_errs.append(abs(ci_upper - strength))
-        
-        # Determine figure size based on number of items
-        height = max(8, len(transition_types) * 0.4)
-        fig, ax = plt.subplots(figsize=(14, height))
-        
-        # Create horizontal error bar plot
-        y_pos = np.arange(len(transition_types))
-        colors = ['green' if s > 0 else 'red' for s in strengths]
-        
-        ax.errorbar(strengths, y_pos, xerr=[lower_errs, upper_errs], 
-                   fmt='o', color='black', ecolor='gray', capsize=3, capthick=1)
-        
-        # Color the points
-        for i, (strength, color) in enumerate(zip(strengths, colors)):
-            ax.scatter(strength, i, c=color, s=60, alpha=0.7, zorder=5)
-        
-        # Customize
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(transition_types, fontsize=9)
-        ax.set_xlabel('Bradley-Terry Strength (95% CI)')
-        ax.set_title(title.lower())
-        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
-        ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, filename), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
-    def _plot_statistical_comparisons(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Create plots showing statistical comparisons and effect sizes."""
-        
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
-        
-        # 1. Key strength range comparison
-        key_rankings = results['key_preferences']['overall_rankings']
-        if key_rankings:
-            key_strengths = [strength for _, strength in key_rankings]
-            key_cis = results['key_preferences']['bt_confidence_intervals']
-            key_ci_widths = []
-            for key, strength in key_rankings:
-                ci_lower, ci_upper = key_cis.get(key, (strength, strength))
-                key_ci_widths.append(ci_upper - ci_lower)
-            
-            ax1.boxplot([key_strengths], labels=['Keys'])
-            ax1.set_ylabel('Bradley-Terry Strength')
-            ax1.set_title('distribution of key strengths')
-            ax1.grid(True, alpha=0.3)
-            
-            # Add individual points
-            y_vals = np.random.normal(1, 0.04, len(key_strengths))
-            colors = ['green' if s > 0 else 'red' for s in key_strengths]
-            ax1.scatter(y_vals, key_strengths, c=colors, alpha=0.6, s=50)
-        
-        # 2. Transition strength range comparison
-        transition_rankings = results['transition_preferences']['overall_rankings']
-        if transition_rankings:
-            transition_strengths = [strength for _, strength in transition_rankings]
-            transition_cis = results['transition_preferences']['bt_confidence_intervals']
-            
-            ax2.boxplot([transition_strengths], labels=['Transitions'])
-            ax2.set_ylabel('Bradley-Terry Strength')
-            ax2.set_title('distribution of transition strengths')
-            ax2.grid(True, alpha=0.3)
-            
-            # Add individual points
-            y_vals = np.random.normal(1, 0.04, len(transition_strengths))
-            colors = ['green' if s > 0 else 'red' for s in transition_strengths]
-            ax2.scatter(y_vals, transition_strengths, c=colors, alpha=0.6, s=30)
-        
-        # 3. Confidence interval widths
-        if key_rankings:
-            ax3.hist(key_ci_widths, bins=15, alpha=0.7, color='blue', edgecolor='black')
-            ax3.set_xlabel('95% CI Width')
-            ax3.set_ylabel('Frequency')
-            ax3.set_title('key preference confidence interval widths')
-            ax3.axvline(np.mean(key_ci_widths), color='red', linestyle='--', 
-                       label=f'Mean: {np.mean(key_ci_widths):.3f}')
-            ax3.legend()
-            ax3.grid(True, alpha=0.3)
-        
-        # 4. Statistical significance summary
-        key_stats = results['key_preferences']['pairwise_statistics']
-        transition_stats = results['transition_preferences']['pairwise_statistics']
-        
-        # Count significant results
-        key_significant = sum(1 for stats in key_stats.values() 
-                             if stats.get('significant_corrected', False))
-        key_total = len(key_stats)
-        
-        transition_significant = sum(1 for stats in transition_stats.values() 
-                                   if stats.get('significant_corrected', False))
-        transition_total = len(transition_stats)
-        
-        categories = ['Key\nComparisons', 'Transition\nComparisons']
-        significant_counts = [key_significant, transition_significant]
-        total_counts = [key_total, transition_total]
-        
-        x_pos = np.arange(len(categories))
-        width = 0.35
-        
-        ax4.bar(x_pos - width/2, total_counts, width, label='Total', color='lightblue', alpha=0.7)
-        ax4.bar(x_pos + width/2, significant_counts, width, label='Significant', color='darkblue', alpha=0.7)
-        
-        ax4.set_ylabel('Number of Comparisons')
-        ax4.set_title('statistical significance summary')
-        ax4.set_xticks(x_pos)
-        ax4.set_xticklabels(categories)
-        ax4.legend()
-        ax4.grid(True, alpha=0.3)
-        
-        # Add percentage labels
-        for i, (sig, total) in enumerate(zip(significant_counts, total_counts)):
-            if total > 0:
-                pct = sig / total * 100
-                ax4.text(i, max(total_counts) * 0.9, f'{pct:.1f}%', 
-                        ha='center', va='center', fontweight='bold')
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'statistical_comparisons.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
-    def _plot_key_preference_heatmap(self, key_results: Dict[str, Any], output_folder: str) -> None:
-        """Create heatmap showing key preferences using row and column for unique key positioning."""
-        
-        plot_data = []
-        for key, strength in key_results['overall_rankings']:
-            if key in self.key_positions:
-                pos = self.key_positions[key]
-                plot_data.append({
-                    'row': pos.row,
-                    'column': pos.column,
-                    'finger': pos.finger,
-                    'key': key.upper(),
-                    'strength': strength
-                })
-        
-        if not plot_data:
-            return
-        
-        df = pd.DataFrame(plot_data)
-        
-        # Create pivot tables for strength and key labels
-        pivot_strength = df.pivot(index='row', columns='column', values='strength')
-        pivot_keys = df.pivot(index='row', columns='column', values='key').fillna('')
-        
-        # Determine the full range of columns and rows for a consistent grid
-        all_columns = sorted(df['column'].unique())
-        all_rows = sorted(df['row'].unique())
-
-        # Reindex pivots to ensure all rows and columns are present, filling with NaN
-        pivot_strength = pivot_strength.reindex(index=all_rows, columns=all_columns)
-        pivot_keys = pivot_keys.reindex(index=all_rows, columns=all_columns).fillna('')
-
-        # Create figure
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        # Create heatmap
-        colormap = self.config.get('heatmap_colormap', 'RdYlGn')
-        sns.heatmap(pivot_strength, cmap=colormap, center=0, 
-                    cbar_kws={'label': 'Bradley-Terry Strength'},
-                    linewidths=.5, linecolor='lightgray', ax=ax,
-                    mask=pivot_strength.isnull()
-                )
-        
-        # Add key and finger labels manually
-        for text in ax.texts:
-            text.set_visible(False)
-            
-        for (j, i), key_label in np.ndenumerate(pivot_keys):
-            row_idx = all_rows[j]
-            col_idx = all_columns[i]
-            
-            # Find the original data point to get the finger
-            original_entry = df[(df['row'] == row_idx) & (df['column'] == col_idx)]
-            if not original_entry.empty:
-                finger_label = f"F{original_entry['finger'].iloc[0]}"
-                full_label = f"{key_label}\n({finger_label})"
-                ax.text(i + 0.5, j + 0.5, full_label, 
-                        ha='center', va='center', color='black', fontsize=10)
-        
-        ax.set_title('key preferences by keyboard position (strength and finger)')
-        ax.set_xlabel('Column (1=Leftmost, 5=Index Center)')
-        ax.set_ylabel('Row (1=Upper, 2=Home, 3=Lower)')
-        
-        # Set tick labels to match actual row/column numbers
-        ax.set_xticks(np.arange(len(all_columns)) + 0.5, labels=[str(col) for col in all_columns])
-        ax.set_yticks(np.arange(len(all_rows)) + 0.5, labels=[str(row) for row in all_rows])
-
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'key_preference_heatmap.png'), 
-                dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-            
-    def _plot_transition_rankings(self, transition_results: Dict[str, Any], output_folder: str) -> None:
-        """Create bar plot of transition type rankings."""
-        
-        rankings = transition_results['overall_rankings']
-        if not rankings:
-            return
-        
-        # Prepare data (top 15 for readability)
-        top_rankings = rankings[:15]
-        # Format transition names with proper delta symbols
-        transition_types = []
-        for t, _ in top_rankings:
-            formatted_name = t.replace('Δ', 'Δ')  # Ensure proper delta symbol
-            transition_types.append(formatted_name)
-        
-        strengths = [s for _, s in top_rankings]
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        # Create horizontal bar plot
-        y_pos = np.arange(len(transition_types))
-        bars = ax.barh(y_pos, strengths, alpha=0.7)
-        
-        # Color bars based on strength
-        for i, bar in enumerate(bars):
-            if strengths[i] > 0:
-                bar.set_color('green')
-            else:
-                bar.set_color('red')
-        
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(transition_types, fontsize=10)
-        ax.set_xlabel('Bradley-Terry Strength')
-        ax.set_title('top 15 bigram transition type preferences')
-        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'transition_rankings.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
-    def _plot_effect_size_distributions(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Plot distributions of effect sizes."""
-        
-        # Collect effect sizes
-        key_effects = []
-        transition_effects = []
-        
-        # Key effect sizes
-        for stats in results['key_preferences']['pairwise_statistics'].values():
-            if not np.isnan(stats['effect_size']):
-                key_effects.append(stats['effect_size'])
-        
-        # Transition effect sizes
-        for stats in results['transition_preferences']['pairwise_statistics'].values():
-            if not np.isnan(stats['effect_size']):
-                transition_effects.append(stats['effect_size'])
-        
-        # Create figure
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
-        
-        # Key effect sizes
-        if key_effects:
-            ax1.hist(key_effects, bins=20, alpha=0.7, color='blue', edgecolor='black')
-            ax1.axvline(np.mean(key_effects), color='red', linestyle='--', 
-                       label=f'Mean: {np.mean(key_effects):.3f}')
-            ax1.set_xlabel('Effect Size')
-            ax1.set_ylabel('Frequency')
-            ax1.set_title('key preference effect sizes')
-            ax1.legend()
-        
-        # Transition effect sizes
-        if transition_effects:
-            ax2.hist(transition_effects, bins=20, alpha=0.7, color='green', edgecolor='black')
-            ax2.axvline(np.mean(transition_effects), color='red', linestyle='--',
-                       label=f'Mean: {np.mean(transition_effects):.3f}')
-            ax2.set_xlabel('Effect Size')
-            ax2.set_ylabel('Frequency')
-            ax2.set_title('transition preference effect sizes')
-            ax2.legend()
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'effect_size_distributions.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
-    def _plot_confidence_summary(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Create summary plot of confidence levels."""
-        
-        # Collect confidence levels
-        finger_confidences = []
-        for finger in range(1, 5):
-            finger_key = f'finger_{finger}'
-            if finger_key in results['key_preferences']['finger_specific_results']:
-                confidence = results['key_preferences']['finger_specific_results'][finger_key]['confidence_level']
-                finger_confidences.append(confidence)
-        
-        # Count confidence levels
-        confidence_counts = Counter(finger_confidences)
-        
-        # Create figure
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        confidence_levels = ['definitive', 'probable', 'suggestive', 'inconclusive', 'insufficient_data']
-        counts = [confidence_counts.get(level, 0) for level in confidence_levels]
-        colors = ['green', 'orange', 'yellow', 'red', 'gray']
-        
-        bars = ax.bar(confidence_levels, counts, color=colors, alpha=0.7)
-        
-        # Add count labels on bars
-        for bar, count in zip(bars, counts):
-            if count > 0:
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.05,
-                       str(count), ha='center', va='bottom')
-        
-        ax.set_ylabel('Number of Finger Rankings')
-        ax.set_title('confidence levels in finger key rankings')
-        ax.set_ylim(0, max(counts) + 0.5 if counts else 1)
-        
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'confidence_summary.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
     def _generate_comprehensive_report(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Generate comprehensive text report with detailed statistical tables."""
+        """Generate comprehensive text report for exploratory analysis."""
         
         report_lines = [
-            "comprehensive keyboard preference analysis report",
-            "=" * 70,
+            "exploratory keyboard preference analysis report",
+            "=" * 60,
             "",
-            "executive summary",
-            "================",
+            "This section contains data-driven exploration of keyboard preferences",
+            "using Bradley-Terry models without pre-specified hypotheses.",
             "",
-            f"This analysis used Bradley-Terry models to rank keyboard positions and",
-            f"transition types based on typing preference data. The approach provides",
-            f"statistically rigorous rankings with effect sizes and confidence assessments.",
-            "",
+            "TOP 10 PREFERRED KEYS:",
+            "=" * 25,
+            ""
         ]
         
-        # Key preference results with detailed table
-        report_lines.extend([
-            "detailed key preference statistics",
-            "=================================",
-            ""
-        ])
-        
-        # Create comprehensive table
-        key_table = self._create_comprehensive_key_table(results['key_preferences'])
-        
-        # Format table for text report
-        report_lines.append("key performance summary:")
-        report_lines.append("-" * 125)
-        report_lines.append(f"{'Rank':<4} {'Key':<3} {'Row':<3} {'Col':<3} {'Fngr':<4} "
-                           f"{'BT Strength':<12} {'95% CI':<20} {'Win Rate':<9} "
-                           f"{'Effect Size':<11} {'N Comp':<7} {'% Sig':<6} {'Level':<15}")
-        report_lines.append("-" * 125)
-        
-        for _, row in key_table.iterrows():
-            ci_str = f"[{row['BT_CI_Lower']:.3f}, {row['BT_CI_Upper']:.3f}]"
+        # Key preference results
+        key_results = results['key_preferences']
+        for i, (key, strength) in enumerate(key_results['overall_rankings'][:10], 1):
+            finger = self.key_positions.get(key, KeyPosition('', 0, 0, 0)).finger
+            row = self.key_positions.get(key, KeyPosition('', 0, 0, 0)).row
+            row_name = {1: 'upper', 2: 'home', 3: 'lower'}.get(row, 'unknown')
             report_lines.append(
-                f"{row['Rank']:<4} {row['Key']:<3} {row['Row']:<3} {row['Column']:<3} "
-                f"{row['Finger']:<4} {row['BT_Strength']:<12.3f} {ci_str:<20} "
-                f"{row['Mean_Win_Rate']:<9.3f} {row['Mean_Effect_Size']:<11.3f} "
-                f"{row['Total_Comparisons']:<7.0f} {row['Pct_Significant']:<6.1f} "
-                f"{row['Preference_Level']:<15}"
+                f"{i:2d}. {key.upper()} (F{finger}, {row_name} row): {strength:6.3f}"
             )
         
         report_lines.extend([
-            "-" * 125,
             "",
-            "column definitions:",
-            "  BT Strength: Bradley-Terry latent preference parameter (higher = more preferred)",
-            "  95% CI: Bootstrap confidence interval for BT strength",
-            "  Win Rate: Average proportion of pairwise comparisons won by this key",
-            "  Effect Size: Average effect size across all pairwise comparisons",
-            "  N Comp: Total number of pairwise comparisons involving this key",
-            "  % Sig: Percentage of pairwise comparisons that are statistically significant",
-            "",
-        ])
-        
-        # Finger-specific results
-        report_lines.extend([
-            "finger-specific key rankings",
-            "============================",
+            "TOP 10 PREFERRED TRANSITIONS:",
+            "=" * 35,
             ""
         ])
-        
-        key_results = results['key_preferences']
-        for finger in range(1, 5):
-            finger_key = f'finger_{finger}'
-            if finger_key in key_results['finger_specific_results']:
-                finger_data = key_results['finger_specific_results'][finger_key]
-                report_lines.extend([
-                    f"finger {finger} results:",
-                    f"  {finger_data['interpretation']}",
-                    f"  confidence level: {finger_data['confidence_level'].upper()}",
-                    ""
-                ])
         
         # Transition preference results
+        transition_results = results['transition_preferences']
+        for i, (transition_type, strength) in enumerate(transition_results['overall_rankings'][:10], 1):
+            report_lines.append(
+                f"{i:2d}. {transition_type:<35} {strength:6.3f}"
+            )
+        
+        # Save report
+        report_path = os.path.join(output_folder, 'exploratory_analysis_report.txt')
+        with open(report_path, 'w') as f:
+            f.write('\n'.join(report_lines))
+    
+    def _save_focused_results(self, focused_results: Dict[str, Any], output_folder: str) -> None:
+        """Save focused hypothesis results."""
+        
+        # Save detailed results as JSON
+        with open(os.path.join(output_folder, 'focused_hypothesis_results.json'), 'w') as f:
+            json_results = self._convert_for_json(focused_results)
+            json.dump(json_results, f, indent=2, default=str)
+        
+        # Save summary as CSV
+        summary_data = []
+        for hyp_name, result in focused_results['hypothesis_results'].items():
+            if 'statistics' in result:
+                stats = result['statistics']
+                val1, val2 = stats.get('values_compared', ('', ''))
+                summary_data.append({
+                    'Hypothesis': hyp_name,
+                    'Description': result['description'],
+                    'Values_Compared': f"{val1} vs {val2}",
+                    'Val1_Win_Rate': stats['proportion_val1_wins'],
+                    'Effect_Size': stats['effect_size'],
+                    'P_Value': stats.get('p_value', np.nan),
+                    'P_Value_Corrected': stats.get('p_value_corrected', np.nan),
+                    'Significant_Corrected': stats.get('significant_corrected', False),
+                    'Practical_Significance': stats['practical_significance'],
+                    'N_Comparisons': stats['n_comparisons']
+                })
+        
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            summary_df.to_csv(os.path.join(output_folder, 'focused_hypothesis_summary.csv'), index=False)
+        
+        # Save text report
+        self._save_focused_text_report(focused_results, output_folder)
+    
+    def _save_focused_text_report(self, focused_results: Dict[str, Any], output_folder: str) -> None:
+        """Save human-readable text report for focused hypotheses."""
+        
+        summary = focused_results['summary']
+        
+        report_lines = [
+            "focused keyboard preference hypothesis testing results",
+            "=" * 65,
+            "",
+            f"Total hypotheses tested: {focused_results['total_hypotheses']}",
+            f"Total comparisons made: {focused_results['total_comparisons']}",
+            f"Significant results (after FDR correction): {len(summary['significant_results'])}",
+            f"Large practical effects (>30% preference): {len(summary['large_effects'])}",
+            "",
+            "SIGNIFICANT RESULTS (after global FDR correction):",
+            "=" * 55
+        ]
+        
+        if summary['significant_results']:
+            for result in summary['significant_results']:
+                val1, val2 = result['values_compared']
+                winner = val1 if result['proportion'] > 0.5 else val2
+                report_lines.append(
+                    f"✓ {result['description']}: {winner} preferred "
+                    f"(effect: {result['effect_size']:.3f}, p: {result['p_value_corrected']:.4f})"
+                )
+        else:
+            report_lines.append("No statistically significant results after correction.")
+        
         report_lines.extend([
-            "transition preference results", 
-            "============================",
-            ""
+            "",
+            "LARGE PRACTICAL EFFECTS (>30% preference difference):",
+            "=" * 60
         ])
         
-        transition_results = results['transition_preferences']
-        rankings = transition_results['overall_rankings']
-        
-        if rankings:
-            report_lines.extend([
-                "top 10 preferred transitions:",
-                "-----------------------------"
-            ])
-            for i, (transition_type, strength) in enumerate(rankings[:10]):
-                ci_lower, ci_upper = transition_results['bt_confidence_intervals'].get(
-                    transition_type, (np.nan, np.nan)
-                )
-                ci_str = f"[{ci_lower:.3f}, {ci_upper:.3f}]" if not np.isnan(ci_lower) else "[---, ---]"
+        if summary['large_effects']:
+            for effect in summary['large_effects']:
+                val1, val2 = effect['values_compared']
+                winner = val1 if effect['proportion'] > 0.5 else val2
                 report_lines.append(
-                    f"{i+1:2d}. {transition_type.replace('_', ' ').title():<35} "
-                    f"strength: {strength:6.3f} CI: {ci_str}"
+                    f"• {effect['description']}: {winner} preferred "
+                    f"(effect: {effect['effect_size']:.3f}, proportion: {effect['proportion']:.3f})"
                 )
-            
+        else:
+            report_lines.append("No large practical effects found.")
+        
+        report_lines.extend([
+            "",
+            "HYPOTHESIS OVERVIEW:",
+            "=" * 25
+        ])
+        
+        for hyp_name, overview in summary['hypothesis_overview'].items():
+            sig_indicator = "✓" if overview['significant'] else "✗"
+            report_lines.append(
+                f"{sig_indicator} {hyp_name}: {overview['description']}"
+            )
+            report_lines.append(
+                f"   Effect: {overview['effect_size']:.3f} ({overview['practical_significance']}), "
+                f"N: {overview['n_comparisons']}"
+            )
+            report_lines.append("")
+        
+        # Save report
+        with open(os.path.join(output_folder, 'focused_hypothesis_report.txt'), 'w') as f:
+            f.write('\n'.join(report_lines))
+    
+    def _save_combined_report(self, results: Dict[str, Any], output_folder: str) -> None:
+        """Save comprehensive combined report."""
+        
+        focused_results = results['focused_hypotheses']
+        key_results = results['key_preferences']
+        transition_results = results['transition_preferences']
+        combined_insights = results['combined_insights']
+        
+        report_lines = [
+            "COMBINED KEYBOARD PREFERENCE ANALYSIS REPORT",
+            "=" * 70,
+            "",
+            "This comprehensive analysis combines confirmatory hypothesis testing",
+            "with exploratory preference discovery for complete insights.",
+            "",
+            "EXECUTIVE SUMMARY:",
+            "=" * 20,
+            ""
+        ]
+        
+        # Executive summary
+        focused_summary = focused_results['summary']
+        total_significant = len(focused_summary['significant_results'])
+        total_large_effects = len(focused_summary['large_effects'])
+        
+        report_lines.extend([
+            f"• Focused Hypotheses: {total_significant}/{focused_results['total_hypotheses']} significant",
+            f"• Large Effects Found: {total_large_effects}",
+            f"• Keys Analyzed: {len(key_results['overall_rankings'])}",
+            f"• Transition Types: {len(transition_results['overall_rankings'])}",
+            "",
+        ])
+        
+        # Key findings
+        if total_significant > 0:
+            report_lines.extend([
+                "KEY CONFIRMED PRINCIPLES:",
+                "-" * 30
+            ])
+            for result in focused_summary['significant_results'][:5]:
+                val1, val2 = result['values_compared']
+                winner = val1 if result['proportion'] > 0.5 else val2
+                report_lines.append(
+                    f"✓ {result['description']}: {winner} preferred "
+                    f"(effect: {result['effect_size']:.3f})"
+                )
+            report_lines.append("")
+        
+        # Top discoveries from exploratory analysis
+        report_lines.extend([
+            "TOP EXPLORATORY DISCOVERIES:",
+            "-" * 35,
+            "",
+            "Most Preferred Keys:"
+        ])
+        
+        for i, (key, strength) in enumerate(key_results['overall_rankings'][:5], 1):
+            finger = self.key_positions.get(key, KeyPosition('', 0, 0, 0)).finger
+            report_lines.append(f"  {i}. {key.upper()} (F{finger}): {strength:.3f}")
+        
+        report_lines.extend([
+            "",
+            "Most Preferred Transitions:"
+        ])
+        
+        for i, (transition, strength) in enumerate(transition_results['overall_rankings'][:5], 1):
+            report_lines.append(f"  {i}. {transition}: {strength:.3f}")
+        
+        # Combined insights
+        if 'convergent_findings' in combined_insights and combined_insights['convergent_findings']:
             report_lines.extend([
                 "",
-                "bottom 5 transitions:",
-                "--------------------"
+                "CONVERGENT FINDINGS (both analyses agree):",
+                "-" * 45
             ])
-            for i, (transition_type, strength) in enumerate(rankings[-5:]):
-                ci_lower, ci_upper = transition_results['bt_confidence_intervals'].get(
-                    transition_type, (np.nan, np.nan)
-                )
-                ci_str = f"[{ci_lower:.3f}, {ci_upper:.3f}]" if not np.isnan(ci_lower) else "[---, ---]"
-                rank = len(rankings) - 4 + i
-                report_lines.append(
-                    f"{rank:2d}. {transition_type.replace('_', ' ').title():<35} "
-                    f"strength: {strength:6.3f} CI: {ci_str}"
-                )
+            for finding in combined_insights['convergent_findings'][:3]:
+                report_lines.append(f"• {finding}")
         
-        # Statistical summary
-        report_lines.extend([
-            "",
-            "statistical summary",
-            "==================",
-            ""
-        ])
-        
-        # Key statistics
-        key_stats = key_results['pairwise_statistics']
-        key_effect_sizes = [stats['effect_size'] for stats in key_stats.values() if not np.isnan(stats['effect_size'])]
-        key_significant = sum(1 for stats in key_stats.values() if stats.get('significant_corrected', False))
+        if 'practical_recommendations' in combined_insights and combined_insights['practical_recommendations']:
+            report_lines.extend([
+                "",
+                "PRACTICAL RECOMMENDATIONS:",
+                "-" * 30
+            ])
+            for rec in combined_insights['practical_recommendations'][:5]:
+                report_lines.append(f"• {rec}")
         
         report_lines.extend([
-            f"key preferences:",
-            f"  total pairwise comparisons: {len(key_stats)}",
-            f"  statistically significant: {key_significant} ({key_significant/len(key_stats)*100:.1f}%)" if key_stats else "  no comparisons available",
-            f"  mean effect size: {np.mean(key_effect_sizes):.3f}" if key_effect_sizes else "  no effect sizes calculated",
-            f"  effect size range: {min(key_effect_sizes):.3f} - {max(key_effect_sizes):.3f}" if key_effect_sizes else "",
-            ""
-        ])
-        
-        # Transition statistics
-        transition_stats = transition_results['pairwise_statistics']
-        transition_effect_sizes = [stats['effect_size'] for stats in transition_stats.values() if not np.isnan(stats['effect_size'])]
-        transition_significant = sum(1 for stats in transition_stats.values() if stats.get('significant_corrected', False))
-        
-        report_lines.extend([
-            f"transition preferences:",
-            f"  total pairwise comparisons: {len(transition_stats)}",
-            f"  statistically significant: {transition_significant} ({transition_significant/len(transition_stats)*100:.1f}%)" if transition_stats else "  no comparisons available",
-            f"  mean effect size: {np.mean(transition_effect_sizes):.3f}" if transition_effect_sizes else "  no effect sizes calculated",
-            f"  effect size range: {min(transition_effect_sizes):.3f} - {max(transition_effect_sizes):.3f}" if transition_effect_sizes else "",
-            ""
-        ])
-        
-        # Configuration summary
-        report_lines.extend([
-            "configuration summary",
-            "====================",
             "",
-            f"analyzed keys: {self.config.get('analyze_keys', 'left_hand_15')}",
-            f"bootstrap iterations: {self.config.get('bootstrap_iterations', 1000)}",
-            f"confidence level: {self.config.get('confidence_level', 0.95)}",
-            f"alpha level: {self.config.get('alpha_level', 0.05)}",
-            f"correction method: {self.config.get('correction_method', 'fdr_bh')}",
-            f"min key comparisons: {self.config.get('min_key_comparisons', 5)}",
-            f"min transition comparisons: {self.config.get('min_transition_comparisons', 10)}",
+            "METHODOLOGY:",
+            "=" * 15,
             "",
-        ])
-        
-        # Methodology notes
-        report_lines.extend([
-            "methodology notes",
-            "================",
+            "• Focused Analysis: 20 pre-specified hypotheses with global FDR correction",
+            "• Exploratory Analysis: Bradley-Terry models with bootstrap confidence intervals",
+            "• Cross-Validation: Confirmatory findings validated against exploratory patterns",
+            "• Effect Sizes: Practical significance assessed alongside statistical significance",
             "",
-            "• Bradley-Terry models provide optimal rankings from pairwise comparison data",
-            "• Multiple comparison correction applied using False Discovery Rate (FDR)",
-            "• Bootstrap confidence intervals (1000 resamples) for Bradley-Terry strengths",
-            "• Effect sizes calculated as deviations from chance (0.5)",
-            "• Confidence levels: definitive > probable > suggestive > inconclusive",
-            "• Practical significance thresholds: small (5-15%), medium (15-30%), large (>30%)",
+            "OUTPUT FILES:",
+            "=" * 15,
             "",
-            "files generated",
-            "===============",
+            "focused_hypotheses/:",
+            "  • focused_hypothesis_results.json - Complete numerical results",
+            "  • focused_hypothesis_summary.csv - Tabular summary",
+            "  • focused_hypothesis_report.txt - Human-readable findings",
             "",
-            "statistical tables:",
-            "• key_preference_statistics.csv - complete key analysis with CIs",
-            "• pairwise_key_comparisons.csv - all pairwise key comparison details",
-            "• transition_preference_statistics.csv - transition rankings with CIs",
-            "• complete_preference_analysis.json - full numerical results",
+            "exploratory/:",
+            "  • key_preference_statistics.csv - Individual key analysis",
+            "  • transition_preference_statistics.csv - Transition analysis",
+            "  • key_preference_heatmap.png - Spatial preference visualization",
+            "  • key_strengths_with_cis.png - Forest plot with confidence intervals",
+            "  • transition_rankings.png - Top transition preferences",
             "",
-            "visualizations:",
-            "• key_preference_heatmap.png - key preferences by keyboard position",
-            "• key_strengths_with_cis.png - forest plot of key strengths",
-            "• transition_rankings.png - top transition preferences",
-            "• transition_strengths_with_cis.png - forest plot of transition strengths",
-            "• statistical_comparisons.png - statistical summary comparisons",
-            "• effect_size_distributions.png - distribution of effect sizes",
-            "• confidence_summary.png - confidence level assessment",
+            "Root directory:",
+            "  • complete_combined_analysis.json - Full results from both analyses",
+            "  • combined_analysis_report.txt - This comprehensive summary",
             ""
         ])
         
         # Save report
-        report_path = os.path.join(output_folder, 'comprehensive_preference_report.txt')
-        with open(report_path, 'w') as f:
+        with open(os.path.join(output_folder, 'combined_analysis_report.txt'), 'w') as f:
             f.write('\n'.join(report_lines))
+    
+    def _convert_for_json(self, obj):
+        """Convert numpy types to native Python types for JSON serialization."""
+        if isinstance(obj, dict):
+            return {key: self._convert_for_json(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [self._convert_for_json(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return [self._convert_for_json(item) for item in obj]
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.integer, np.floating)):
+            return obj.item()
+        elif pd.isna(obj):
+            return None
+        else:
+            return obj
 
 def main():
     """Main function for command-line usage."""
@@ -1891,10 +2082,8 @@ def main():
             data_config = full_config.get('data', {})
             input_dir = data_config.get('input_dir', '')
             filtered_data_file = data_config.get('filtered_data_file', None)
-            print("Loading filtered data file: ", os.path.join(input_dir, filtered_data_file))
-
+            
             if filtered_data_file and input_dir:
-                # Join input_dir with filtered_data_file
                 default_data_file = os.path.join(input_dir, filtered_data_file)
             elif filtered_data_file:
                 default_data_file = filtered_data_file
@@ -1909,7 +2098,7 @@ def main():
     
     # Create main parser with config-based defaults
     parser = argparse.ArgumentParser(
-        description='Analyze keyboard position and transition preferences using Bradley-Terry models'
+        description='Combined keyboard preference analysis: exploratory + focused hypothesis testing'
     )
     parser.add_argument('--data', default=default_data_file,
                        help=f'Path to CSV file with bigram choice data (default: {default_data_file or "required"})')
@@ -1930,12 +2119,24 @@ def main():
         return 1
     
     try:
-        # Run analysis
+        # Run combined analysis
         analyzer = PreferenceAnalyzer(args.config)
         results = analyzer.analyze_preferences(args.data, args.output)
         
-        logger.info("Analysis completed successfully!")
+        logger.info("Combined analysis completed successfully!")
         logger.info(f"Results saved to: {args.output}")
+        
+        # Print quick summary
+        focused_summary = results['focused_hypotheses']['summary']
+        key_rankings = results['key_preferences']['overall_rankings']
+        
+        print(f"\nQUICK SUMMARY:")
+        print(f"==============")
+        print(f"Focused Hypotheses: {len(focused_summary['significant_results'])}/{results['focused_hypotheses']['total_hypotheses']} significant")
+        print(f"Large Effects: {len(focused_summary['large_effects'])}")
+        print(f"Top 3 Keys: {', '.join([k.upper() for k, _ in key_rankings[:3]])}")
+        print(f"")
+        print(f"See detailed reports in: {args.output}")
         
         return 0
         
