@@ -137,54 +137,184 @@ class BradleyTerryModel:
         return [(self.items[i], self.strengths[i]) for i in ranked_indices]
 
 class FocusedHypothesisAnalyzer:
-    """Analyzer for testing 20 specific keyboard ergonomic hypotheses."""
+    """Analyzer for testing keyboard ergonomic hypotheses."""
     
-    def __init__(self, config: Dict[str, Any], key_positions: Dict[str, KeyPosition]):
+    def __init__(self, config: Dict[str, Any], key_positions: Dict[str, KeyPosition], include_column5: bool = False):
         self.config = config
         self.key_positions = key_positions
+        self.include_column5 = include_column5
         
-        # Define the 20 focused hypotheses
+        # Define the core hypotheses (excluding column 5 by default)
         self.hypotheses = {
-            # Finger separation effects (5 tests)
-            'same_row_finger_sep_1v2': {'description': 'Same-row: 1 vs 2 fingers apart', 'category': 'same_row_finger_separation', 'values': ['1', '2']},
-            'same_row_finger_sep_2v3': {'description': 'Same-row: 2 vs 3 fingers apart', 'category': 'same_row_finger_separation', 'values': ['2', '3']},
-            'cross_row_finger_sep_1v2': {'description': 'Cross-row: 1 vs 2 fingers apart', 'category': 'cross_row_finger_separation', 'values': ['1', '2']},
-            'cross_row_finger_sep_2v3': {'description': 'Cross-row: 2 vs 3 fingers apart', 'category': 'cross_row_finger_separation', 'values': ['2', '3']},
-            'cross_row_same_vs_diff': {'description': 'Cross-row: same vs different finger', 'category': 'cross_row_same_finger', 'values': ['True', 'False']},
+            # Column separation effects (NOT finger separation) - 4 tests
+            'same_row_column_sep_1v2': {'description': 'Same-row: 1 vs 2 columns apart', 'category': 'same_row_column_separation', 'values': ['1', '2']},
+            'same_row_column_sep_2v3': {'description': 'Same-row: 2 vs 3 columns apart', 'category': 'same_row_column_separation', 'values': ['2', '3']},
+            'cross_row_column_sep_1v2': {'description': 'Cross-row: 1 vs 2 columns apart', 'category': 'cross_row_column_separation', 'values': ['1', '2']},
+            'cross_row_column_sep_2v3': {'description': 'Cross-row: 2 vs 3 columns apart', 'category': 'cross_row_column_separation', 'values': ['2', '3']},
+            'cross_row_same_vs_diff_column': {'description': 'Cross-row: same vs different column', 'category': 'cross_row_same_column', 'values': ['True', 'False']},
             
-            # Movement effects (2 tests)
+            # Movement effects - 2 tests  
             'home_keys_2v1': {'description': 'Home keys: 2 vs 1', 'category': 'home_key_count', 'values': ['2', '1']},
             'home_keys_1v0': {'description': 'Home keys: 1 vs 0', 'category': 'home_key_count', 'values': ['1', '0']},
             
-            # Vertical separation effects (2 tests)
+            # Vertical separation effects - 2 tests
             'row_sep_0v1': {'description': 'Row separation: 0 vs 1', 'category': 'row_separation', 'values': ['0', '1']},
             'row_sep_1v2': {'description': 'Row separation: 1 vs 2', 'category': 'row_separation', 'values': ['1', '2']},
             
-            # Horizontal reach effects (2 tests)
-            'column5_0v1': {'description': 'Column 5: 0 vs 1 key', 'category': 'column5_count', 'values': ['0', '1']},
-            'column5_1v2': {'description': 'Column 5: 1 vs 2 keys', 'category': 'column5_count', 'values': ['1', '2']},
-            
-            # Finger preferences (3 tests)
+            # Finger preferences - 3 tests
             'finger_f4_vs_f3': {'description': 'Finger: F4 vs F3', 'category': 'dominant_finger', 'values': ['4', '3']},
             'finger_f3_vs_f2': {'description': 'Finger: F3 vs F2', 'category': 'dominant_finger', 'values': ['3', '2']},
             'finger_f2_vs_f1': {'description': 'Finger: F2 vs F1', 'category': 'dominant_finger', 'values': ['2', '1']},
             
-            # Direction effects (2 tests)
+            # Direction effects - 2 tests
             'same_row_direction': {'description': 'Same-row: inner vs outer roll', 'category': 'same_row_direction', 'values': ['inner_roll', 'outer_roll']},
             'cross_row_direction': {'description': 'Cross-row: inner vs outer roll', 'category': 'cross_row_direction', 'values': ['inner_roll_cross', 'outer_roll_cross']},
             
-            # Column-specific row preferences (4 tests) 
+            # Column-specific row preferences - 4 tests (columns 1-4 only)
             'column1_upper_vs_lower': {'description': 'Column 1: Q vs Z (F1)', 'category': 'column1_row_pref', 'values': ['1', '3']},
             'column2_upper_vs_lower': {'description': 'Column 2: W vs X (F2)', 'category': 'column2_row_pref', 'values': ['1', '3']},
             'column3_upper_vs_lower': {'description': 'Column 3: E vs C (F3)', 'category': 'column3_row_pref', 'values': ['1', '3']},
             'column4_upper_vs_lower': {'description': 'Column 4: R vs V (F4)', 'category': 'column4_row_pref', 'values': ['1', '3']},
         }
         
-        logger.info(f"Initialized focused hypothesis testing with {len(self.hypotheses)} hypotheses")
+        # Add column 5 hypotheses only if requested
+        if include_column5:
+            self.hypotheses.update({
+                'column5_0v1': {'description': 'Column 5: 0 vs 1 key', 'category': 'column5_count', 'values': ['0', '1']},
+                'column5_1v2': {'description': 'Column 5: 1 vs 2 keys', 'category': 'column5_count', 'values': ['1', '2']},
+                'column5_upper_vs_lower': {'description': 'Column 5: T vs B (F4)', 'category': 'column5_row_pref', 'values': ['1', '3']},
+            })
+        
+        total_hypotheses = len(self.hypotheses)
+        logger.info(f"Initialized focused hypothesis testing with {total_hypotheses} hypotheses (column5={include_column5})")
+
+    def _classify_single_bigram(self, pos1: KeyPosition, pos2: KeyPosition) -> Dict[str, Any]:
+        """Classify a single bigram according to corrected hypothesis dimensions."""
+        
+        # Skip column 5 keys unless specifically testing column 5
+        column5_keys = {'t', 'g', 'b'}
+        if not self.include_column5:
+            if pos1.key in column5_keys or pos2.key in column5_keys:
+                # Return minimal classification excluding this bigram from most tests
+                return {
+                    'same_row_column_separation': None,
+                    'cross_row_column_separation': None, 
+                    'cross_row_same_column': None,
+                    'home_key_count': None,
+                    'row_separation': None,
+                    'column5_count': None,
+                    'dominant_finger': None,
+                    'same_row_direction': None,
+                    'cross_row_direction': None,
+                    'column1_row_pref': None,
+                    'column2_row_pref': None,
+                    'column3_row_pref': None,
+                    'column4_row_pref': None,
+                    'column5_row_pref': None,
+                }
+        
+        # Basic measurements - CORRECTED to use column separation not finger separation
+        column_separation = abs(pos1.column - pos2.column)
+        row_separation = abs(pos1.row - pos2.row)
+        
+        # Home keys (finger-column home keys: A,S,D,F) - exclude G if not testing column 5
+        if self.include_column5:
+            home_keys = {'a', 's', 'd', 'f'}  # Column 5 home key 'g' excluded from "home keys" concept
+        else:
+            home_keys = {'a', 's', 'd', 'f'}
+        home_key_count = sum(1 for pos in [pos1, pos2] if pos.key in home_keys)
+        
+        # Column 5 keys (index finger extended position: T,G,B)
+        column5_keys = {'t', 'g', 'b'}
+        if self.include_column5:
+            column5_count = sum(1 for pos in [pos1, pos2] if pos.key in column5_keys)
+        else:
+            column5_count = 0  # Always 0 when not testing column 5
+        
+        # Direction calculation (based on column movement, not finger)
+        if row_separation == 0:  # Same row
+            if pos2.column > pos1.column:
+                direction = 'inner_roll'  # Left to right
+            elif pos2.column < pos1.column:
+                direction = 'outer_roll'  # Right to left
+            else:
+                direction = 'same_column'
+        else:  # Cross row
+            if pos2.column > pos1.column:
+                direction = 'inner_roll_cross'
+            elif pos2.column < pos1.column:
+                direction = 'outer_roll_cross'
+            else:
+                direction = 'same_column_cross'
+        
+        # Dominant finger - FIXED: this should work correctly
+        # Note: for finger preference tests, we want to compare actual finger usage
+        finger_separation = abs(pos1.finger - pos2.finger)
+        dominant_finger = max(pos1.finger, pos2.finger)
+        
+        # Column-specific row preferences - CORRECTED logic  
+        column_row_prefs = {}
+        max_column = 5 if self.include_column5 else 4
+        
+        for column in range(1, max_column + 1):
+            # Find which keys (if any) are in this column
+            keys_in_column = []
+            if pos1.column == column:
+                keys_in_column.append(pos1)
+            if pos2.column == column:
+                keys_in_column.append(pos2)
+            
+            if len(keys_in_column) == 1:
+                # Exactly one key in this column
+                column_row_prefs[f'column{column}_row_pref'] = str(keys_in_column[0].row)
+            elif len(keys_in_column) == 2:
+                # Both keys in this column - for upper vs lower comparison
+                rows = [k.row for k in keys_in_column]
+                if 1 in rows and 3 in rows:
+                    # Contains both upper and lower - use first key's row
+                    column_row_prefs[f'column{column}_row_pref'] = str(pos1.row)
+                elif 1 in rows:
+                    # Contains upper row
+                    column_row_prefs[f'column{column}_row_pref'] = '1'
+                elif 3 in rows:
+                    # Contains lower row  
+                    column_row_prefs[f'column{column}_row_pref'] = '3'
+                else:
+                    # Only home row keys or mixed non-target rows
+                    column_row_prefs[f'column{column}_row_pref'] = None
+            else:
+                # No keys in this column
+                column_row_prefs[f'column{column}_row_pref'] = None
+        
+        return {
+            # Column separation hypotheses (CORRECTED from finger separation)
+            'same_row_column_separation': str(column_separation) if row_separation == 0 else None,
+            'cross_row_column_separation': str(column_separation) if row_separation > 0 else None,
+            'cross_row_same_column': str(column_separation == 0) if row_separation > 0 else None,
+            
+            # Movement hypothesis
+            'home_key_count': str(home_key_count),
+            
+            # Vertical separation hypothesis
+            'row_separation': str(row_separation),
+            
+            # Horizontal reach hypothesis (only if testing column 5)
+            'column5_count': str(column5_count) if self.include_column5 else None,
+            
+            # Finger preference hypothesis (uses actual finger numbers)
+            'dominant_finger': str(dominant_finger) if finger_separation > 0 else None,
+            
+            # Direction hypotheses
+            'same_row_direction': direction if row_separation == 0 and direction not in ['same_column'] else None,
+            'cross_row_direction': direction if row_separation > 0 and direction not in ['same_column_cross'] else None,
+            
+            # Column-specific row preferences
+            **column_row_prefs
+        }
     
     def analyze_hypotheses(self, data: pd.DataFrame) -> Dict[str, Any]:
-        """Analyze all 20 focused hypotheses."""
-        logger.info("Running focused hypothesis testing (20 hypotheses)...")
+        """Analyze all focused hypotheses."""
+        logger.info("Running focused hypothesis testing...")
         
         # Classify all bigrams
         bigram_classifications = self._classify_bigrams_for_hypotheses(data)
@@ -239,100 +369,31 @@ class FocusedHypothesisAnalyzer:
             'total_hypotheses': len(self.hypotheses),
             'total_comparisons': len(all_p_values)
         }
-    
+        
     def _classify_bigrams_for_hypotheses(self, data: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
-        """Classify each bigram according to all hypothesis dimensions."""
-        classifications = {}
-        
-        # Get all unique bigrams
-        all_bigrams = set()
-        for col in ['chosen_bigram', 'unchosen_bigram']:
-            all_bigrams.update(data[col].unique())
-        
-        for bigram in all_bigrams:
-            if len(bigram) >= 2:
-                char1, char2 = bigram[0], bigram[1]
-                
-                if char1 in self.key_positions and char2 in self.key_positions:
-                    pos1 = self.key_positions[char1]
-                    pos2 = self.key_positions[char2]
+            """Classify each bigram according to all hypothesis dimensions."""
+            classifications = {}
+            
+            # Get all unique bigrams
+            all_bigrams = set()
+            for col in ['chosen_bigram', 'unchosen_bigram']:
+                all_bigrams.update(data[col].unique())
+            
+            for bigram in all_bigrams:
+                if len(bigram) >= 2:
+                    char1, char2 = bigram[0], bigram[1]
                     
-                    classifications[bigram] = self._classify_single_bigram(pos1, pos2)
-        
-        return classifications
-    
-    def _classify_single_bigram(self, pos1: KeyPosition, pos2: KeyPosition) -> Dict[str, Any]:
-        """Classify a single bigram according to all hypothesis dimensions."""
-        
-        # Basic measurements
-        finger_separation = abs(pos1.finger - pos2.finger)
-        row_separation = abs(pos1.row - pos2.row)
-        
-        # Home keys (finger-column home keys: A,S,D,F)
-        home_keys = {'a', 's', 'd', 'f'}
-        home_key_count = sum(1 for pos in [pos1, pos2] if pos.key in home_keys)
-        
-        # Column 5 keys (index finger extended position: T,G,B)
-        column5_keys = {'t', 'g', 'b'}
-        column5_count = sum(1 for pos in [pos1, pos2] if pos.key in column5_keys)
-        
-        # Direction calculation
-        if row_separation == 0:  # Same row
-            if pos2.finger > pos1.finger:
-                direction = 'inner_roll'
-            elif pos2.finger < pos1.finger:
-                direction = 'outer_roll'
-            else:
-                direction = 'same_finger'
-        else:  # Cross row
-            if pos2.finger > pos1.finger:
-                direction = 'inner_roll_cross'
-            elif pos2.finger < pos1.finger:
-                direction = 'outer_roll_cross'
-            else:
-                direction = 'same_finger_cross'
-        
-        # Dominant finger (higher finger number for finger preference tests)
-        dominant_finger = max(pos1.finger, pos2.finger)
-        
-        # Column-specific row preferences
-        column_row_prefs = {}
-        for column in [1, 2, 3, 4]:
-            if pos1.column == column and pos2.column == column:
-                # Both keys in same column, compare rows
-                column_row_prefs[f'column{column}_row_pref'] = f"{pos1.row}" if pos1.row != pos2.row else None
-            else:
-                column_row_prefs[f'column{column}_row_pref'] = None
-        
-        return {
-            # Finger separation hypotheses
-            'same_row_finger_separation': str(finger_separation) if row_separation == 0 else None,
-            'cross_row_finger_separation': str(finger_separation) if row_separation > 0 else None,
-            'cross_row_same_finger': str(finger_separation == 0) if row_separation > 0 else None,
+                    if char1 in self.key_positions and char2 in self.key_positions:
+                        pos1 = self.key_positions[char1]
+                        pos2 = self.key_positions[char2]
+                        
+                        classifications[bigram] = self._classify_single_bigram(pos1, pos2)
             
-            # Movement hypothesis
-            'home_key_count': str(home_key_count),
-            
-            # Vertical separation hypothesis
-            'row_separation': str(row_separation),
-            
-            # Horizontal reach hypothesis
-            'column5_count': str(column5_count),
-            
-            # Finger preference hypothesis
-            'dominant_finger': str(dominant_finger) if finger_separation > 0 else None,
-            
-            # Direction hypotheses
-            'same_row_direction': direction if row_separation == 0 and direction != 'same_finger' else None,
-            'cross_row_direction': direction if row_separation > 0 and direction != 'same_finger_cross' else None,
-            
-            # Column-specific row preferences
-            **column_row_prefs
-        }
+            return classifications
     
     def _extract_comparisons_for_hypothesis(self, data: pd.DataFrame, 
-                                          classifications: Dict[str, Dict[str, Any]], 
-                                          hyp_config: Dict[str, Any]) -> Dict[Tuple[str, str], Dict[str, int]]:
+                                        classifications: Dict[str, Dict[str, Any]], 
+                                        hyp_config: Dict[str, Any]) -> Dict[Tuple[str, str], Dict[str, int]]:
         """Extract pairwise comparisons for a specific hypothesis."""
         
         comparisons = defaultdict(lambda: {'wins_item1': 0, 'total': 0})
@@ -364,7 +425,7 @@ class FocusedHypothesisAnalyzer:
         return dict(comparisons)
     
     def _calculate_hypothesis_stats(self, comparisons: Dict[Tuple[str, str], Dict[str, int]], 
-                                  hyp_config: Dict[str, Any]) -> Dict[str, Any]:
+                                hyp_config: Dict[str, Any]) -> Dict[str, Any]:
         """Calculate statistics for a single hypothesis test."""
         
         if not comparisons:
@@ -415,9 +476,9 @@ class FocusedHypothesisAnalyzer:
         }
     
     def _apply_global_correction(self, hypothesis_results: Dict[str, Any], 
-                               all_p_values: List[float], 
-                               p_value_info: List[Dict]) -> Dict[str, Any]:
-        """Apply global multiple testing correction across all 20 hypotheses."""
+                            all_p_values: List[float], 
+                            p_value_info: List[Dict]) -> Dict[str, Any]:
+        """Apply global multiple testing correction across all hypotheses."""
         
         if not all_p_values:
             return hypothesis_results
@@ -500,16 +561,19 @@ class FocusedHypothesisAnalyzer:
 class PreferenceAnalyzer:
     """Main class for comprehensive keyboard preference analysis (exploratory + focused)."""
     
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, include_column5: bool = False):
         # Load configuration
         self.config = self._load_config(config_path)
         
-        # Define keyboard layout
+        # Store column 5 flag FIRST - before defining keyboard layout
+        self.include_column5 = include_column5
+        
+        # Define keyboard layout (which uses the include_column5 flag)
         self.key_positions = self._define_keyboard_layout()
         self.left_hand_keys = set(self.key_positions.keys())
         
-        # Initialize focused hypothesis analyzer
-        self.focused_analyzer = FocusedHypothesisAnalyzer(self.config, self.key_positions)
+        # Initialize focused hypothesis analyzer with column 5 flag
+        self.focused_analyzer = FocusedHypothesisAnalyzer(self.config, self.key_positions, include_column5)
         
         # Store data for access in other methods
         self.data = None
@@ -587,28 +651,36 @@ class PreferenceAnalyzer:
         analyze_keys = self.config.get('analyze_keys', 'left_hand_15')
         
         if analyze_keys == 'left_hand_15':
-            return {
+            layout = {
                 # Upper row (row 1)
                 'q': KeyPosition('q', 1, 1, 1),
                 'w': KeyPosition('w', 1, 2, 2),
                 'e': KeyPosition('e', 1, 3, 3),
                 'r': KeyPosition('r', 1, 4, 4),
-                't': KeyPosition('t', 1, 5, 4),
                 
                 # Middle/home row (row 2)
                 'a': KeyPosition('a', 2, 1, 1),
                 's': KeyPosition('s', 2, 2, 2),
                 'd': KeyPosition('d', 2, 3, 3),
                 'f': KeyPosition('f', 2, 4, 4),
-                'g': KeyPosition('g', 2, 5, 4),
                 
                 # Lower row (row 3)
                 'z': KeyPosition('z', 3, 1, 1),
                 'x': KeyPosition('x', 3, 2, 2),
                 'c': KeyPosition('c', 3, 3, 3),
                 'v': KeyPosition('v', 3, 4, 4),
-                'b': KeyPosition('b', 3, 5, 4)
             }
+            
+            # Add column 5 keys only if include_column5 is True
+            if self.include_column5:
+                layout.update({
+                    't': KeyPosition('t', 1, 5, 4),
+                    'g': KeyPosition('g', 2, 5, 4),
+                    'b': KeyPosition('b', 3, 5, 4)
+                })
+            
+            return layout
+            
         elif analyze_keys == 'home_block_12':
             return {
                 # Upper row
@@ -631,7 +703,7 @@ class PreferenceAnalyzer:
             }
         else:
             raise ValueError(f"Unsupported analyze_keys option: {analyze_keys}")
-    
+            
     def analyze_preferences(self, data_path: str, output_folder: str) -> Dict[str, Any]:
         """Run complete preference analysis (exploratory + focused hypotheses)."""
         logger.info("Starting comprehensive preference analysis (exploratory + focused)...")
@@ -1441,8 +1513,14 @@ class PreferenceAnalyzer:
         # 3. Transition preference rankings
         self._plot_transition_rankings(results['transition_preferences'], output_folder)
         
-        # 4. Effect size distributions
+        # 4. Transition strength differences with confidence intervals
+        self._plot_transition_strengths_with_cis(results['transition_preferences'], output_folder)
+        
+        # 5. Effect size distributions
         self._plot_effect_size_distributions(results, output_folder)
+        
+        # 6. Statistical comparison plots
+        self._plot_statistical_comparisons(results, output_folder)
     
     def _plot_key_preference_heatmap(self, key_results: Dict[str, Any], output_folder: str) -> None:
         """Create heatmap showing key preferences."""
@@ -1618,6 +1696,177 @@ class PreferenceAnalyzer:
         
         plt.tight_layout()
         plt.savefig(os.path.join(output_folder, 'transition_rankings.png'), 
+                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
+        plt.close()
+    
+    def _plot_transition_strengths_with_cis(self, transition_results: Dict[str, Any], output_folder: str) -> None:
+        """Create forest plots showing transition strengths with confidence intervals."""
+        
+        rankings = transition_results['overall_rankings']
+        bt_cis = transition_results['bt_confidence_intervals']
+        
+        if not rankings:
+            return
+        
+        # Create top 15 plot
+        self._create_transition_forest_plot(rankings[:15], bt_cis, output_folder, 
+                                          'transition_strengths_with_cis_top15.png',
+                                          'Top 15 Transition Type Preferences with Confidence Intervals')
+        
+        # Create all transitions plot
+        self._create_transition_forest_plot(rankings, bt_cis, output_folder,
+                                          'transition_strengths_with_cis_all.png', 
+                                          'All Transition Type Preferences with Confidence Intervals')
+    
+    def _create_transition_forest_plot(self, rankings: List[Tuple[str, float]], 
+                                     bt_cis: Dict[str, Tuple[float, float]], 
+                                     output_folder: str, filename: str, title: str) -> None:
+        """Create a single transition forest plot."""
+        
+        if not rankings:
+            return
+        
+        # Prepare data with proper delta formatting
+        transition_types = []
+        for t, _ in rankings:
+            # Convert to proper format with delta symbol
+            formatted_name = t.replace('Δ', 'Δ')  # Ensure proper delta symbol
+            transition_types.append(formatted_name)
+        
+        strengths = [float(strength) for _, strength in rankings]
+        ci_lowers = [float(bt_cis.get(t, (np.nan, np.nan))[0]) for t, _ in rankings]
+        ci_uppers = [float(bt_cis.get(t, (np.nan, np.nan))[1]) for t, _ in rankings]
+        
+        # Calculate error bars, handling NaN values
+        lower_errs = []
+        upper_errs = []
+        for strength, ci_lower, ci_upper in zip(strengths, ci_lowers, ci_uppers):
+            if np.isnan(ci_lower) or np.isnan(ci_upper):
+                lower_errs.append(0)
+                upper_errs.append(0)
+            else:
+                lower_errs.append(abs(strength - ci_lower))
+                upper_errs.append(abs(ci_upper - strength))
+        
+        # Determine figure size based on number of items
+        height = max(8, len(transition_types) * 0.4)
+        fig, ax = plt.subplots(figsize=(14, height))
+        
+        # Create horizontal error bar plot
+        y_pos = np.arange(len(transition_types))
+        colors = ['green' if s > 0 else 'red' for s in strengths]
+        
+        ax.errorbar(strengths, y_pos, xerr=[lower_errs, upper_errs], 
+                   fmt='o', color='black', ecolor='gray', capsize=3, capthick=1)
+        
+        # Color the points
+        for i, (strength, color) in enumerate(zip(strengths, colors)):
+            ax.scatter(strength, i, c=color, s=60, alpha=0.7, zorder=5)
+        
+        # Customize
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(transition_types, fontsize=9)
+        ax.set_xlabel('Bradley-Terry Strength (95% CI)')
+        ax.set_title(title.lower())
+        ax.axvline(x=0, color='black', linestyle='--', alpha=0.5)
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, filename), 
+                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
+        plt.close()
+    
+    def _plot_statistical_comparisons(self, results: Dict[str, Any], output_folder: str) -> None:
+        """Create plots showing statistical comparisons and effect sizes."""
+        
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        
+        # 1. Key strength range comparison
+        key_rankings = results['key_preferences']['overall_rankings']
+        if key_rankings:
+            key_strengths = [strength for _, strength in key_rankings]
+            key_cis = results['key_preferences']['bt_confidence_intervals']
+            key_ci_widths = []
+            for key, strength in key_rankings:
+                ci_lower, ci_upper = key_cis.get(key, (strength, strength))
+                key_ci_widths.append(ci_upper - ci_lower)
+            
+            ax1.boxplot([key_strengths], labels=['Keys'])
+            ax1.set_ylabel('Bradley-Terry Strength')
+            ax1.set_title('distribution of key strengths')
+            ax1.grid(True, alpha=0.3)
+            
+            # Add individual points
+            y_vals = np.random.normal(1, 0.04, len(key_strengths))
+            colors = ['green' if s > 0 else 'red' for s in key_strengths]
+            ax1.scatter(y_vals, key_strengths, c=colors, alpha=0.6, s=50)
+        
+        # 2. Transition strength range comparison
+        transition_rankings = results['transition_preferences']['overall_rankings']
+        if transition_rankings:
+            transition_strengths = [strength for _, strength in transition_rankings]
+            transition_cis = results['transition_preferences']['bt_confidence_intervals']
+            
+            ax2.boxplot([transition_strengths], labels=['Transitions'])
+            ax2.set_ylabel('Bradley-Terry Strength')
+            ax2.set_title('distribution of transition strengths')
+            ax2.grid(True, alpha=0.3)
+            
+            # Add individual points
+            y_vals = np.random.normal(1, 0.04, len(transition_strengths))
+            colors = ['green' if s > 0 else 'red' for s in transition_strengths]
+            ax2.scatter(y_vals, transition_strengths, c=colors, alpha=0.6, s=30)
+        
+        # 3. Confidence interval widths
+        if key_rankings:
+            ax3.hist(key_ci_widths, bins=15, alpha=0.7, color='blue', edgecolor='black')
+            ax3.set_xlabel('95% CI Width')
+            ax3.set_ylabel('Frequency')
+            ax3.set_title('key preference confidence interval widths')
+            ax3.axvline(np.mean(key_ci_widths), color='red', linestyle='--', 
+                       label=f'Mean: {np.mean(key_ci_widths):.3f}')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+        
+        # 4. Statistical significance summary
+        key_stats = results['key_preferences']['pairwise_statistics']
+        transition_stats = results['transition_preferences']['pairwise_statistics']
+        
+        # Count significant results
+        key_significant = sum(1 for stats in key_stats.values() 
+                             if stats.get('significant_corrected', False))
+        key_total = len(key_stats)
+        
+        transition_significant = sum(1 for stats in transition_stats.values() 
+                                   if stats.get('significant_corrected', False))
+        transition_total = len(transition_stats)
+        
+        categories = ['Key\nComparisons', 'Transition\nComparisons']
+        significant_counts = [key_significant, transition_significant]
+        total_counts = [key_total, transition_total]
+        
+        x_pos = np.arange(len(categories))
+        width = 0.35
+        
+        ax4.bar(x_pos - width/2, total_counts, width, label='Total', color='lightblue', alpha=0.7)
+        ax4.bar(x_pos + width/2, significant_counts, width, label='Significant', color='darkblue', alpha=0.7)
+        
+        ax4.set_ylabel('Number of Comparisons')
+        ax4.set_title('statistical significance summary')
+        ax4.set_xticks(x_pos)
+        ax4.set_xticklabels(categories)
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+        
+        # Add percentage labels
+        for i, (sig, total) in enumerate(zip(significant_counts, total_counts)):
+            if total > 0:
+                pct = sig / total * 100
+                ax4.text(i, max(total_counts) * 0.9, f'{pct:.1f}%', 
+                        ha='center', va='center', fontweight='bold')
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, 'statistical_comparisons.png'), 
                    dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
         plt.close()
     
@@ -2038,6 +2287,10 @@ class PreferenceAnalyzer:
             "  • key_preference_heatmap.png - Spatial preference visualization",
             "  • key_strengths_with_cis.png - Forest plot with confidence intervals",
             "  • transition_rankings.png - Top transition preferences",
+            "  • transition_strengths_with_cis_top15.png - Top 15 transition forest plot",
+            "  • transition_strengths_with_cis_all.png - All transitions forest plot",
+            "  • statistical_comparisons.png - Statistical summary comparisons",
+            "  • effect_size_distributions.png - Distribution of effect sizes",
             "",
             "Root directory:",
             "  • complete_combined_analysis.json - Full results from both analyses",
@@ -2106,6 +2359,8 @@ def main():
                        help='Output directory for results')
     parser.add_argument('--config', default='config.yaml',
                        help='Path to configuration file (default: config.yaml)')
+    parser.add_argument('--include-column5', action='store_true',
+                       help='Include column 5 keys (T, G, B) in analysis and add column 5 specific tests')
     
     args = parser.parse_args()
     
@@ -2119,8 +2374,8 @@ def main():
         return 1
     
     try:
-        # Run combined analysis
-        analyzer = PreferenceAnalyzer(args.config)
+        # Run combined analysis with column 5 flag
+        analyzer = PreferenceAnalyzer(args.config, include_column5=args.include_column5)
         results = analyzer.analyze_preferences(args.data, args.output)
         
         logger.info("Combined analysis completed successfully!")
@@ -2130,8 +2385,11 @@ def main():
         focused_summary = results['focused_hypotheses']['summary']
         key_rankings = results['key_preferences']['overall_rankings']
         
+        column5_status = "included" if args.include_column5 else "excluded"
+        
         print(f"\nQUICK SUMMARY:")
         print(f"==============")
+        print(f"Column 5 keys: {column5_status}")
         print(f"Focused Hypotheses: {len(focused_summary['significant_results'])}/{results['focused_hypotheses']['total_hypotheses']} significant")
         print(f"Large Effects: {len(focused_summary['large_effects'])}")
         print(f"Top 3 Keys: {', '.join([k.upper() for k, _ in key_rankings[:3]])}")
@@ -2143,6 +2401,6 @@ def main():
     except Exception as e:
         logger.error(f"Analysis failed: {e}")
         return 1
-
+    
 if __name__ == "__main__":
     exit(main())
