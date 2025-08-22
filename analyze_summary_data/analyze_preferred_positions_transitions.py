@@ -146,16 +146,15 @@ class FocusedHypothesisAnalyzer:
         
         # Define the core hypotheses (excluding column 5 by default)
         self.hypotheses = {
-            # Column separation effects (NOT finger separation) - 4 tests
+            # Column separation effects (NOT finger separation) - 5 tests
             'same_row_column_sep_1v2': {'description': 'Same-row: 1 vs 2 columns apart', 'category': 'same_row_column_separation', 'values': ['1', '2']},
-            'same_row_column_sep_2v3': {'description': 'Same-row: 2 vs 3 columns apart', 'category': 'same_row_column_separation', 'values': ['2', '3']},
+            'same_row_column_sep_1v3': {'description': 'Same-row: 1 vs 3 columns apart', 'category': 'same_row_column_separation', 'values': ['1', '3']},
             'cross_row_column_sep_1v2': {'description': 'Cross-row: 1 vs 2 columns apart', 'category': 'cross_row_column_separation', 'values': ['1', '2']},
-            'cross_row_column_sep_2v3': {'description': 'Cross-row: 2 vs 3 columns apart', 'category': 'cross_row_column_separation', 'values': ['2', '3']},
+            'cross_row_column_sep_1v3': {'description': 'Cross-row: 1 vs 3 columns apart', 'category': 'cross_row_column_separation', 'values': ['1', '3']},
             'cross_row_same_vs_diff_column': {'description': 'Cross-row: same vs different column', 'category': 'cross_row_same_column', 'values': ['True', 'False']},
             
-            # Movement effects - 2 tests  
-            'home_keys_2v1': {'description': 'Home keys: 2 vs 1', 'category': 'home_key_count', 'values': ['2', '1']},
-            'home_keys_1v0': {'description': 'Home keys: 1 vs 0', 'category': 'home_key_count', 'values': ['1', '0']},
+            # Movement effects - 1 test  
+            'home_vs_other_keys': {'description': 'Home keys: home vs other keys', 'category': 'involves_home_keys', 'values': ['home', 'other']},
             
             # Vertical separation effects - 2 tests
             'row_sep_0v1': {'description': 'Row separation: 0 vs 1', 'category': 'row_separation', 'values': ['0', '1']},
@@ -164,7 +163,7 @@ class FocusedHypothesisAnalyzer:
             # Finger preferences - 3 tests
             'finger_f4_vs_f3': {'description': 'Finger: F4 vs F3', 'category': 'dominant_finger', 'values': ['4', '3']},
             'finger_f3_vs_f2': {'description': 'Finger: F3 vs F2', 'category': 'dominant_finger', 'values': ['3', '2']},
-            'finger_f2_vs_f1': {'description': 'Finger: F2 vs F1', 'category': 'dominant_finger', 'values': ['2', '1']},
+            'finger_f1_vs_other': {'description': 'Finger: F1 vs other fingers', 'category': 'involves_finger_1', 'values': ['1', 'other']},
             
             # Direction effects - 2 tests
             'same_row_direction': {'description': 'Same-row: inner vs outer roll', 'category': 'same_row_direction', 'values': ['inner_roll', 'outer_roll']},
@@ -180,9 +179,7 @@ class FocusedHypothesisAnalyzer:
         # Add column 5 hypotheses only if requested
         if include_column5:
             self.hypotheses.update({
-                'column5_0v1': {'description': 'Column 5: 0 vs 1 key', 'category': 'column5_count', 'values': ['0', '1']},
-                'column5_1v2': {'description': 'Column 5: 1 vs 2 keys', 'category': 'column5_count', 'values': ['1', '2']},
-                'column5_upper_vs_lower': {'description': 'Column 5: T vs B (F4)', 'category': 'column5_row_pref', 'values': ['1', '3']},
+                'column5_vs_other': {'description': 'Column 5: column 5 vs other columns', 'category': 'involves_column5', 'values': ['column5', 'other']},
             })
         
         total_hypotheses = len(self.hypotheses)
@@ -224,12 +221,21 @@ class FocusedHypothesisAnalyzer:
             home_keys = {'a', 's', 'd', 'f'}
         home_key_count = sum(1 for pos in [pos1, pos2] if pos.key in home_keys)
         
+        # Home key involvement test
+        involves_home_keys = 'home' if (pos1.key in home_keys or pos2.key in home_keys) else 'other'
+
         # Column 5 keys (index finger extended position: T,G,B)
         column5_keys = {'t', 'g', 'b'}
         if self.include_column5:
             column5_count = sum(1 for pos in [pos1, pos2] if pos.key in column5_keys)
         else:
             column5_count = 0  # Always 0 when not testing column 5
+
+        # Column 5 involvement test
+        if self.include_column5:
+            involves_column5 = 'column5' if (pos1.column == 5 or pos2.column == 5) else 'other'
+        else:
+            involves_column5 = None
         
         # Direction calculation (based on column movement, not finger)
         if row_separation == 0:  # Same row
@@ -251,7 +257,8 @@ class FocusedHypothesisAnalyzer:
         # Note: for finger preference tests, we want to compare actual finger usage
         finger_separation = abs(pos1.finger - pos2.finger)
         dominant_finger = max(pos1.finger, pos2.finger)
-        
+        involves_finger_1 = '1' if (pos1.finger == 1 or pos2.finger == 1) else 'other'
+
         # Column-specific row preferences - CORRECTED logic  
         column_row_prefs = {}
         max_column = 5 if self.include_column5 else 4
@@ -294,15 +301,18 @@ class FocusedHypothesisAnalyzer:
             
             # Movement hypothesis
             'home_key_count': str(home_key_count),
-            
+            'involves_home_keys': involves_home_keys,
+
             # Vertical separation hypothesis
             'row_separation': str(row_separation),
             
             # Horizontal reach hypothesis (only if testing column 5)
             'column5_count': str(column5_count) if self.include_column5 else None,
-            
+            'involves_column5': involves_column5,
+
             # Finger preference hypothesis (uses actual finger numbers)
             'dominant_finger': str(dominant_finger) if finger_separation > 0 else None,
+            'involves_finger_1': involves_finger_1 if finger_separation > 0 else None,
             
             # Direction hypotheses
             'same_row_direction': direction if row_separation == 0 and direction not in ['same_column'] else None,
@@ -2265,10 +2275,10 @@ class PreferenceAnalyzer:
         
         report_lines.extend([
             "",
-            "METHODOLOGY:",
+            "METHODS:",
             "=" * 15,
             "",
-            "• Focused Analysis: 20 pre-specified hypotheses with global FDR correction",
+            "• Focused Analysis: Pre-specified hypotheses with global FDR correction",
             "• Exploratory Analysis: Bradley-Terry models with bootstrap confidence intervals",
             "• Cross-Validation: Confirmatory findings validated against exploratory patterns",
             "• Effect Sizes: Practical significance assessed alongside statistical significance",
