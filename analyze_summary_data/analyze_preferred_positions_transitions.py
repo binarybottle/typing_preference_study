@@ -237,15 +237,15 @@ class FocusedHypothesisAnalyzer:
             },
             
             # 6. Column pair direction preferences (2 tests)
-            'direction_adjacent_columns': {
-                'description': 'Adjacent columns: inner vs outer roll', 
-                'category': 'adjacent_columns_direction', 
+            'direction_same_row': {
+                'description': 'Same row: inner vs outer roll', 
+                'category': 'same_row_direction', 
                 'values': ['inner_roll', 'outer_roll']
             },
-            'direction_nonadjacent_columns': {
-                'description': 'Non-adjacent columns: inner vs outer roll', 
-                'category': 'nonadjacent_columns_direction', 
-                'values': ['inner_roll', 'outer_roll']
+            'direction_different_rows': {
+                'description': 'Different rows: inner vs outer roll', 
+                'category': 'cross_row_direction', 
+                'values': ['inner_roll_cross', 'outer_roll_cross']
             },
         }
         
@@ -277,8 +277,8 @@ class FocusedHypothesisAnalyzer:
                     'row_separation': None,
                     'dominant_column': None,
                     'involves_column1': None,
-                    'adjacent_columns_direction': None,
-                    'nonadjacent_columns_direction': None,
+                    'same_row_direction': None,
+                    'cross_row_direction': None,
                     'column1_row_pref': None,
                     'column2_row_pref': None,
                     'column3_row_pref': None,
@@ -298,22 +298,21 @@ class FocusedHypothesisAnalyzer:
         # Column 5 keys (index finger extended position: T,G,B)
         column5_keys = {'t', 'g', 'b'}
         
-        # Direction calculation (based on column adjacency, not row patterns)
-        direction = None
-        if column_separation > 0:  # Only classify if keys are in different columns
+        # Direction calculation (based on column movement)
+        if row_separation == 0:  # Same row
             if pos2.column > pos1.column:
                 direction = 'inner_roll'  # Left to right
-            else:
+            elif pos2.column < pos1.column:
                 direction = 'outer_roll'  # Right to left
-        
-        # Direction preferences based on column adjacency
-        adjacent_columns_direction = None
-        nonadjacent_columns_direction = None
-        
-        if column_separation == 1 and direction:  # Adjacent columns
-            adjacent_columns_direction = direction
-        elif column_separation > 1 and direction:  # Non-adjacent columns  
-            nonadjacent_columns_direction = direction
+            else:
+                direction = 'same_column'
+        else:  # Cross row
+            if pos2.column > pos1.column:
+                direction = 'inner_roll_cross'
+            elif pos2.column < pos1.column:
+                direction = 'outer_roll_cross'
+            else:
+                direction = 'same_column_cross'
         
         # Column preferences - dominant column (higher column number)
         dominant_column = max(pos1.column, pos2.column) if column_separation > 0 else None
@@ -376,9 +375,9 @@ class FocusedHypothesisAnalyzer:
             'dominant_column': str(dominant_column) if dominant_column and column_separation > 0 else None,
             'involves_column1': involves_column1 if column_separation > 0 else None,
             
-            # Direction hypotheses (updated to use column adjacency)
-            'adjacent_columns_direction': adjacent_columns_direction,
-            'nonadjacent_columns_direction': nonadjacent_columns_direction,
+            # Direction hypotheses
+            'same_row_direction': direction if row_separation == 0 and direction not in ['same_column'] else None,
+            'cross_row_direction': direction if row_separation > 0 and direction not in ['same_column_cross'] else None,
             
             # Column-specific row preferences
             **column_row_prefs,
@@ -2221,10 +2220,10 @@ class PreferenceAnalyzer:
                 return ('Column 4', 'Column 5') if val1 == '4' else ('Column 5', 'Column 4')
             elif 'column_1_vs_other' in hyp_name:
                 return ('Column 1', 'other columns') if val1 == '1' else ('other columns', 'Column 1')
-            elif 'direction_adjacent_columns' in hyp_name:
+            elif 'direction_same_row' in hyp_name:
                 return ('inner roll', 'outer roll') if val1 == 'inner_roll' else ('outer roll', 'inner roll')
-            elif 'direction_nonadjacent_columns' in hyp_name:
-                return ('inner roll', 'outer roll') if val1 == 'inner_roll' else ('outer roll', 'inner roll')
+            elif 'direction_different_rows' in hyp_name:
+                return ('inner roll', 'outer roll') if val1 == 'inner_roll_cross' else ('outer roll', 'inner roll')
             elif 'same_vs_different_column_reach' in hyp_name:
                 return ('same column (1 row)', 'different column (1 row)') if val1 == 'same' else ('different column (1 row)', 'same column (1 row)')
             elif 'same_vs_different_column_hurdle' in hyp_name:
