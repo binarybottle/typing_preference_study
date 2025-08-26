@@ -144,52 +144,124 @@ class FocusedHypothesisAnalyzer:
         self.key_positions = key_positions
         self.include_column5 = include_column5
         
-        # Define the core hypotheses (excluding column 5 by default)
+        # Define the updated hypotheses based on the new naming scheme
         self.hypotheses = {
-            # Column separation effects (NOT finger separation) - 3 tests
-            #'same_row_column_sep_1v2or3': {'description': 'Same-row: 1 vs >1 columns apart', 'category': 'same_row_column_separation_binary', 'values': ['1', '>1']},
-            'same_row_column_sep_1v2': {'description': 'Same-row: 1 vs 2 columns apart', 'category': 'same_row_column_separation', 'values': ['1', '2']},
-            'same_row_column_sep_2v3': {'description': 'Same-row: 2 vs 3 columns apart', 'category': 'same_row_column_separation', 'values': ['2', '3']},
-            #'cross_row_1row_sep_column_sep_1v2or3': {'description': 'Cross-row (1 row): 1 vs >1 columns apart', 'category': 'cross_row_1row_column_separation_binary', 'values': ['1', '>1']},
-            'cross_row_column_sep_1v2': {'description': 'Cross-row: 1 vs 2 columns apart', 'category': 'cross_row_column_separation', 'values': ['1', '2']},
-            'cross_row_column_sep_2v3': {'description': 'Cross-row: 2 vs 3 columns apart', 'category': 'cross_row_column_separation', 'values': ['2', '3']},
-            'cross_row_1row_sep_same_vs_diff_col': {'description': 'Cross-row (1 row): same vs different column', 'category': 'cross_row_1row_same_vs_diff', 'values': ['same', 'different']},
-            'cross_row_2row_sep_same_vs_diff_col': {'description': 'Cross-row (2 rows): same vs different column', 'category': 'cross_row_2row_same_vs_diff', 'values': ['same', 'different']},
+            # 1. Finger load preferences (2 tests)
+            'same_vs_different_column_reach': {
+                'description': 'Same vs different column (1 row apart)', 
+                'category': 'cross_row_1row_same_vs_diff', 
+                'values': ['same', 'different']
+            },
+            'same_vs_different_column_hurdle': {
+                'description': 'Same vs different column (2 rows apart)', 
+                'category': 'cross_row_2row_same_vs_diff', 
+                'values': ['same', 'different']
+            },
             
-            # Movement effects - 1 test  
-            'home_vs_other_keys': {'description': 'Home keys: home vs other keys', 'category': 'involves_home_keys', 'values': ['home', 'other']},
+            # 2. Row preferences (5 tests - includes home vs other)
+            'home_vs_other_keys': {
+                'description': 'Home keys vs other keys', 
+                'category': 'involves_home_keys', 
+                'values': ['home', 'other']
+            },
+            'column1_upper_vs_lower_row': {
+                'description': 'Column 1: Upper vs Lower row', 
+                'category': 'column1_row_pref', 
+                'values': ['1', '3']
+            },
+            'column2_upper_vs_lower_row': {
+                'description': 'Column 2: Upper vs Lower row', 
+                'category': 'column2_row_pref', 
+                'values': ['1', '3']
+            },
+            'column3_upper_vs_lower_row': {
+                'description': 'Column 3: Upper vs Lower row', 
+                'category': 'column3_row_pref', 
+                'values': ['1', '3']
+            },
+            'column4_upper_vs_lower_row': {
+                'description': 'Column 4: Upper vs Lower row', 
+                'category': 'column4_row_pref', 
+                'values': ['1', '3']
+            },
             
-            # Vertical separation effects - 2 tests
-            'row_sep_0v1': {'description': 'Row separation: 0 vs 1', 'category': 'row_separation', 'values': ['0', '1']},
-            'row_sep_1v2': {'description': 'Row separation: 1 vs 2', 'category': 'row_separation', 'values': ['1', '2']},
+            # 3. Row pair preferences (2 tests)
+            'same_row_vs_reach': {
+                'description': 'Same row vs reach (1 row apart)', 
+                'category': 'row_separation', 
+                'values': ['0', '1']
+            },
+            'reach_vs_hurdle': {
+                'description': 'Reach vs hurdle (1 vs 2 rows apart)', 
+                'category': 'row_separation', 
+                'values': ['1', '2']
+            },
             
-            # Finger preferences - 3 tests
-            'finger_f4_vs_f3': {'description': 'Finger: F4 vs F3', 'category': 'dominant_finger', 'values': ['4', '3']},
-            'finger_f3_vs_f2': {'description': 'Finger: F3 vs F2', 'category': 'dominant_finger', 'values': ['3', '2']},
-            'finger_f1_vs_other': {'description': 'Finger: F1 vs other fingers', 'category': 'involves_finger_1', 'values': ['1', 'other']},
+            # 4. Column preferences (4 tests - includes column_4_vs_3, column_3_vs_2, column_1_vs_other, and optionally column_5_vs_4)
+            'column_4_vs_3': {
+                'description': 'Column 4 vs Column 3', 
+                'category': 'dominant_column', 
+                'values': ['4', '3']
+            },
+            'column_3_vs_2': {
+                'description': 'Column 3 vs Column 2', 
+                'category': 'dominant_column', 
+                'values': ['3', '2']
+            },
+            'column_1_vs_other': {
+                'description': 'Column 1 vs other columns', 
+                'category': 'involves_column1', 
+                'values': ['1', 'other']
+            },
             
-            # Direction effects - 2 tests
-            'same_row_direction': {'description': 'Same-row: inner vs outer roll', 'category': 'same_row_direction', 'values': ['inner_roll', 'outer_roll']},
-            'cross_row_direction': {'description': 'Cross-row: inner vs outer roll', 'category': 'cross_row_direction', 'values': ['inner_roll_cross', 'outer_roll_cross']},
+            # 5. Column pair preferences (4 tests)
+            'separation_of_1_vs_2_columns_same_row': {
+                'description': 'Same row: 1 vs 2 columns apart', 
+                'category': 'same_row_column_separation', 
+                'values': ['1', '2']
+            },
+            'separation_of_2_vs_3_columns_same_row': {
+                'description': 'Same row: 2 vs 3 columns apart', 
+                'category': 'same_row_column_separation', 
+                'values': ['2', '3']
+            },
+            'separation_of_1_vs_2_columns_different_rows': {
+                'description': 'Different rows: 1 vs 2 columns apart', 
+                'category': 'cross_row_column_separation', 
+                'values': ['1', '2']
+            },
+            'separation_of_2_vs_3_columns_different_rows': {
+                'description': 'Different rows: 2 vs 3 columns apart', 
+                'category': 'cross_row_column_separation', 
+                'values': ['2', '3']
+            },
             
-            # Column-specific row preferences - 4 tests (columns 1-4 only)
-            'column1_upper_vs_lower': {'description': 'Column 1: Q vs Z (F1)', 'category': 'column1_row_pref', 'values': ['1', '3']},
-            'column2_upper_vs_lower': {'description': 'Column 2: W vs X (F2)', 'category': 'column2_row_pref', 'values': ['1', '3']},
-            'column3_upper_vs_lower': {'description': 'Column 3: E vs C (F3)', 'category': 'column3_row_pref', 'values': ['1', '3']},
-            'column4_upper_vs_lower': {'description': 'Column 4: R vs V (F4)', 'category': 'column4_row_pref', 'values': ['1', '3']},
+            # 6. Column pair direction preferences (2 tests)
+            'direction_adjacent_columns': {
+                'description': 'Adjacent columns: inner vs outer roll', 
+                'category': 'adjacent_columns_direction', 
+                'values': ['inner_roll', 'outer_roll']
+            },
+            'direction_nonadjacent_columns': {
+                'description': 'Non-adjacent columns: inner vs outer roll', 
+                'category': 'nonadjacent_columns_direction', 
+                'values': ['inner_roll', 'outer_roll']
+            },
         }
         
-        # Add column 5 hypotheses only if requested
+        # Add column 5 hypothesis only if requested (specifically column 4 vs 5)
         if include_column5:
-            self.hypotheses.update({
-                'column5_vs_other': {'description': 'Column 5: column 5 vs other columns', 'category': 'involves_column5', 'values': ['column5', 'other']},
-            })
+            self.hypotheses['column_4_vs_5'] = {
+                'description': 'Column 4 vs Column 5', 
+                'category': 'column_4_vs_5_comparison', 
+                'values': ['4', '5']
+            }
         
         total_hypotheses = len(self.hypotheses)
         logger.info(f"Initialized focused hypothesis testing with {total_hypotheses} hypotheses (column5={include_column5})")
 
     def _classify_single_bigram(self, pos1: KeyPosition, pos2: KeyPosition) -> Dict[str, Any]:
-        """Classify a single bigram according to corrected hypothesis dimensions."""
+        """Classify a single bigram according to updated hypothesis dimensions."""
         
         # Skip column 5 keys unless specifically testing column 5
         column5_keys = {'t', 'g', 'b'}
@@ -198,75 +270,64 @@ class FocusedHypothesisAnalyzer:
                 # Return minimal classification excluding this bigram from most tests
                 return {
                     'same_row_column_separation': None,
-                    'same_row_column_separation_binary': None,
-                    'cross_row_column_separation': None, 
-                    'cross_row_1row_column_separation_binary': None,
+                    'cross_row_column_separation': None,
                     'cross_row_1row_same_vs_diff': None,
                     'cross_row_2row_same_vs_diff': None,
-                    'cross_row_same_column': None,
-                    'home_key_count': None,
+                    'involves_home_keys': None,
                     'row_separation': None,
-                    'column5_count': None,
-                    'dominant_finger': None,
-                    'same_row_direction': None,
-                    'cross_row_direction': None,
+                    'dominant_column': None,
+                    'involves_column1': None,
+                    'adjacent_columns_direction': None,
+                    'nonadjacent_columns_direction': None,
                     'column1_row_pref': None,
                     'column2_row_pref': None,
                     'column3_row_pref': None,
                     'column4_row_pref': None,
                     'column5_row_pref': None,
+                    'column_4_vs_5_comparison': None,
                 }
         
-        # Basic measurements - CORRECTED to use column separation not finger separation
+        # Basic measurements
         column_separation = abs(pos1.column - pos2.column)
         row_separation = abs(pos1.row - pos2.row)
         
         # Home keys (finger-column home keys: A,S,D,F) - exclude G if not testing column 5
-        if self.include_column5:
-            home_keys = {'a', 's', 'd', 'f'}  # Column 5 home key 'g' excluded from "home keys" concept
-        else:
-            home_keys = {'a', 's', 'd', 'f'}
-        home_key_count = sum(1 for pos in [pos1, pos2] if pos.key in home_keys)
-        
-        # Home key involvement test
+        home_keys = {'a', 's', 'd', 'f'}
         involves_home_keys = 'home' if (pos1.key in home_keys or pos2.key in home_keys) else 'other'
 
         # Column 5 keys (index finger extended position: T,G,B)
         column5_keys = {'t', 'g', 'b'}
-        if self.include_column5:
-            column5_count = sum(1 for pos in [pos1, pos2] if pos.key in column5_keys)
-        else:
-            column5_count = 0  # Always 0 when not testing column 5
-
-        # Column 5 involvement test
-        if self.include_column5:
-            involves_column5 = 'column5' if (pos1.column == 5 or pos2.column == 5) else 'other'
-        else:
-            involves_column5 = None
         
-        # Direction calculation (based on column movement, not finger)
-        if row_separation == 0:  # Same row
+        # Direction calculation (based on column adjacency, not row patterns)
+        direction = None
+        if column_separation > 0:  # Only classify if keys are in different columns
             if pos2.column > pos1.column:
                 direction = 'inner_roll'  # Left to right
-            elif pos2.column < pos1.column:
+            else:
                 direction = 'outer_roll'  # Right to left
-            else:
-                direction = 'same_column'
-        else:  # Cross row
-            if pos2.column > pos1.column:
-                direction = 'inner_roll_cross'
-            elif pos2.column < pos1.column:
-                direction = 'outer_roll_cross'
-            else:
-                direction = 'same_column_cross'
         
-        # Dominant finger - FIXED: this should work correctly
-        # Note: for finger preference tests, we want to compare actual finger usage
-        finger_separation = abs(pos1.finger - pos2.finger)
-        dominant_finger = max(pos1.finger, pos2.finger)
-        involves_finger_1 = '1' if (pos1.finger == 1 or pos2.finger == 1) else 'other'
+        # Direction preferences based on column adjacency
+        adjacent_columns_direction = None
+        nonadjacent_columns_direction = None
+        
+        if column_separation == 1 and direction:  # Adjacent columns
+            adjacent_columns_direction = direction
+        elif column_separation > 1 and direction:  # Non-adjacent columns  
+            nonadjacent_columns_direction = direction
+        
+        # Column preferences - dominant column (higher column number)
+        dominant_column = max(pos1.column, pos2.column) if column_separation > 0 else None
+        involves_column1 = '1' if (pos1.column == 1 or pos2.column == 1) else 'other'
 
-        # Column-specific row preferences - CORRECTED logic  
+        # Column 4 vs 5 specific comparison
+        column_4_vs_5_comparison = None
+        if self.include_column5 and column_separation > 0:
+            columns = sorted([pos1.column, pos2.column])
+            if columns == [4, 5]:
+                # Determine which column was chosen - use first key's column
+                column_4_vs_5_comparison = str(pos1.column)
+
+        # Column-specific row preferences
         column_row_prefs = {}
         max_column = 5 if self.include_column5 else 4
         
@@ -302,34 +363,28 @@ class FocusedHypothesisAnalyzer:
         
         return {
             # Column separation hypotheses
-            'same_row_column_separation_binary': ('1' if column_separation == 1 else '>1') if (row_separation == 0 and column_separation > 0) else None,
-            'cross_row_1row_column_separation_binary': ('1' if column_separation == 1 else '>1') if (row_separation == 1 and column_separation > 0) else None,
             'same_row_column_separation': str(column_separation) if row_separation == 0 else None,
             'cross_row_column_separation': str(column_separation) if row_separation > 0 else None,
             'cross_row_1row_same_vs_diff': 'same' if (row_separation == 1 and column_separation == 0) else ('different' if (row_separation == 1 and column_separation > 0) else None),
             'cross_row_2row_same_vs_diff': 'same' if (row_separation == 2 and column_separation == 0) else ('different' if (row_separation == 2 and column_separation > 0) else None),
             
-            # Movement hypothesis
-            'home_key_count': str(home_key_count),
+            # Row preferences
             'involves_home_keys': involves_home_keys,
-
-            # Vertical separation hypothesis
             'row_separation': str(row_separation),
             
-            # Horizontal reach hypothesis (only if testing column 5)
-            'column5_count': str(column5_count) if self.include_column5 else None,
-            'involves_column5': involves_column5,
-
-            # Finger preference hypothesis (uses actual finger numbers)
-            'dominant_finger': str(dominant_finger) if finger_separation > 0 else None,
-            'involves_finger_1': involves_finger_1 if finger_separation > 0 else None,
+            # Column preferences (updated to use column instead of finger)
+            'dominant_column': str(dominant_column) if dominant_column and column_separation > 0 else None,
+            'involves_column1': involves_column1 if column_separation > 0 else None,
             
-            # Direction hypotheses
-            'same_row_direction': direction if row_separation == 0 and direction not in ['same_column'] else None,
-            'cross_row_direction': direction if row_separation > 0 and direction not in ['same_column_cross'] else None,
+            # Direction hypotheses (updated to use column adjacency)
+            'adjacent_columns_direction': adjacent_columns_direction,
+            'nonadjacent_columns_direction': nonadjacent_columns_direction,
             
             # Column-specific row preferences
-            **column_row_prefs
+            **column_row_prefs,
+            
+            # Column 4 vs 5 specific comparison
+            'column_4_vs_5_comparison': column_4_vs_5_comparison,
         }
     
     def analyze_hypotheses(self, data: pd.DataFrame) -> Dict[str, Any]:
@@ -1333,7 +1388,7 @@ class PreferenceAnalyzer:
                 key_rows[key] = row_names[self.key_positions[key].row]
         
         # Create ranking description
-        ranking_desc = " > ".join([f"{key} ({key_rows.get(key, 'unknown')})" for key, _ in rankings])
+        ranking_desc = " > ".join([f"{key.upper()} ({key_rows.get(key, 'unknown')})" for key, _ in rankings])
         
         # Identify pattern
         if len(rankings) >= 3:
@@ -1398,9 +1453,9 @@ class PreferenceAnalyzer:
             'practical_recommendations': []
         }
         
-        # Validate finger preference hypothesis against individual key rankings
-        finger_validation = self._validate_finger_preferences(focused_results, key_results)
-        insights['validation_summary']['finger_preferences'] = finger_validation
+        # Validate column preference hypothesis against individual key rankings
+        column_validation = self._validate_column_preferences(focused_results, key_results)
+        insights['validation_summary']['column_preferences'] = column_validation
         
         # Generate practical recommendations
         insights['practical_recommendations'] = self._generate_practical_recommendations(
@@ -1409,75 +1464,76 @@ class PreferenceAnalyzer:
         
         return insights
     
-    def _validate_finger_preferences(self, focused_results: Dict[str, Any], 
+    def _validate_column_preferences(self, focused_results: Dict[str, Any], 
                                    key_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Cross-validate focused finger hypothesis with individual key rankings."""
+        """Cross-validate focused column hypothesis with individual key rankings."""
         
-        # Get finger preference results from focused analysis
-        finger_hypotheses = ['finger_f4_vs_f3', 'finger_f3_vs_f2', 'finger_f2_vs_f1']
-        focused_finger_results = {}
+        # Get column preference results from focused analysis
+        column_hypotheses = ['column_4_vs_3', 'column_3_vs_2', 'column_1_vs_other']
+        focused_column_results = {}
         
-        for hyp in finger_hypotheses:
+        for hyp in column_hypotheses:
             if hyp in focused_results['hypothesis_results']:
                 result = focused_results['hypothesis_results'][hyp]
                 if 'statistics' in result:
-                    focused_finger_results[hyp] = result['statistics']
+                    focused_column_results[hyp] = result['statistics']
         
-        # Analyze individual key rankings by finger
-        finger_strengths = {1: [], 2: [], 3: [], 4: []}
+        # Analyze individual key rankings by column
+        column_strengths = {1: [], 2: [], 3: [], 4: [], 5: []}
         for key, strength in key_results['overall_rankings']:
             if key in self.key_positions:
-                finger = self.key_positions[key].finger
-                finger_strengths[finger].append(strength)
+                column = self.key_positions[key].column
+                column_strengths[column].append(strength)
         
-        # Calculate average strength per finger
-        finger_averages = {}
-        for finger, strengths in finger_strengths.items():
+        # Calculate average strength per column
+        column_averages = {}
+        for column, strengths in column_strengths.items():
             if strengths:
-                finger_averages[finger] = np.mean(strengths)
+                column_averages[column] = np.mean(strengths)
         
         # Compare rankings
-        exploratory_finger_ranking = sorted(finger_averages.items(), key=lambda x: x[1], reverse=True)
+        exploratory_column_ranking = sorted(column_averages.items(), key=lambda x: x[1], reverse=True)
         
         validation = {
-            'exploratory_finger_ranking': exploratory_finger_ranking,
-            'focused_finger_results': focused_finger_results,
-            'consistency_analysis': self._analyze_finger_consistency(focused_finger_results, finger_averages)
+            'exploratory_column_ranking': exploratory_column_ranking,
+            'focused_column_results': focused_column_results,
+            'consistency_analysis': self._analyze_column_consistency(focused_column_results, column_averages)
         }
         
         return validation
     
-    def _analyze_finger_consistency(self, focused_results: Dict[str, Any], 
-                                  finger_averages: Dict[int, float]) -> str:
-        """Analyze consistency between focused and exploratory finger results."""
+    def _analyze_column_consistency(self, focused_results: Dict[str, Any], 
+                                  column_averages: Dict[int, float]) -> str:
+        """Analyze consistency between focused and exploratory column results."""
         
         # Check if exploratory rankings match focused hypothesis predictions
-        if len(finger_averages) < 4:
+        if len(column_averages) < 3:
             return "Insufficient data for consistency analysis"
         
         # Exploratory ranking order
-        exp_order = [finger for finger, _ in sorted(finger_averages.items(), key=lambda x: x[1], reverse=True)]
+        exp_order = [column for column, _ in sorted(column_averages.items(), key=lambda x: x[1], reverse=True)]
         
         # Check specific comparisons from focused hypotheses
         consistencies = []
         
-        # F4 vs F3
-        if 'finger_f4_vs_f3' in focused_results:
-            focused_f4_better = focused_results['finger_f4_vs_f3'].get('proportion_val1_wins', 0.5) > 0.5
-            exp_f4_better = finger_averages.get(4, 0) > finger_averages.get(3, 0)
-            consistencies.append(f"F4 vs F3: {'Consistent' if focused_f4_better == exp_f4_better else 'Inconsistent'}")
+        # Column 4 vs 3
+        if 'column_4_vs_3' in focused_results:
+            focused_c4_better = focused_results['column_4_vs_3'].get('proportion_val1_wins', 0.5) > 0.5
+            exp_c4_better = column_averages.get(4, 0) > column_averages.get(3, 0)
+            consistencies.append(f"C4 vs C3: {'Consistent' if focused_c4_better == exp_c4_better else 'Inconsistent'}")
         
-        # F3 vs F2
-        if 'finger_f3_vs_f2' in focused_results:
-            focused_f3_better = focused_results['finger_f3_vs_f2'].get('proportion_val1_wins', 0.5) > 0.5
-            exp_f3_better = finger_averages.get(3, 0) > finger_averages.get(2, 0)
-            consistencies.append(f"F3 vs F2: {'Consistent' if focused_f3_better == exp_f3_better else 'Inconsistent'}")
+        # Column 3 vs 2
+        if 'column_3_vs_2' in focused_results:
+            focused_c3_better = focused_results['column_3_vs_2'].get('proportion_val1_wins', 0.5) > 0.5
+            exp_c3_better = column_averages.get(3, 0) > column_averages.get(2, 0)
+            consistencies.append(f"C3 vs C2: {'Consistent' if focused_c3_better == exp_c3_better else 'Inconsistent'}")
         
-        # F2 vs F1
-        if 'finger_f2_vs_f1' in focused_results:
-            focused_f2_better = focused_results['finger_f2_vs_f1'].get('proportion_val1_wins', 0.5) > 0.5
-            exp_f2_better = finger_averages.get(2, 0) > finger_averages.get(1, 0)
-            consistencies.append(f"F2 vs F1: {'Consistent' if focused_f2_better == exp_f2_better else 'Inconsistent'}")
+        # Column 1 vs Other
+        if 'column_1_vs_other' in focused_results:
+            focused_c1_better = focused_results['column_1_vs_other'].get('proportion_val1_wins', 0.5) > 0.5
+            other_avg = np.mean([column_averages.get(c, 0) for c in [2, 3, 4] if c in column_averages])
+            exp_c1_better = column_averages.get(1, 0) > other_avg
+            consistencies.append(f"C1 vs Other: {'Consistent' if focused_c1_better == exp_c1_better else 'Inconsistent'}")
         
         consistency_summary = "; ".join(consistencies)
         return f"Exploratory order: {exp_order}. Focused comparisons: {consistency_summary}"
@@ -1496,8 +1552,8 @@ class PreferenceAnalyzer:
             hyp_name = result['hypothesis']
             effect_size = result['effect_size']
             
-            if 'finger' in hyp_name and effect_size > 0.20:
-                recommendations.append(f"FINGER PREFERENCE: {result['description']} - prioritize this in layout design")
+            if 'column' in hyp_name and effect_size > 0.20:
+                recommendations.append(f"COLUMN PREFERENCE: {result['description']} - prioritize this in layout design")
             elif 'home' in hyp_name and effect_size > 0.15:
                 recommendations.append(f"HOME ROW: {result['description']} - maximize home row usage")
             elif 'direction' in hyp_name and effect_size > 0.15:
@@ -2157,34 +2213,28 @@ class PreferenceAnalyzer:
                 return ('R (upper)', 'V (lower)') if val1 == '1' else ('V (lower)', 'R (upper)')
             elif 'column5_upper_vs_lower' in hyp_name:
                 return ('T (upper)', 'B (lower)') if val1 == '1' else ('B (lower)', 'T (upper)')
-            elif 'finger_f4_vs_f3' in hyp_name:
-                return ('F4 (index)', 'F3 (middle)') if val1 == '4' else ('F3 (middle)', 'F4 (index)')
-            elif 'finger_f3_vs_f2' in hyp_name:
-                return ('F3 (middle)', 'F2 (ring)') if val1 == '3' else ('F2 (ring)', 'F3 (middle)')
-            elif 'finger_f2_vs_f1' in hyp_name:
-                return ('F2 (ring)', 'F1 (pinky)') if val1 == '2' else ('F1 (pinky)', 'F2 (ring)')
-            elif 'finger_f1_vs_other' in hyp_name:
-                return ('F1 (pinky)', 'other fingers') if val1 == '1' else ('other fingers', 'F1 (pinky)')
-            elif 'same_row_direction' in hyp_name:
+            elif 'column_4_vs_3' in hyp_name:
+                return ('Column 4', 'Column 3') if val1 == '4' else ('Column 3', 'Column 4')
+            elif 'column_3_vs_2' in hyp_name:
+                return ('Column 3', 'Column 2') if val1 == '3' else ('Column 2', 'Column 3')
+            elif 'column_4_vs_5' in hyp_name:
+                return ('Column 4', 'Column 5') if val1 == '4' else ('Column 5', 'Column 4')
+            elif 'column_1_vs_other' in hyp_name:
+                return ('Column 1', 'other columns') if val1 == '1' else ('other columns', 'Column 1')
+            elif 'direction_adjacent_columns' in hyp_name:
                 return ('inner roll', 'outer roll') if val1 == 'inner_roll' else ('outer roll', 'inner roll')
-            elif 'cross_row_direction' in hyp_name:
-                return ('inner roll', 'outer roll') if val1 == 'inner_roll_cross' else ('outer roll', 'inner roll')
-            elif 'cross_row_1row_same_vs_diff' in hyp_name:
+            elif 'direction_nonadjacent_columns' in hyp_name:
+                return ('inner roll', 'outer roll') if val1 == 'inner_roll' else ('outer roll', 'inner roll')
+            elif 'same_vs_different_column_reach' in hyp_name:
                 return ('same column (1 row)', 'different column (1 row)') if val1 == 'same' else ('different column (1 row)', 'same column (1 row)')
-            elif 'cross_row_2row_same_vs_diff' in hyp_name:
+            elif 'same_vs_different_column_hurdle' in hyp_name:
                 return ('same column (2 rows)', 'different column (2 rows)') if val1 == 'same' else ('different column (2 rows)', 'same column (2 rows)')
             elif 'home_vs_other' in hyp_name:
                 return ('home keys', 'other keys') if val1 == 'home' else ('other keys', 'home keys')
-            elif 'column5_vs_other' in hyp_name:
-                return ('column 5', 'other columns') if val1 == 'column5' else ('other columns', 'column 5')
-            elif 'involves_finger_1' in hyp_name:
-                return ('with F1', 'without F1') if val1 == '1' else ('without F1', 'with F1')
-            elif 'column_separation' in hyp_name:
+            elif 'separation_of' in hyp_name and 'columns' in hyp_name:
                 return (f'{val1} columns apart', f'{val2} columns apart')
-            elif 'row_separation' in hyp_name:
+            elif 'same_row_vs_reach' in hyp_name or 'reach_vs_hurdle' in hyp_name:
                 return (f'{val1} rows apart', f'{val2} rows apart')
-            elif 'home_key_count' in hyp_name:
-                return (f'{val1} home keys', f'{val2} home keys')
             else:
                 return (val1, val2)
         
@@ -2195,7 +2245,7 @@ class PreferenceAnalyzer:
             
             if 'statistics' not in result:
                 # Failed test
-                report_lines.append(f"❌ {hyp_name}: {description}")
+                report_lines.append(f"✗ {hyp_name}: {description}")
                 report_lines.append(f"   ERROR: {result.get('error', 'Unknown error')}")
                 report_lines.append("")
                 continue
