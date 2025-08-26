@@ -537,16 +537,19 @@ class DatasetComparator:
                     'Hypothesis': hyp['hypothesis'],
                     'Description': hyp['description'],
                     'Dataset1_Significant': hyp['dataset1']['significant'],
-                    'Dataset1_Effect_Size': hyp['dataset1']['effect_size'],
+                    'Dataset1_Effect_Size': round(hyp['dataset1']['effect_size'], 3),
                     'Dataset1_N_Comparisons': hyp['dataset1']['n_comparisons'],
                     'Dataset2_Significant': hyp['dataset2']['significant'],
-                    'Dataset2_Effect_Size': hyp['dataset2']['effect_size'],
+                    'Dataset2_Effect_Size': round(hyp['dataset2']['effect_size'], 3),
                     'Dataset2_N_Comparisons': hyp['dataset2']['n_comparisons'],
-                    'Effect_Size_Difference': hyp['effect_difference']
+                    'Effect_Size_Difference': round(hyp['effect_difference'], 3)
                 })
             
             df = pd.DataFrame(rows)
             df.to_csv(self.output_path / 'hypothesis_comparison_detailed.csv', index=False)
+        
+        # Save comprehensive comparison with all available statistics
+        self._save_comprehensive_hypothesis_comparison()
         
         # Save direction changes as separate CSV
         if comparison.get('direction_changes'):
@@ -557,15 +560,15 @@ class DatasetComparator:
                     'Description': change['description'],
                     'Values_Compared': f"{change['values_compared'][0]} vs {change['values_compared'][1]}",
                     'Dataset1_Preferred': change['dataset1_preferred'],
-                    'Dataset1_Preferred_Proportion': change['dataset1_preferred_proportion'],
-                    'Dataset1_Effect_Size': change['dataset1_effect_size'],
+                    'Dataset1_Preferred_Proportion': round(change['dataset1_preferred_proportion'], 3),
+                    'Dataset1_Effect_Size': round(change['dataset1_effect_size'], 3),
                     'Dataset2_Preferred': change['dataset2_preferred'],
-                    'Dataset2_Preferred_Proportion': change['dataset2_preferred_proportion'],
-                    'Dataset2_Effect_Size': change['dataset2_effect_size'],
-                    'Flip_Magnitude': change['flip_magnitude'],
-                    'Effect_Size_Change': change['effect_size_change'],
-                    'Dataset1_Val1_Proportion': change['dataset1_val1_proportion'],  # For reference
-                    'Dataset2_Val1_Proportion': change['dataset2_val1_proportion']   # For reference
+                    'Dataset2_Preferred_Proportion': round(change['dataset2_preferred_proportion'], 3),
+                    'Dataset2_Effect_Size': round(change['dataset2_effect_size'], 3),
+                    'Flip_Magnitude': round(change['flip_magnitude'], 3),
+                    'Effect_Size_Change': round(change['effect_size_change'], 3),
+                    'Dataset1_Val1_Proportion': round(change['dataset1_val1_proportion'], 3),  # For reference
+                    'Dataset2_Val1_Proportion': round(change['dataset2_val1_proportion'], 3)   # For reference
                 })
             df = pd.DataFrame(direction_rows)
             df.to_csv(self.output_path / 'hypothesis_direction_changes.csv', index=False)
@@ -586,23 +589,23 @@ class DatasetComparator:
             # Direction changes (MOST IMPORTANT)
             direction_changes = comparison.get('direction_changes', [])
             if direction_changes:
-                f.write(f"🔄 DIRECTION CHANGES ({len(direction_changes)} total):\n")
+                f.write(f"DIRECTION CHANGES ({len(direction_changes)} total):\n")
                 f.write("=" * 45 + "\n")
                 f.write("These hypotheses show preference REVERSALS between datasets:\n\n")
                 for change in direction_changes:
-                    f.write(f"📌 {change['hypothesis']}\n")
+                    f.write(f"• {change['hypothesis']}\n")
                     f.write(f"   → {change['description']}\n")
                     f.write(f"   → Dataset 1: {change['dataset1_preferred']} preferred ({change['dataset1_preferred_proportion']:.1%}) - Effect: {change['dataset1_effect_size']:.3f}\n")
                     f.write(f"   → Dataset 2: {change['dataset2_preferred']} preferred ({change['dataset2_preferred_proportion']:.1%}) - Effect: {change['dataset2_effect_size']:.3f}\n")
                     f.write(f"   → Flip magnitude: {change['flip_magnitude']:.3f}\n")
                     f.write(f"   → Effect size change: {change['effect_size_change']:+.3f}\n\n")
             else:
-                f.write("✅ NO DIRECTION CHANGES: All hypothesis preferences consistent\n\n")
+                f.write("NO DIRECTION CHANGES: All hypothesis preferences consistent\n\n")
             
             # Significance changes
             sig_changes = comparison.get('significance_changes', [])
             if sig_changes:
-                f.write(f"📊 SIGNIFICANCE CHANGES ({len(sig_changes)} total):\n")
+                f.write(f"SIGNIFICANCE CHANGES ({len(sig_changes)} total):\n")
                 f.write("-" * 40 + "\n")
                 for change in sig_changes:
                     status = "GAINED" if change['change_type'] == 'gained_significance' else "LOST"
@@ -613,14 +616,167 @@ class DatasetComparator:
             # Effect size changes
             effect_changes = comparison.get('effect_size_changes', [])
             if effect_changes:
-                f.write(f"📈 LARGEST EFFECT SIZE CHANGES ({len(effect_changes)} total):\n")
+                f.write(f"LARGEST EFFECT SIZE CHANGES ({len(effect_changes)} total):\n")
                 f.write("-" * 45 + "\n")
                 for change in effect_changes[:5]:
-                    direction = "↑" if change['effect_difference'] > 0 else "↓"
+                    direction = "↗" if change['effect_difference'] > 0 else "↘"
                     f.write(f"  {direction} {change['hypothesis']}\n")
                     f.write(f"    → {change['description']}\n")
                     f.write(f"    → Effect change: {change['effect_difference']:+.3f} ({change['change_magnitude']})\n")
                 f.write("\n")
+    
+    def _save_comprehensive_hypothesis_comparison(self) -> None:
+        """Save comprehensive hypothesis comparison with all available statistics."""
+        
+        # Load detailed hypothesis data from both datasets
+        hyp1_detailed = self._load_detailed_hypothesis_data(self.dataset1_path)
+        hyp2_detailed = self._load_detailed_hypothesis_data(self.dataset2_path)
+        
+        if not hyp1_detailed or not hyp2_detailed:
+            print("Warning: Cannot create comprehensive comparison - missing detailed data")
+            return
+        
+        hyp1_results = hyp1_detailed.get('hypothesis_results', {})
+        hyp2_results = hyp2_detailed.get('hypothesis_results', {})
+        
+        # Get all hypotheses from both datasets
+        all_hypotheses = set(hyp1_results.keys()) | set(hyp2_results.keys())
+        
+        comprehensive_rows = []
+        
+        for hyp_name in sorted(all_hypotheses):
+            hyp1_data = hyp1_results.get(hyp_name, {})
+            hyp2_data = hyp2_results.get(hyp_name, {})
+            
+            # Get statistics from both datasets
+            stats1 = hyp1_data.get('statistics', {})
+            stats2 = hyp2_data.get('statistics', {})
+            
+            # Helper function to safely round values
+            def safe_round(value, decimals=3):
+                if pd.isna(value) or value is None:
+                    return None
+                try:
+                    return round(float(value), decimals)
+                except (ValueError, TypeError):
+                    return None
+            
+            # Helper function to safely convert boolean
+            def safe_bool(value):
+                if pd.isna(value) or value is None:
+                    return None
+                return bool(value)
+            
+            # Helper function to safely convert int
+            def safe_int(value):
+                if pd.isna(value) or value is None:
+                    return None
+                try:
+                    return int(value)
+                except (ValueError, TypeError):
+                    return None
+            
+            row = {
+                'Hypothesis': hyp_name,
+                'Description': hyp1_data.get('description', hyp2_data.get('description', '')),
+                'Comparison_Values': f"{stats1.get('values_compared', stats2.get('values_compared', ['', '']))[0]} vs {stats1.get('values_compared', stats2.get('values_compared', ['', '']))[1]}",
+                
+                # Dataset 1 Statistics
+                'Dataset1_Val1_Win_Proportion': safe_round(stats1.get('proportion_val1_wins')),
+                'Dataset1_Effect_Size': safe_round(stats1.get('effect_size')),
+                'Dataset1_P_Value': safe_round(stats1.get('p_value')),
+                'Dataset1_P_Value_Corrected': safe_round(stats1.get('p_value_corrected')),
+                'Dataset1_Significant_Corrected': safe_bool(stats1.get('significant_corrected')),
+                'Dataset1_Practical_Significance': stats1.get('practical_significance'),
+                'Dataset1_N_Comparisons': safe_int(stats1.get('n_comparisons')),
+                
+                # Dataset 2 Statistics  
+                'Dataset2_Val1_Win_Proportion': safe_round(stats2.get('proportion_val1_wins')),
+                'Dataset2_Effect_Size': safe_round(stats2.get('effect_size')),
+                'Dataset2_P_Value': safe_round(stats2.get('p_value')),
+                'Dataset2_P_Value_Corrected': safe_round(stats2.get('p_value_corrected')),
+                'Dataset2_Significant_Corrected': safe_bool(stats2.get('significant_corrected')),
+                'Dataset2_Practical_Significance': stats2.get('practical_significance'),
+                'Dataset2_N_Comparisons': safe_int(stats2.get('n_comparisons')),
+                
+                # Differences
+                'Effect_Size_Difference': safe_round(
+                    (stats2.get('effect_size', 0) or 0) - (stats1.get('effect_size', 0) or 0)
+                ) if stats1.get('effect_size') is not None and stats2.get('effect_size') is not None else None,
+                
+                'Proportion_Difference': safe_round(
+                    (stats2.get('proportion_val1_wins', 0.5) or 0.5) - (stats1.get('proportion_val1_wins', 0.5) or 0.5)
+                ) if stats1.get('proportion_val1_wins') is not None and stats2.get('proportion_val1_wins') is not None else None,
+                
+                'Significance_Change': (
+                    'Gained' if not stats1.get('significant_corrected', False) and stats2.get('significant_corrected', False)
+                    else 'Lost' if stats1.get('significant_corrected', False) and not stats2.get('significant_corrected', False)
+                    else 'No Change'
+                ),
+                
+                'Direction_Flipped': (
+                    bool((stats1.get('proportion_val1_wins', 0.5) > 0.5) != (stats2.get('proportion_val1_wins', 0.5) > 0.5))
+                    if stats1.get('proportion_val1_wins') is not None and stats2.get('proportion_val1_wins') is not None 
+                    and stats1.get('proportion_val1_wins') != 0.5 and stats2.get('proportion_val1_wins') != 0.5
+                    else False
+                ),
+                
+                # Sample size comparison
+                'N_Comparisons_Change': (
+                    safe_int(stats2.get('n_comparisons', 0)) - safe_int(stats1.get('n_comparisons', 0))
+                    if stats1.get('n_comparisons') is not None and stats2.get('n_comparisons') is not None
+                    else None
+                )
+            }
+            
+            comprehensive_rows.append(row)
+        
+        # Create DataFrame and save
+        df = pd.DataFrame(comprehensive_rows)
+        
+        # Define the original hypothesis order from the analysis script
+        hypothesis_order = [
+            # 1. Finger load preferences (2 tests)
+            'same_vs_different_column_reach',
+            'same_vs_different_column_hurdle',
+            
+            # 2. Row preferences (5 tests)
+            'home_vs_other_keys',
+            'column1_upper_vs_lower_row',
+            'column2_upper_vs_lower_row', 
+            'column3_upper_vs_lower_row',
+            'column4_upper_vs_lower_row',
+            
+            # 3. Row pair preferences (2 tests)
+            'same_row_vs_reach',
+            'reach_vs_hurdle',
+            
+            # 4. Column preferences (4 tests)
+            'column_4_vs_3',
+            'column_3_vs_2',
+            'column_1_vs_other',
+            'column_4_vs_5',  # Only when --include-column5
+            
+            # 5. Column pair preferences (4 tests)
+            'separation_of_1_vs_2_columns_same_row',
+            'separation_of_2_vs_3_columns_same_row',
+            'separation_of_1_vs_2_columns_different_rows',
+            'separation_of_2_vs_3_columns_different_rows',
+            
+            # 6. Column pair direction preferences (2 tests)
+            'direction_same_row',
+            'direction_different_rows'
+        ]
+        
+        # Sort by original hypothesis order, then by any remaining hypotheses alphabetically
+        df['sort_order'] = df['Hypothesis'].apply(
+            lambda x: hypothesis_order.index(x) if x in hypothesis_order else len(hypothesis_order)
+        )
+        df = df.sort_values(['sort_order', 'Hypothesis']).drop('sort_order', axis=1)
+        
+        df.to_csv(self.output_path / 'hypothesis_comparison_comprehensive.csv', index=False)
+        
+        print(f"Saved comprehensive hypothesis comparison with {len(comprehensive_rows)} hypotheses")
     
     def _save_key_comparison(self, comparison: Dict[str, Any]) -> None:
         """Save key preference comparison results."""
@@ -730,8 +886,9 @@ class DatasetComparator:
             
             f.write("DETAILED RESULTS:\n")
             f.write("-" * 20 + "\n")
+            f.write("• hypothesis_comparison_comprehensive.csv - ALL hypothesis comparisons with full statistics\n")
             f.write("• hypothesis_direction_changes.csv - PREFERENCE REVERSALS (most important!)\n")
-            f.write("• hypothesis_comparison_detailed.csv - All hypothesis comparisons\n")
+            f.write("• hypothesis_comparison_detailed.csv - Summary hypothesis comparisons\n")
             f.write("• key_ranking_changes.csv - Key preference ranking changes\n")
             f.write("• key_strength_changes.csv - Key preference strength changes\n")
             f.write("• transition_ranking_changes.csv - Transition ranking changes\n")
@@ -782,7 +939,7 @@ def main():
             # Show direction changes if any
             if 'hypothesis_comparison' in results and results['hypothesis_comparison'].get('direction_changes'):
                 direction_changes = results['hypothesis_comparison']['direction_changes']
-                print(f"\n🔄 CRITICAL: {len(direction_changes)} hypotheses reversed direction!")
+                print(f"\nCRITICAL: {len(direction_changes)} hypotheses reversed direction!")
                 for change in direction_changes[:3]:  # Show top 3
                     print(f"   • {change['hypothesis']}: {change['dataset1_preferred']} → {change['dataset2_preferred']} "
                           f"(effects: {change['dataset1_effect_size']:.3f} → {change['dataset2_effect_size']:.3f})")

@@ -21,6 +21,136 @@ Features:
 - Comprehensive reporting and visualization
 - Cross-validation between approaches
 
+Updated Keyboard Preference Analysis Script
+Code ∙ Version 30 
+
+Meticulously analyzed keyboard layout and interaction patterns.
+1m, 6s
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Now the code should be correct. Here are the precise descriptions with accurate examples:
+
+1. Finger Load Preferences
+same_vs_different_column_reach
+
+"same" group: 1 row apart, same column (e.g., "qa", "ws", "ed", "rf", "az", "sx", "dc", "fv")
+"different" group: 1 row apart, different columns (e.g., "qs", "wa", "es", "ra", "ax", "sz", "dx", "fz")
+Excluded: All T/G/B bigrams, row separation ≠ 1
+same_vs_different_column_hurdle
+
+"same" group: 2 rows apart, same column (e.g., "qz", "wx", "ec", "rv")
+"different" group: 2 rows apart, different columns (e.g., "qx", "wz", "ez", "rx")
+Excluded: All T/G/B bigrams, row separation ≠ 2
+2. Row Preferences
+home_vs_other_keys
+
+"home" group: Contains A/S/D/F, different columns (e.g., "aw", "se", "dr", "fz", "ax", "sc")
+"other" group: No A/S/D/F, different columns (e.g., "qw", "er", "zx", "cv", "qc", "wv")
+Excluded: All T/G/B bigrams, same-column bigrams
+Column row preferences
+
+column1_upper_vs_lower_row: "1" = "qa"/"aq", "3" = "za"/"az" ONLY
+column2_upper_vs_lower_row: "1" = "ws"/"sw", "3" = "xs"/"sx" ONLY
+column3_upper_vs_lower_row: "1" = "ed"/"de", "3" = "cd"/"dc" ONLY
+column4_upper_vs_lower_row: "1" = "rf"/"fr", "3" = "vf"/"fv" ONLY
+3. Row Pair Preferences
+same_row_vs_reach
+
+"0" group: Same row, different columns (e.g., "qw", "we", "er", "as", "sd", "df", "zx", "xc", "cv")
+"1" group: 1 row apart, different columns (e.g., "qs", "wa", "es", "ra", "ax", "sz", "dx", "fz")
+Excluded: All T/G/B bigrams, same-column bigrams, 2 rows apart
+reach_vs_hurdle
+
+"1" group: 1 row apart, different columns (same as above)
+"2" group: 2 rows apart, different columns (e.g., "qx", "wz", "ez", "rx", "zc", "wv")
+Excluded: All T/G/B bigrams, same-column bigrams, same row
+4. Column Preferences
+column_4_vs_3
+
+"4" group: Has R/F/V but no E/D/C, different columns (e.g., "rq", "fa", "vs", "rw", "fx", "vz")
+"3" group: Has E/D/C but no R/F/V, different columns (e.g., "eq", "da", "cs", "ew", "dx", "cz")
+Excluded: All T/G/B bigrams, same-column bigrams, bigrams with both col 4 and col 3 (e.g., "re", "fd", "vc")
+column_3_vs_2
+
+"3" group: Has E/D/C but no W/S/X, different columns (e.g., "eq", "da", "cz", "ea", "dq", "cf")
+"2" group: Has W/S/X but no E/D/C, different columns (e.g., "wq", "sa", "xz", "wr", "sf", "xv")
+Excluded: All T/G/B bigrams, same-column bigrams, bigrams with both col 3 and col 2 (e.g., "ew", "ds", "cx")
+column_1_vs_other
+
+"1" group: Has Q/A/Z, different columns (e.g., "qw", "ar", "zx", "aw", "qe", "zc")
+"other" group: No Q/A/Z, different columns (e.g., "we", "sf", "xc", "wr", "cv", "dx")
+Excluded: All T/G/B bigrams, same-column bigrams
+column_4_vs_5 (only when --include-column5)
+
+"4" group: Has R/F/V but no T/G/B, different columns (e.g., "rq", "fa", "vs")
+"5" group: Has T/G/B but no R/F/V, different columns (e.g., "tq", "ga", "bs")
+Excluded: Same-column bigrams, bigrams with both col 4 and col 5 (e.g., "rt", "fg", "vb")
+5. Column Pair Preferences
+separation_of_1_vs_2_columns_same_row
+
+"1" group: Same row, 1 column apart (e.g., "qw", "we", "er", "as", "sd", "df", "zx", "xc", "cv")
+"2" group: Same row, 2 columns apart (e.g., "qe", "wr", "ad", "sf", "zc", "xv")
+Excluded: All T/G/B bigrams, different rows, other separations
+separation_of_2_vs_3_columns_same_row
+
+"2" group: Same row, 2 columns apart (e.g., "qe", "wr", "ad", "sf", "zc", "xv")
+"3" group: Same row, 3 columns apart (e.g., "qr", "af", "zv")
+Excluded: All T/G/B bigrams, different rows, other separations
+separation_of_1_vs_2_columns_different_rows
+
+"1" group: Different rows, 1 column apart (e.g., "qs", "wa", "es", "rd", "ax", "sz", "dx", "fc")
+"2" group: Different rows, 2 columns apart (e.g., "qd", "wf", "ea", "rs", "ac", "sv", "ze", "fx")
+Excluded: All T/G/B bigrams, same row, other separations
+separation_of_2_vs_3_columns_different_rows
+
+"2" group: Different rows, 2 columns apart (same as above)
+"3" group: Different rows, 3 columns apart (e.g., "qf", "ar", "zr", "qv", "av", "zf")
+Excluded: All T/G/B bigrams, same row, other separations
+6. Direction Preferences
+direction_same_row
+
+"inner_roll" group: Same row, left-to-right (e.g., "qw", "we", "er", "as", "sd", "df", "zx", "xc", "cv")
+"outer_roll" group: Same row, right-to-left (e.g., "wq", "ew", "re", "sa", "ds", "fd", "xz", "cx", "vc")
+Excluded: All T/G/B bigrams, different rows, same column
+direction_different_rows
+
+"inner_roll_cross" group: Different rows, left-to-right (e.g., "qs", "wa", "es", "ax", "sz", "dx")
+"outer_roll_cross" group: Different rows, right-to-left (e.g., "sq", "aw", "se", "xa", "zs", "xd")
+Excluded: All T/G/B bigrams, same row, same column
+
 Usage:
     python combined_analyzer.py --data data/filtered_data.csv --output results/ --config config.yaml
 """
@@ -275,8 +405,10 @@ class FocusedHypothesisAnalyzer:
                     'cross_row_2row_same_vs_diff': None,
                     'involves_home_keys': None,
                     'row_separation': None,
-                    'dominant_column': None,
                     'involves_column1': None,
+                    'column_4_vs_3_comparison': None,
+                    'column_3_vs_2_comparison': None,
+                    'column_4_vs_5_comparison': None,
                     'same_row_direction': None,
                     'cross_row_direction': None,
                     'column1_row_pref': None,
@@ -314,17 +446,51 @@ class FocusedHypothesisAnalyzer:
             else:
                 direction = 'same_column_cross'
         
-        # Column preferences - dominant column (higher column number)
-        dominant_column = max(pos1.column, pos2.column) if column_separation > 0 else None
-        involves_column1 = '1' if (pos1.column == 1 or pos2.column == 1) else 'other'
-
-        # Column 4 vs 5 specific comparison
+        # Define column key sets for proper column comparisons
+        column_keys = {
+            1: {'q', 'a', 'z'},
+            2: {'w', 's', 'x'},
+            3: {'e', 'd', 'c'},
+            4: {'r', 'f', 'v'},
+            5: {'t', 'g', 'b'} if self.include_column5 else set()
+        }
+        
+        # Helper function to check if bigram contains keys from a specific column
+        def contains_column_keys(column_num):
+            return bool(column_keys[column_num] & {pos1.key, pos2.key})
+        
+        # Column comparison classifications (exclusionary logic)
+        # Column 4 vs 3: Only classify if bigram has col 4 keys XOR col 3 keys (not both)
+        column_4_vs_3_comparison = None
+        has_col4 = contains_column_keys(4)
+        has_col3 = contains_column_keys(3)
+        if has_col4 and not has_col3:
+            column_4_vs_3_comparison = '4'
+        elif has_col3 and not has_col4:
+            column_4_vs_3_comparison = '3'
+        # If both or neither, leave as None (excluded from comparison)
+        
+        # Column 3 vs 2: Only classify if bigram has col 3 keys XOR col 2 keys (not both)
+        column_3_vs_2_comparison = None
+        has_col2 = contains_column_keys(2)
+        if has_col3 and not has_col2:
+            column_3_vs_2_comparison = '3'
+        elif has_col2 and not has_col3:
+            column_3_vs_2_comparison = '2'
+        # If both or neither, leave as None (excluded from comparison)
+        
+        # Column 4 vs 5: Only classify if bigram has col 4 keys XOR col 5 keys (not both)
         column_4_vs_5_comparison = None
-        if self.include_column5 and column_separation > 0:
-            columns = sorted([pos1.column, pos2.column])
-            if columns == [4, 5]:
-                # Determine which column was chosen - use first key's column
-                column_4_vs_5_comparison = str(pos1.column)
+        if self.include_column5:
+            has_col5 = contains_column_keys(5)
+            if has_col4 and not has_col5:
+                column_4_vs_5_comparison = '4'
+            elif has_col5 and not has_col4:
+                column_4_vs_5_comparison = '5'
+            # If both or neither, leave as None (excluded from comparison)
+        
+        # Column 1 vs other (keeps existing logic - simpler case)
+        involves_column1 = '1' if contains_column_keys(1) else 'other'
 
         # Column-specific row preferences
         column_row_prefs = {}
@@ -371,9 +537,11 @@ class FocusedHypothesisAnalyzer:
             'involves_home_keys': involves_home_keys,
             'row_separation': str(row_separation),
             
-            # Column preferences (updated to use column instead of finger)
-            'dominant_column': str(dominant_column) if dominant_column and column_separation > 0 else None,
+            # Column preferences (updated with exclusionary logic)
             'involves_column1': involves_column1 if column_separation > 0 else None,
+            'column_4_vs_3_comparison': column_4_vs_3_comparison,
+            'column_3_vs_2_comparison': column_3_vs_2_comparison,
+            'column_4_vs_5_comparison': column_4_vs_5_comparison,
             
             # Direction hypotheses
             'same_row_direction': direction if row_separation == 0 and direction not in ['same_column'] else None,
@@ -381,9 +549,6 @@ class FocusedHypothesisAnalyzer:
             
             # Column-specific row preferences
             **column_row_prefs,
-            
-            # Column 4 vs 5 specific comparison
-            'column_4_vs_5_comparison': column_4_vs_5_comparison,
         }
     
     def analyze_hypotheses(self, data: pd.DataFrame) -> Dict[str, Any]:
