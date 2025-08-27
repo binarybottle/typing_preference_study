@@ -10,131 +10,68 @@ This script provides comprehensive keyboard preference analysis using Bradley-Te
    - Bootstrap validation and effect size analysis
 
 2. FOCUSED HYPOTHESIS TESTING:
-   - 20 pre-specified ergonomic hypotheses
-   - Finger separation, movement, direction, and finger preference effects
+   - 16-17 pre-specified ergonomic hypotheses across 6 categories
    - Global multiple testing correction (FDR)
-   - Column-specific row preferences
+   - Rigorous statistical validation
 
-Features:
-- Dual analysis approach (confirmatory + exploratory)
-- Rigorous statistical testing with proper corrections
-- Comprehensive reporting and visualization
-- Cross-validation between approaches
+HYPOTHESIS CATEGORIES:
+Note that all but Categories 1 and 4 below exclude same-column bigrams, and
+all but test column_4_vs_5 in Category 4 exclude bigrams containing T/G/B.
 
-1. Finger Load Preferences
-same_vs_different_column_reach
+1. SAME VS DIFFERENT COLUMN (1 test)
+   same_vs_different_column:
+   - "same": Same column (e.g., "qa", "ws", "ec", "qz")
+   - "different": Different columns (e.g., "qw", "as", "zx")
 
-"same" group: 1 row apart, same column (e.g., "qa", "ws", "ed", "rf", "az", "sx", "dc", "fv")
-"different" group: 1 row apart, different columns (e.g., "qs", "wa", "es", "ra", "ax", "sz", "dx", "fz")
-Excluded: All T/G/B bigrams, row separation ≠ 1
+2. ROW PREFERENCES (5 tests)
+   home_vs_other_keys:
+   - "home": Contains A/S/D/F, different columns (e.g., "aw", "se", "dr", "fz")  
+   - "other": No A/S/D/F, different columns (e.g., "qw", "er", "zx", "cv")
+   
+   column_N_upper_vs_lower_row (N=1,2,3,4):
+   Only bigrams where exactly one key is from target column and target row:
+   - "1": Upper row key in column N (e.g., "qs", "qx", "qf" for column 1)
+   - "3": Lower row key in column N (e.g., "zs", "zx", "zr" for column 1)
 
-same_vs_different_column_hurdle
+3. ROW SEPARATION (2 tests)
+   same_row_vs_reach:
+   - "0": Same row, different columns (e.g., "qw", "we", "as", "sd", "zx", "xc")
+   - "1": 1 row apart, different columns (e.g., "qs", "wa", "ax", "sz")
+   
+   reach_vs_hurdle:
+   - "1": 1 row apart, different columns (same as above)
+   - "2": 2 rows apart, different columns (e.g., "qx", "qc", "wz", "ez")
 
-"same" group: 2 rows apart, same column (e.g., "qz", "wx", "ec", "rv")
-"different" group: 2 rows apart, different columns (e.g., "qx", "wz", "ez", "rx")
-Excluded: All T/G/B bigrams, row separation ≠ 2
+4. COLUMN PREFERENCES (4-5 tests)
+   column_N_vs_other (N=1,2,3,4):
+   - "N": Contains at least one key from column N (e.g., "qi", "ra", "az" for column 1)
+   - "other": Contains no keys from column N (e.g., "we", "sx", "cv" for column 1)
+   
+   column_4_vs_5 (only when include_column5=True):
+   - "4": Contains column 4 keys but no column 5 keys (e.g., "rf", "ra", "fv")
+   - "5": Contains column 5 keys but no column 4 keys (e.g., "tg", "ta", "gb")  
 
-2. Row Preferences
-home_vs_other_keys
+5. COLUMN SEPARATION (2 tests)
+   separation_of_1_vs_2_columns_same_row:
+   - "1": 1 column apart, same row (e.g., "qw", "we", "as", "sd", "zx", "xc")
+   - "2": 2 columns apart, same row (e.g., "qe", "wr", "ad", "sf", "zc", "xv")
+   
+   separation_of_1_vs_2_columns_different_rows:
+   - "1": 1 column apart, different rows (e.g., "qs", "wa", "ax", "sz")
+   - "2": 2 columns apart, different rows (e.g., "qd", "wf", "ac", "sv")
 
-"home" group: Contains A/S/D/F, different columns (e.g., "aw", "se", "dr", "fz", "ax", "sc")
-"other" group: No A/S/D/F, different columns (e.g., "qw", "er", "zx", "cv", "qc", "wv")
-Excluded: All T/G/B bigrams, same-column bigrams
-
-Column row preferences
-
-column1_upper_vs_lower_row: "1" = "qa"/"aq", "3" = "za"/"az" ONLY
-column2_upper_vs_lower_row: "1" = "ws"/"sw", "3" = "xs"/"sx" ONLY
-column3_upper_vs_lower_row: "1" = "ed"/"de", "3" = "cd"/"dc" ONLY
-column4_upper_vs_lower_row: "1" = "rf"/"fr", "3" = "vf"/"fv" ONLY
-
-
-
-
-
-
-
-3. Row Pair Preferences
-same_row_vs_reach
-
-"0" group: Same row, different columns (e.g., "qw", "we", "er", "as", "sd", "df", "zx", "xc", "cv")
-"1" group: 1 row apart, different columns (e.g., "qs", "wa", "es", "ra", "ax", "sz", "dx", "fz")
-Excluded: All T/G/B bigrams, same-column bigrams, 2 rows apart
-
-reach_vs_hurdle
-
-"1" group: 1 row apart, different columns (same as above)
-"2" group: 2 rows apart, different columns (e.g., "qx", "qc", "qv", "wz", "wc", "wv", "ez", "ex", "ev", "rz", "rx", "rc")
-Excluded: All T/G/B bigrams, same-column bigrams, same row
-
-4. Column Preferences
-column_4_vs_3
-
-"4" group: Has R/F/V but no E/D/C (e.g., "rq", "fa", "vs", "rw", "fx", "vz")
-"3" group: Has E/D/C but no R/F/V (e.g., "eq", "da", "cs", "ew", "dx", "cz")
-Excluded: All T/G/B bigrams, bigrams with both col 4 and col 3 (e.g., "re", "fd", "vc")
-
-column_3_vs_2
-
-"3" group: Has E/D/C but no W/S/X (e.g., "eq", "da", "cz", "ea", "dq", "cf")
-"2" group: Has W/S/X but no E/D/C (e.g., "wq", "sa", "xz", "wr", "sf", "xv")
-Excluded: All T/G/B bigrams, bigrams with both col 3 and col 2 (e.g., "ew", "ds", "cx")
-
-column_1_vs_other
-
-"1" group: Has Q/A/Z (e.g., "qw", "ar", "zx", "aw", "qe", "zc")
-"other" group: No Q/A/Z (e.g., "we", "sf", "xc", "wr", "cv", "dx")
-Excluded: All T/G/B bigrams
-
-column_4_vs_5 (only when --include-column5)
-
-"4" group: Has R/F/V but no T/G/B (e.g., "rq", "fa", "vs")
-"5" group: Has T/G/B but no R/F/V (e.g., "tq", "ga", "bs")
-Excluded: Bigrams with both col 4 and col 5 (e.g., "rt", "fg", "vb")
-
-5. Column Pair Preferences
-separation_of_1_vs_2_columns_same_row
-
-"1" group: Same row, 1 column apart (e.g., "qw", "we", "er", "as", "sd", "df", "zx", "xc", "cv")
-"2" group: Same row, 2 columns apart (e.g., "qe", "wr", "ad", "sf", "zc", "xv")
-Excluded: All T/G/B bigrams, different rows, other separations
-
-separation_of_2_vs_3_columns_same_row
-
-"2" group: Same row, 2 columns apart (e.g., "qe", "wr", "ad", "sf", "zc", "xv")
-"3" group: Same row, 3 columns apart (e.g., "qr", "af", "zv")
-Excluded: All T/G/B bigrams, different rows, other separations
-
-separation_of_1_vs_2_columns_different_rows
-
-"1" group: Different rows, 1 column apart (e.g., "qs", "wa", "es", "rd", "ax", "sz", "dx", "fc")
-"2" group: Different rows, 2 columns apart (e.g., "qd", "wf", "ea", "rs", "ac", "sv", "ze", "fx")
-Excluded: All T/G/B bigrams, same row, other separations
-
-separation_of_2_vs_3_columns_different_rows
-
-"2" group: Different rows, 2 columns apart (same as above)
-"3" group: Different rows, 3 columns apart (e.g., "qf", "ar", "zr", "qv", "av", "zf")
-Excluded: All T/G/B bigrams, same row, other separations
-
-6. Direction Preferences
-direction_same_row
-
-"inner_roll" group: Same row, left-to-right (e.g., "qw", "we", "er", "as", "sd", "df", "zx", "xc", "cv")
-"outer_roll" group: Same row, right-to-left (e.g., "wq", "ew", "re", "sa", "ds", "fd", "xz", "cx", "vc")
-Excluded: All T/G/B bigrams, different rows, same column
-
-direction_different_rows
-
-"inner_roll_cross" group: Different rows, left-to-right (e.g., "qs", "ax", "aw", "se", "zs", "xd")
-"outer_roll_cross" group: Different rows, right-to-left (e.g., "sq", "xa", "wa", "es", "sz", "dx")
-Excluded: All T/G/B bigrams, same row, same column
-
+6. DIRECTION PREFERENCES (2 tests)
+   direction_same_row:
+   - "inner_roll": Left-to-right, same row (e.g., "qw", "we", "as", "sd", "zx", "xc")
+   - "outer_roll": Right-to-left, same row (e.g., "wq", "ew", "sa", "ds", "xz", "cx")
+   
+   direction_different_rows:
+   - "inner_roll_cross": Left-to-right, different rows (e.g., "qs", "ax", "aw", "se")
+   - "outer_roll_cross": Right-to-left, different rows (e.g., "sq", "xa", "wa", "es")
 
 Usage:
     python combined_analyzer.py --data data/filtered_data.csv --output results/ --config config.yaml
 """
-
 import os
 import argparse
 import logging
@@ -254,85 +191,77 @@ class FocusedHypothesisAnalyzer:
         self.key_positions = key_positions
         self.include_column5 = include_column5
         
-        # Define the updated hypotheses based on the new naming scheme
+        # Define the reorganized hypotheses with clear categories
         self.hypotheses = {
-            # 1. Finger load preferences (2 tests)
+            # CATEGORY 1: SAME VS DIFFERENT COLUMN (1 test)
             'same_vs_different_column': {
                 'description': 'Same vs different column', 
-                'category': 'same_vs_diff_column', 
+                'category': 'column_distinction', 
                 'values': ['same', 'different']
             },
-            #'same_vs_different_column_reach': {
-            #    'description': 'Same vs different column (1 row apart)', 
-            #    'category': 'cross_row_1row_same_vs_diff', 
-            #    'values': ['same', 'different']
-            #},
-            #'same_vs_different_column_hurdle': {
-            #    'description': 'Same vs different column (2 rows apart)', 
-            #    'category': 'cross_row_2row_same_vs_diff', 
-            #    'values': ['same', 'different']
-            #},
             
-            # 2. Row preferences (5 tests - includes home vs other)
+            # CATEGORY 2: ROW PREFERENCES (5 tests)
             'home_vs_other_keys': {
                 'description': 'Home keys vs other keys', 
-                'category': 'involves_home_keys', 
+                'category': 'home_key_preference', 
                 'values': ['home', 'other']
             },
             'column1_upper_vs_lower_row': {
                 'description': 'Column 1: Upper vs Lower row', 
-                'category': 'column1_row_pref', 
+                'category': 'column1_row_preference', 
                 'values': ['1', '3']
             },
             'column2_upper_vs_lower_row': {
                 'description': 'Column 2: Upper vs Lower row', 
-                'category': 'column2_row_pref', 
+                'category': 'column2_row_preference', 
                 'values': ['1', '3']
             },
             'column3_upper_vs_lower_row': {
                 'description': 'Column 3: Upper vs Lower row', 
-                'category': 'column3_row_pref', 
+                'category': 'column3_row_preference', 
                 'values': ['1', '3']
             },
             'column4_upper_vs_lower_row': {
                 'description': 'Column 4: Upper vs Lower row', 
-                'category': 'column4_row_pref', 
+                'category': 'column4_row_preference', 
                 'values': ['1', '3']
             },
             
-            # 3. Row pair preferences (2 tests)
+            # CATEGORY 3: ROW SEPARATION (2 tests)
             'same_row_vs_reach': {
                 'description': 'Same row vs reach (1 row apart)', 
-                'category': 'row_separation', 
+                'category': 'row_separation_0vs1', 
                 'values': ['0', '1']
             },
             'reach_vs_hurdle': {
                 'description': 'Reach vs hurdle (1 vs 2 rows apart)', 
-                'category': 'row_separation', 
+                'category': 'row_separation_1vs2', 
                 'values': ['1', '2']
             },
-            'column_4_vs_other': {
-                'description': 'Column 4 vs other columns', 
-                'category': 'involves_column4', 
-                'values': ['4', 'other']
-            },
-            'column_3_vs_other': {
-                'description': 'Column 3 vs other columns', 
-                'category': 'involves_column3', 
-                'values': ['3', 'other']
+            
+            # CATEGORY 4: COLUMN PREFERENCES (4-5 tests)
+            'column_1_vs_other': {
+                'description': 'Column 1 vs other columns', 
+                'category': 'column1_isolation', 
+                'values': ['1', 'other']
             },
             'column_2_vs_other': {
                 'description': 'Column 2 vs other columns', 
-                'category': 'involves_column2', 
+                'category': 'column2_isolation', 
                 'values': ['2', 'other']
             },
-            'column_1_vs_other': {
-                'description': 'Column 1 vs other columns', 
-                'category': 'involves_column1', 
-                'values': ['1', 'other']
+            'column_3_vs_other': {
+                'description': 'Column 3 vs other columns', 
+                'category': 'column3_isolation', 
+                'values': ['3', 'other']
+            },
+            'column_4_vs_other': {
+                'description': 'Column 4 vs other columns', 
+                'category': 'column4_isolation', 
+                'values': ['4', 'other']
             },
             
-            # 5. Column pair preferences (4 tests)
+            # CATEGORY 5: COLUMN SEPARATION (2 tests)
             'separation_of_1_vs_2_columns_same_row': {
                 'description': 'Same row: 1 vs 2 columns apart', 
                 'category': 'same_row_column_separation', 
@@ -344,7 +273,7 @@ class FocusedHypothesisAnalyzer:
                 'values': ['1', '2']
             },
             
-            # 6. Column pair direction preferences (2 tests)
+            # CATEGORY 6: DIRECTION PREFERENCES (2 tests)
             'direction_same_row': {
                 'description': 'Same row: inner vs outer roll', 
                 'category': 'same_row_direction', 
@@ -357,11 +286,11 @@ class FocusedHypothesisAnalyzer:
             },
         }
         
-        # Add column 5 hypothesis only if requested (specifically column 4 vs 5)
+        # Add column 5 hypothesis only if requested
         if include_column5:
             self.hypotheses['column_4_vs_5'] = {
                 'description': 'Column 4 vs Column 5', 
-                'category': 'column_4_vs_5_comparison', 
+                'category': 'column4vs5_isolation', 
                 'values': ['4', '5']
             }
         
@@ -369,61 +298,30 @@ class FocusedHypothesisAnalyzer:
         logger.info(f"Initialized focused hypothesis testing with {total_hypotheses} hypotheses (column5={include_column5})")
 
     def _classify_single_bigram(self, pos1: KeyPosition, pos2: KeyPosition) -> Dict[str, Any]:
-        """Classify a single bigram according to updated hypothesis dimensions."""
+        """Classify a single bigram according to updated hypothesis dimensions with validation."""
         
         # Skip column 5 keys unless specifically testing column 5
         column5_keys = {'t', 'g', 'b'}
         if not self.include_column5:
             if pos1.key in column5_keys or pos2.key in column5_keys:
-                # Return minimal classification excluding this bigram from most tests
-                return {
-                    'same_row_column_separation': None,
-                    'cross_row_column_separation': None,
-                    'same_vs_diff_column': None,
-                    'involves_home_keys': None,
-                    'row_separation': None,
-                    'involves_column4': None,
-                    'involves_column3': None,
-                    'involves_column2': None,
-                    'involves_column1': None,
-                    'column_4_vs_5_comparison': None,
-                    'same_row_direction': None,
-                    'cross_row_direction': None,
-                    'column1_row_pref': None,
-                    'column2_row_pref': None,
-                    'column3_row_pref': None,
-                    'column4_row_pref': None,
-                    'column5_row_pref': None,
-                }
+                # Return None for all categories to exclude this bigram from analysis
+                return {category: None for category in [
+                    'column_distinction', 'home_key_preference', 
+                    'column1_row_preference', 'column2_row_preference', 
+                    'column3_row_preference', 'column4_row_preference',
+                    'row_separation_0vs1', 'row_separation_1vs2',
+                    'column1_isolation', 'column2_isolation', 
+                    'column3_isolation', 'column4_isolation',
+                    'column4vs5_isolation', 'same_row_column_separation', 
+                    'cross_row_column_separation', 'same_row_direction', 
+                    'cross_row_direction'
+                ]}
         
         # Basic measurements
         column_separation = abs(pos1.column - pos2.column)
         row_separation = abs(pos1.row - pos2.row)
         
-        # Home keys (finger-column home keys: A,S,D,F) - exclude G if not testing column 5
-        home_keys = {'a', 's', 'd', 'f'}
-        involves_home_keys = 'home' if (pos1.key in home_keys or pos2.key in home_keys) else 'other'
-
-        # Column 5 keys (index finger extended position: T,G,B)
-        column5_keys = {'t', 'g', 'b'}
-        
-        # Direction calculation (based on column movement)
-        if row_separation == 0:  # Same row
-            if pos2.column > pos1.column:
-                direction = 'inner_roll'  # Left to right
-            elif pos2.column < pos1.column:
-                direction = 'outer_roll'  # Right to left
-            else:
-                direction = 'same_column'
-        else:  # Cross row
-            if pos2.column > pos1.column:
-                direction = 'inner_roll_cross'
-            elif pos2.column < pos1.column:
-                direction = 'outer_roll_cross'
-            else:
-                direction = 'same_column_cross'
-        
-        # Define column key sets for proper column comparisons
+        # Define column key sets
         column_keys = {
             1: {'q', 'a', 'z'},
             2: {'w', 's', 'x'},
@@ -432,92 +330,150 @@ class FocusedHypothesisAnalyzer:
             5: {'t', 'g', 'b'} if self.include_column5 else set()
         }
         
-        # Helper function to check if bigram contains at least one key from a specific column
-        def contains_column_key(column_num):
-            return pos1.key in column_keys[column_num] or pos2.key in column_keys[column_num]
-        
-        # Column 4 vs 5: Only classify if bigram has col 4 key XOR col 5 key (not both)
-        column_4_vs_5_comparison = None
-        if self.include_column5:
-            has_col4 = contains_column_key(4)
-            has_col5 = contains_column_key(5)
-            if has_col4 and not has_col5:
-                column_4_vs_5_comparison = '4'
-            elif has_col5 and not has_col4:
-                column_4_vs_5_comparison = '5'
-        
-        # Column 4 vs other
-        involves_column4 = '4' if contains_column_key(4) else 'other'
-
-        # Column 3 vs other
-        involves_column3 = '3' if contains_column_key(3) else 'other'
-
-        # Column 2 vs other
-        involves_column2 = '2' if contains_column_key(2) else 'other'
-
-        # Column 1 vs other
-        involves_column1 = '1' if contains_column_key(1) else 'other'
-
-        # Column-specific row preferences
-        column_row_prefs = {}
-        max_column = 5 if self.include_column5 else 4
-        
-        for column in range(1, max_column + 1):
-            # Find which keys (if any) are in this column
+        # Helper functions with validation
+        def get_columns_represented():
+            """Get set of columns that have keys in this bigram."""
+            columns = set()
+            for col, keys in column_keys.items():
+                if pos1.key in keys or pos2.key in keys:
+                    columns.add(col)
+            return columns
+                
+        # CATEGORY 1: COLUMN DISTINCTION
+        if column_separation == 0:
+            column_distinction = 'same'
+        elif column_separation > 0:
+            column_distinction = 'different'
+        else:
+            column_distinction = None
+            
+        # CATEGORY 2: ROW PREFERENCES
+        # Home keys preference (different columns only)
+        home_keys = {'a', 's', 'd', 'f'}
+        has_home_key = pos1.key in home_keys or pos2.key in home_keys
+        if column_separation > 0:  # Different columns only
+            home_key_preference = 'home' if has_home_key else 'other'
+        else:
+            home_key_preference = None
+            
+        # Column-specific row preferences (different columns only)
+        column_row_preferences = {}
+        for column in range(1, 5):
+            # Only classify if exactly one key is from this column and upper or lower row
             keys_in_column = []
-            if pos1.column == column:
+            if pos1.column == column and pos1.row in [1, 3]:  # Upper or lower only
                 keys_in_column.append(pos1)
-            if pos2.column == column:
+            if pos2.column == column and pos2.row in [1, 3]:  # Upper or lower only
                 keys_in_column.append(pos2)
             
-            if len(keys_in_column) == 1:
-                # Exactly one key in this column
-                column_row_prefs[f'column{column}_row_pref'] = str(keys_in_column[0].row)
-            elif len(keys_in_column) == 2:
-                # Both keys in this column - for upper vs lower comparison
-                rows = [k.row for k in keys_in_column]
-                if 1 in rows and 3 in rows:
-                    # Contains both upper and lower - ignore
-                    column_row_prefs[f'column{column}_row_pref'] = None
-                    # Contains both upper and lower - use first key's row
-                    #column_row_prefs[f'column{column}_row_pref'] = str(pos1.row)
-                elif 1 in rows:
-                    # Contains upper row
-                    column_row_prefs[f'column{column}_row_pref'] = '1'
-                elif 3 in rows:
-                    # Contains lower row  
-                    column_row_prefs[f'column{column}_row_pref'] = '3'
-                else:
-                    # Only home row keys or mixed non-target rows
-                    column_row_prefs[f'column{column}_row_pref'] = None
+            if len(keys_in_column) == 1 and column_separation > 0:
+                # Exactly one key from this column, other key from different column
+                column_row_preferences[f'column{column}_row_preference'] = str(keys_in_column[0].row)
             else:
-                # No keys in this column
-                column_row_prefs[f'column{column}_row_pref'] = None
+                column_row_preferences[f'column{column}_row_preference'] = None
         
-        return {
-            # Column separation hypotheses
-            'same_row_column_separation': str(column_separation) if row_separation == 0 else None,
-            'cross_row_column_separation': str(column_separation) if row_separation > 0 else None,
-            'same_vs_diff_column': 'same' if (column_separation == 0) else ('different' if (column_separation > 0) else None),
+        # CATEGORY 3: ROW SEPARATION (different columns only)
+        if column_separation > 0:
+            row_separation_0vs1 = str(row_separation) if row_separation in [0, 1] else None
+            row_separation_1vs2 = str(row_separation) if row_separation in [1, 2] else None
+        else:
+            row_separation_0vs1 = None
+            row_separation_1vs2 = None
             
-            # Row preferences
-            'involves_home_keys': involves_home_keys,
-            'row_separation': str(row_separation),
+        # CATEGORY 4: COLUMN INVOLVEMENT (any key(s) from target column vs none)
+        column_isolations = {}
+        for column in range(1, 5):
+            columns_present = get_columns_represented()
+            if column in columns_present:
+                column_isolations[f'column{column}_isolation'] = str(column)
+            else:
+                column_isolations[f'column{column}_isolation'] = 'other'
+        
+        # Column 4 vs 5 involvement (only if column 5 enabled)
+        if self.include_column5:
+            columns_present = get_columns_represented()
+            has_col4 = 4 in columns_present
+            has_col5 = 5 in columns_present
+            if has_col4 and not has_col5:
+                column4vs5_isolation = '4'
+            elif has_col5 and not has_col4:
+                column4vs5_isolation = '5'  
+            else:
+                # Both columns or neither - exclude from this specific test
+                column4vs5_isolation = None
+        else:
+            column4vs5_isolation = None
             
-            # Column preferences
-            'involves_column4': involves_column4,
-            'involves_column3': involves_column3,
-            'involves_column2': involves_column2,
-            'involves_column1': involves_column1,
-            'column_4_vs_5_comparison': column_4_vs_5_comparison,
+        # CATEGORY 5: COLUMN SEPARATION (different columns only)
+        if row_separation == 0 and column_separation in [1, 2]:
+            same_row_column_separation = str(column_separation)
+        else:
+            same_row_column_separation = None
             
-            # Direction hypotheses
-            'same_row_direction': direction if row_separation == 0 and direction not in ['same_column'] else None,
-            'cross_row_direction': direction if row_separation > 0 and direction not in ['same_column_cross'] else None,
+        if row_separation > 0 and column_separation in [1, 2]:
+            cross_row_column_separation = str(column_separation)  
+        else:
+            cross_row_column_separation = None
             
-            # Column-specific row preferences
-            **column_row_prefs,
+        # CATEGORY 6: DIRECTION PREFERENCES (different columns only)
+        if column_separation > 0:  # Different columns only
+            if pos2.column > pos1.column:
+                direction = 'inner_roll' if row_separation == 0 else 'inner_roll_cross'
+            else:
+                direction = 'outer_roll' if row_separation == 0 else 'outer_roll_cross'
+                
+            same_row_direction = direction if row_separation == 0 else None
+            cross_row_direction = direction if row_separation > 0 else None
+        else:
+            same_row_direction = None
+            cross_row_direction = None
+        
+        # Validation: Check for impossible combinations
+        result = {
+            'column_distinction': column_distinction,
+            'home_key_preference': home_key_preference,
+            **column_row_preferences,
+            'row_separation_0vs1': row_separation_0vs1,
+            'row_separation_1vs2': row_separation_1vs2,
+            **column_isolations,
+            'column4vs5_isolation': column4vs5_isolation,
+            'same_row_column_separation': same_row_column_separation,
+            'cross_row_column_separation': cross_row_column_separation,
+            'same_row_direction': same_row_direction,
+            'cross_row_direction': cross_row_direction,
         }
+        
+        # Validation warnings (for debugging)
+        if __debug__:
+            self._validate_classification(pos1, pos2, result)
+            
+        return result
+    
+    def _validate_classification(self, pos1: KeyPosition, pos2: KeyPosition, result: Dict[str, Any]) -> None:
+        """Validate that classification makes logical sense."""
+        warnings = []
+        
+        # Check consistency between same/different column and column separation
+        if result['column_distinction'] == 'same' and result['same_row_column_separation'] is not None:
+            warnings.append(f"Same column bigram {pos1.key}{pos2.key} has column separation classification")
+            
+        if result['column_distinction'] == 'different' and result['same_row_column_separation'] is None and result['cross_row_column_separation'] is None:
+            column_sep = abs(pos1.column - pos2.column)
+            if column_sep in [1, 2]:
+                warnings.append(f"Different column bigram {pos1.key}{pos2.key} missing separation classification")
+        
+        # Check that direction preferences only apply to different columns
+        if result['column_distinction'] == 'same' and (result['same_row_direction'] is not None or result['cross_row_direction'] is not None):
+            warnings.append(f"Same column bigram {pos1.key}{pos2.key} has direction classification")
+            
+        # Check row separation consistency
+        actual_row_sep = abs(pos1.row - pos2.row)
+        if result['row_separation_0vs1'] == '0' and actual_row_sep != 0:
+            warnings.append(f"Row separation mismatch for {pos1.key}{pos2.key}: classified as 0, actual {actual_row_sep}")
+            
+        # Log warnings if any
+        if warnings:
+            logger.warning(f"Classification validation warnings: {'; '.join(warnings)}")
     
     def analyze_hypotheses(self, data: pd.DataFrame) -> Dict[str, Any]:
         """Analyze all focused hypotheses."""
@@ -1648,25 +1604,6 @@ class PreferenceAnalyzer:
         # Check specific comparisons from focused hypotheses
         consistencies = []
         
-        # Column 4 or 3 vs 2 or 1
-        #if 'column_4or3_vs_2or1' in focused_results:
-        #    focused_c4or3_better = focused_results['column_4or3_vs_2or1'].get('proportion_val1_wins', 0.5) > 0.5
-        #    exp_c4or3_better = column_averages.get(4, 0) > column_averages.get(3, 0)
-        #    print("FIX HERE")
-        #    consistencies.append(f"C4 or C3 vs C2 or C1: {'Consistent' if focused_c4or3_better == exp_c4or3_better else 'Inconsistent'}")
-        
-        # Column 4 vs 3
-        #if 'column_4_vs_3' in focused_results:
-        #    focused_c4_better = focused_results['column_4_vs_3'].get('proportion_val1_wins', 0.5) > 0.5
-        #    exp_c4_better = column_averages.get(4, 0) > column_averages.get(3, 0)
-        #    consistencies.append(f"C4 vs C3: {'Consistent' if focused_c4_better == exp_c4_better else 'Inconsistent'}")
-        
-        # Column 3 vs 2
-        #if 'column_3_vs_2' in focused_results:
-        #    focused_c3_better = focused_results['column_3_vs_2'].get('proportion_val1_wins', 0.5) > 0.5
-        #    exp_c3_better = column_averages.get(3, 0) > column_averages.get(2, 0)
-        #    consistencies.append(f"C3 vs C2: {'Consistent' if focused_c3_better == exp_c3_better else 'Inconsistent'}")
-        
         # Column 1 vs Other
         if 'column_1_vs_other' in focused_results:
             focused_c1_better = focused_results['column_1_vs_other'].get('proportion_val1_wins', 0.5) > 0.5
@@ -2351,12 +2288,6 @@ class PreferenceAnalyzer:
                 return ('E (upper)', 'C (lower)') if val1 == '1' else ('C (lower)', 'E (upper)')
             elif 'column4_upper_vs_lower' in hyp_name:
                 return ('R (upper)', 'V (lower)') if val1 == '1' else ('V (lower)', 'R (upper)')
-            #elif 'column_4or3_vs_2or1' in hyp_name:
-            #    return ('Column 4 or 3', 'Column 2 or 1') if (val1 == '4' or val1 == '3') else ('Column 2 or 1', 'Column 4 or 3')
-            #elif 'column_4_vs_3' in hyp_name:
-            #    return ('Column 4', 'Column 3') if val1 == '4' else ('Column 3', 'Column 4')
-            #elif 'column_3_vs_2' in hyp_name:
-            #    return ('Column 3', 'Column 2') if val1 == '3' else ('Column 2', 'Column 3')
             elif 'column_4_vs_5' in hyp_name:
                 return ('Column 4', 'Column 5') if val1 == '4' else ('Column 5', 'Column 4')
             elif 'column_4_vs_other' in hyp_name:
@@ -2371,10 +2302,6 @@ class PreferenceAnalyzer:
                 return ('inner roll', 'outer roll') if val1 == 'inner_roll_cross' else ('outer roll', 'inner roll')
             elif 'same_vs_different_column' in hyp_name:
                 return ('same column', 'different column') if val1 == 'same' else ('different column', 'same column')
-            #elif 'same_vs_different_column_reach' in hyp_name:
-            #    return ('same column (1 row)', 'different column (1 row)') if val1 == 'same' else ('different column (1 row)', 'same column (1 row)')
-            #elif 'same_vs_different_column_hurdle' in hyp_name:
-            #    return ('same column (2 rows)', 'different column (2 rows)') if val1 == 'same' else ('different column (2 rows)', 'same column (2 rows)')
             elif 'home_vs_other' in hyp_name:
                 return ('home keys', 'other keys') if val1 == 'home' else ('other keys', 'home keys')
             elif 'separation_of' in hyp_name and 'columns' in hyp_name:
@@ -2386,7 +2313,7 @@ class PreferenceAnalyzer:
         
         # Process each hypothesis and show detailed results
         for hyp_name, result in focused_results['hypothesis_results'].items():
-            # FIX: Safely get description with fallback
+            # Safely get description with fallback
             description = result.get('description', hyp_name.replace('_', ' ').title())
             
             if 'statistics' not in result:
