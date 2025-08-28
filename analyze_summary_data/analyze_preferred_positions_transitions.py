@@ -18,53 +18,65 @@ HYPOTHESIS CATEGORIES:
 Note that all but Categories 1 and 4 below exclude same-column bigrams, and
 all but test column_4_vs_5 in Category 4 exclude bigrams containing T/G/B.
 
-1. SAME VS DIFFERENT COLUMN (1 test)
+1. Same vs. different column preference (1 test)
+   Hypothesis: Typing with two fingers is preferred over typing with one finger.
    same_vs_different_column:
    - "same": Same column (e.g., "qa", "ws", "ec", "qz")
    - "different": Different columns (e.g., "qw", "as", "zx")
 
-2. ROW PREFERENCES (5 tests)
+2. Row preferences (5 tests)
+   Hypothesis: It is preferable to type home keys (A, S, D, F).
    home_vs_other_keys:
    - "home": Contains A/S/D/F, different columns (e.g., "aw", "se", "dr", "fz")  
    - "other": No A/S/D/F, different columns (e.g., "qw", "er", "zx", "cv")
    
+   Hypothesis: It is preferable to type on the upper row with the middle, longer fingers.
+   Hypothesis: It is preferable to type on the lower row with the outer, shorter fingers.
    column_N_upper_vs_lower_row (N=1,2,3,4):
    Only bigrams where exactly one key is from target column and target row:
    - "1": Upper row key in column N (e.g., "qs", "qx", "qf" for column 1)
    - "3": Lower row key in column N (e.g., "zs", "zx", "zr" for column 1)
 
-3. ROW SEPARATION (2 tests)
+3. Row separation preferences (2 tests)
+   Hypothesis: It is preferable to type keys on the same row than to reach (type on adjacent rows).
    same_row_vs_reach:
    - "0": Same row, different columns (e.g., "qw", "we", "as", "sd", "zx", "xc")
    - "1": 1 row apart, different columns (e.g., "qs", "wa", "ax", "sz")
    
+   Hypothesis: It is preferable to reach than to hurdle (type keys that skip the middle/home row).
    reach_vs_hurdle:
    - "1": 1 row apart, different columns (same as above)
    - "2": 2 rows apart, different columns (e.g., "qx", "qc", "wz", "ez")
 
-4. COLUMN PREFERENCES (4-5 tests)
+4. Column preferences (4-5 tests)
+   Hypothesis: It is preferable to type with the stronger fingers (3 and 4) than the weaker fingers (1 and 2).
    column_N_vs_other (N=1,2,3,4):
    - "N": Contains at least one key from column N (e.g., "qi", "ra", "az" for column 1)
    - "other": Contains no keys from column N (e.g., "we", "sx", "cv" for column 1)
    
+   Hypothesis: It is preferable to type in column 4 than column 5 with the 4th (index) finger.
    column_4_vs_5 (only when include_column5=True):
    - "4": Contains column 4 keys but no column 5 keys (e.g., "rf", "ra", "fv")
    - "5": Contains column 5 keys but no column 4 keys (e.g., "tg", "ta", "gb")  
 
-5. COLUMN SEPARATION (2 tests)
+5. Column separation preferences (2 tests)
+   Hypothesis: It is preferable to type with adjacent fingers when typing in the same row.
    separation_of_1_vs_2_columns_same_row:
    - "1": 1 column apart, same row (e.g., "qw", "we", "as", "sd", "zx", "xc")
    - "2": 2 columns apart, same row (e.g., "qe", "wr", "ad", "sf", "zc", "xv")
    
+   Hypothesis: It is preferable to type with non-adjacent fingers when typing in different rows.
    separation_of_1_vs_2_columns_different_rows:
    - "1": 1 column apart, different rows (e.g., "qs", "wa", "ax", "sz")
    - "2": 2 columns apart, different rows (e.g., "qd", "wf", "ac", "sv")
 
-6. DIRECTION PREFERENCES (2 tests)
+6. Direction preferences (2 tests)
+   Hypothesis: It is preferable to type with fingers in a sequence toward the thumb (same row).
    direction_same_row:
    - "inner_roll": Left-to-right, same row (e.g., "qw", "we", "as", "sd", "zx", "xc")
    - "outer_roll": Right-to-left, same row (e.g., "wq", "ew", "sa", "ds", "xz", "cx")
-   
+
+   Hypothesis: It is preferable to type with fingers in a sequence toward the thumb (different rows).   
    direction_different_rows:
    - "inner_roll_cross": Left-to-right, different rows (e.g., "qs", "ax", "aw", "se")
    - "outer_roll_cross": Right-to-left, different rows (e.g., "sq", "xa", "wa", "es")
