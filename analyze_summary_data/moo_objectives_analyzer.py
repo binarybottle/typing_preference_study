@@ -9,7 +9,6 @@ to create meaningful conflicts for multi-objective keyboard layout optimization.
 The 6 MOO objectives (not including trigram flow):
 1. different_finger: Preference for different-finger over same-finger bigrams
 2. key_preference: Individual key quality preferences (66 pairwise comparisons)  
-3. home_row: Mechanical advantage of home row keys (A, S, D, F)
 4. row_separation: Preferences for row transitions (same > reach > hurdle)
 5. column_separation: Context-dependent column spacing preferences
 
@@ -178,19 +177,16 @@ class CompleteMOOObjectiveAnalyzer:
         # Run each objective test
         results = {}
         
-        logger.info("=== OBJECTIVE 1: DIFFERENT_FINGER ===")
-        results['different_finger'] = self._test_different_finger_preference()
-        
-        logger.info("=== OBJECTIVE 2: KEY_PREFERENCE ===")
+        logger.info("=== OBJECTIVE 1: KEY_PREFERENCE ===")
         results['key_preference'] = self._test_key_preference()
         
-        logger.info("=== OBJECTIVE 3: HOME_ROW ===")
-        results['home_row'] = self._test_home_row_preference()
-        
-        logger.info("=== OBJECTIVE 4: ROW_SEPARATION ===")
+        logger.info("=== OBJECTIVE 2: DIFFERENT_FINGER ===")
+        results['different_finger'] = self._test_different_finger_preference()
+
+        logger.info("=== OBJECTIVE 3: ROW_SEPARATION ===")
         results['row_separation'] = self._test_row_separation_preference()
-        
-        logger.info("=== OBJECTIVE 5: COLUMN_SEPARATION ===")
+
+        logger.info("=== OBJECTIVE 4: COLUMN_SEPARATION ===")
         results['column_separation'] = self._test_column_separation_preference()
         
         # Run validation framework
@@ -288,17 +284,6 @@ class CompleteMOOObjectiveAnalyzer:
             # Finger properties
             same_finger = self._same_finger_bigram(bigram)
             
-            # Home row properties
-            home_keys = {'a', 's', 'd', 'f'}
-            home_count = sum(1 for char in bigram if char in home_keys)
-            home_category = ""
-            if home_count == 2:
-                home_category = "both_home"
-            elif home_count == 1:
-                home_category = "one_home"
-            else:
-                home_category = "neither_home"
-            
             # Row separation
             row_separation = self._calculate_row_separation(bigram)
             row_category = ""
@@ -324,8 +309,6 @@ class CompleteMOOObjectiveAnalyzer:
                 'same_finger': same_finger,
                 'key1_finger': key1_pos.finger,
                 'key2_finger': key2_pos.finger,
-                'home_count': home_count,
-                'home_category': home_category,
                 'row_separation': row_separation,
                 'row_category': row_category,
                 'key1_row': key1_pos.row,
@@ -336,7 +319,6 @@ class CompleteMOOObjectiveAnalyzer:
                 'key2_col': key2_pos.column,
                 'english_bigram_freq': self.english_bigram_frequencies.get(bigram, 0),
                 'relevant_for_finger_test': is_left_hand,
-                'relevant_for_home_row': is_left_hand and home_count > 0,
                 'relevant_for_row_separation': is_left_hand,
                 'relevant_for_column_separation': is_left_hand
             })
@@ -349,9 +331,6 @@ class CompleteMOOObjectiveAnalyzer:
             'total_left_hand_bigrams': len(df),
             'same_finger_bigrams': len(df[df['same_finger'] == True]),
             'different_finger_bigrams': len(df[df['same_finger'] == False]),
-            'both_home_bigrams': len(df[df['home_category'] == 'both_home']),
-            'one_home_bigrams': len(df[df['home_category'] == 'one_home']),
-            'neither_home_bigrams': len(df[df['home_category'] == 'neither_home']),
             'same_row_bigrams': len(df[df['row_category'] == 'same_row']),
             'one_row_apart_bigrams': len(df[df['row_category'] == 'one_row_apart']),
             'two_rows_apart_bigrams': len(df[df['row_category'] == 'two_rows_apart']),
@@ -372,12 +351,8 @@ class CompleteMOOObjectiveAnalyzer:
                 f.write(f"{key}: {value}\n")
             
             f.write(f"\nBigrams with most comparisons:\n")
-            top_bigrams = df.nlargest(10, 'comparison_count')[['bigram', 'comparison_count', 'same_finger', 'home_category', 'row_category']]
+            top_bigrams = df.nlargest(10, 'comparison_count')[['bigram', 'comparison_count', 'same_finger', 'row_category']]
             f.write(top_bigrams.to_string(index=False))
-            
-            f.write(f"\n\nHome row bigrams:\n")
-            home_bigrams = df[df['home_count'] > 0][['bigram', 'comparison_count', 'home_category', 'same_finger']]
-            f.write(home_bigrams.to_string(index=False))
         
         logger.info(f"Bigram classification diagnostic saved to {classification_path}")
         logger.info(f"Classification summary saved to {summary_path}")
@@ -471,11 +446,6 @@ class CompleteMOOObjectiveAnalyzer:
         interpretations = {
             'chose_different_finger': {
                 'variable': 'different-finger preference',
-                'good_direction': rate > 0.5,
-                'threshold': 0.5
-            },
-            'chose_more_home': {
-                'variable': 'home row preference', 
                 'good_direction': rate > 0.5,
                 'threshold': 0.5
             },
@@ -1013,176 +983,7 @@ class CompleteMOOObjectiveAnalyzer:
         }
 
     # =========================================================================
-    # OBJECTIVE 3: HOME ROW
-    # =========================================================================
-
-    def _extract_home_row_instances(self) -> pd.DataFrame:
-        """Extract all instances where bigrams with different home row involvement were compared."""
-        instances = []
-        home_keys = {'a', 's', 'd', 'f'}
-        
-        for _, row in self.data.iterrows():
-            chosen = str(row['chosen_bigram']).lower()
-            unchosen = str(row['unchosen_bigram']).lower()
-            
-            if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
-                continue
-                
-            chosen_home_count = sum(1 for char in chosen if char in home_keys)
-            unchosen_home_count = sum(1 for char in unchosen if char in home_keys)
-            
-            # Only include if different levels of home row involvement
-            if chosen_home_count != unchosen_home_count:
-                # Code preference: 1 = chose bigram with more home keys, 0 = chose bigram with fewer
-                chose_more_home = 1 if chosen_home_count > unchosen_home_count else 0
-                
-                instances.append({
-                    'user_id': row['user_id'],
-                    'chosen_bigram': chosen,
-                    'unchosen_bigram': unchosen,
-                    'chose_more_home': chose_more_home,
-                    'chosen_home_count': chosen_home_count,
-                    'unchosen_home_count': unchosen_home_count,
-                    'home_difference': abs(chosen_home_count - unchosen_home_count),
-                    'slider_value': row.get('sliderValue', 0),
-                    # Only bigram frequency controls
-                    'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
-                    'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
-                })
-        
-        return pd.DataFrame(instances)
-
-    def _test_home_row_preference(self) -> Dict[str, Any]:
-        """Test home row preference using instance-level analysis."""
-        logger.info("Testing home row preference (instance-level)...")
-        
-        instances_df = self._extract_home_row_instances()
-        
-        if instances_df.empty:
-            return {'error': 'No home row instances found'}
-        
-        logger.info(f"Found {len(instances_df)} home row instances from {instances_df['user_id'].nunique()} users")
-        
-        raw_home_rate = instances_df['chose_more_home'].mean()
-        logger.info(f"Raw home row preference rate: {raw_home_rate:.1%}")
-        simple_test = self._simple_proportion_test(instances_df, 'chose_more_home')
-        logger.info(f"Simple test: {simple_test['interpretation']}")
-
-        # Fit model  
-        model_results = self._fit_instance_level_model(
-            instances_df,
-            'chose_more_home', 
-            'home_row_instance_level'
-        )
-
-        simple_test = self._simple_proportion_test(instances_df, 'chose_more_home')
-        
-        return {
-            'description': 'Home row preference (instance-level)',
-            'method': 'instance_level_analysis',
-            'n_instances': len(instances_df),
-            'n_users': instances_df['user_id'].nunique() if not instances_df.empty else 0,
-            'model_results': model_results,
-            'instances_data': instances_df,
-            'normalization_range': (0.0, 1.0),
-            'simple_test': simple_test,          
-            'p_value': simple_test['p_value'],      
-            'preference_rate': simple_test['preference_rate'],  
-            'interpretation': model_results.get('interpretation', 'No interpretation available')
-        }
-        
-    def _are_matched_bigrams_for_home_row_test(self, bg1: str, bg2: str) -> bool:
-        """Check if bigrams are well-matched for home row testing."""
-        # Should differ primarily in home row involvement, not other factors
-        
-        # Check finger usage similarity
-        fingers1 = [self.key_positions[char].finger for char in bg1 if char in self.key_positions]
-        fingers2 = [self.key_positions[char].finger for char in bg2 if char in self.key_positions]
-        
-        # Prefer same finger pattern
-        if len(fingers1) == 2 and len(fingers2) == 2:
-            return (fingers1[0] == fingers2[0] and fingers1[1] == fingers2[1]) or \
-                   (fingers1[0] == fingers2[1] and fingers1[1] == fingers2[0])
-        
-        return False
-    
-    def _get_all_left_hand_bigrams(self) -> Set[str]:
-        """Get all unique left-hand bigrams from the data."""
-        bigrams = set()
-        
-        for _, row in self.data.iterrows():
-            chosen = str(row['chosen_bigram']).lower()
-            unchosen = str(row['unchosen_bigram']).lower()
-            
-            if len(chosen) == 2 and self._all_keys_in_left_hand(chosen):
-                bigrams.add(chosen)
-            if len(unchosen) == 2 and self._all_keys_in_left_hand(unchosen):
-                bigrams.add(unchosen)
-        
-        return bigrams
-    
-    def _calculate_home_row_involvement(self, bg1: str, bg2: str, comparison_type: Tuple[str, str]) -> float:
-        """Calculate home row involvement indicator."""
-        home_keys = {'a', 's', 'd', 'f'}
-        
-        def count_home_keys(bigram):
-            return sum(1 for char in bigram if char in home_keys)
-        
-        home1 = count_home_keys(bg1)
-        home2 = count_home_keys(bg2)
-        
-        cat1, cat2 = comparison_type
-        
-        # Map categories to expected home key counts
-        category_map = {
-            'both_home': 2,
-            'one_home': 1,
-            'neither_home': 0
-        }
-        
-        expected1 = category_map[cat1]
-        expected2 = category_map[cat2]
-        
-        # Return 1 if bg1 matches cat1 and bg2 matches cat2
-        if home1 == expected1 and home2 == expected2:
-            return 1.0
-        elif home1 == expected2 and home2 == expected1:
-            return 0.0
-        else:
-            return 0.5  # Mixed or unclear
-    
-    def _aggregate_home_row_preference(self, home_row_results: Dict) -> Dict:
-        """Aggregate home row preference across different comparison types."""
-        coefficients = []
-        weights = []
-        
-        for comparison_type, results in home_row_results.items():
-            if 'error' not in results and 'coefficient' in results:
-                coeff = results['coefficient']
-                n_obs = results.get('n_observations', 1)
-                
-                coefficients.append(coeff)
-                weights.append(n_obs)
-        
-        if not coefficients:
-            return {'overall_home_preference': 0.0, 'confidence': 'low'}
-        
-        # Weighted average
-        total_weight = sum(weights)
-        overall_preference = sum(c * w for c, w in zip(coefficients, weights)) / total_weight
-        
-        # Assess confidence based on consistency
-        consistency = 1.0 - np.std(coefficients) if len(coefficients) > 1 else 0.5
-        
-        return {
-            'overall_home_preference': overall_preference,
-            'individual_coefficients': coefficients,
-            'consistency': consistency,
-            'confidence': 'high' if consistency > 0.7 and len(coefficients) >= 2 else 'medium' if consistency > 0.5 else 'low'
-        }
-
-    # =========================================================================
-    # OBJECTIVE 4: ROW SEPARATION
+    # OBJECTIVE 3: ROW SEPARATION
     # =========================================================================
     
     def _extract_row_separation_instances(self) -> pd.DataFrame:
@@ -1419,11 +1220,11 @@ class CompleteMOOObjectiveAnalyzer:
         return sorted(row_scores.keys(), key=lambda x: row_scores[x], reverse=True)
 
     # =========================================================================
-    # OBJECTIVE 5: COLUMN SEPARATION
+    # OBJECTIVE 4: COLUMN SEPARATION
     # =========================================================================
     
     def _extract_column_separation_instances(self) -> pd.DataFrame:
-        """Extract column separation instances for different-finger bigrams only."""
+        """Extract clean adjacent vs distant column comparisons by row context."""
         instances = []
         
         for _, row in self.data.iterrows():
@@ -1433,7 +1234,7 @@ class CompleteMOOObjectiveAnalyzer:
             if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
                 continue
                 
-            # CRITICAL: Exclude same-finger bigrams from column analysis
+            # CRITICAL: Exclude same-finger bigrams
             if self._same_finger_bigram(chosen) or self._same_finger_bigram(unchosen):
                 continue
                 
@@ -1442,173 +1243,119 @@ class CompleteMOOObjectiveAnalyzer:
             chosen_row_sep = self._calculate_row_separation(chosen)
             unchosen_row_sep = self._calculate_row_separation(unchosen)
             
-            # Only include if different column separations
-            if chosen_col_sep != unchosen_col_sep:
+            # Only compare adjacent (1) vs distant (2 or 3)
+            separations = {chosen_col_sep, unchosen_col_sep}
+            if not (1 in separations and (2 in separations or 3 in separations)):
+                continue
                 
-                # Determine row context for meaningful comparisons
-                if chosen_row_sep == 0 and unchosen_row_sep == 0:
-                    context = "same_row"
-                    context_description = "within same row"
-                elif chosen_row_sep == unchosen_row_sep and chosen_row_sep > 0:
-                    context = f"{chosen_row_sep}_rows_apart"
-                    context_description = f"{chosen_row_sep} row(s) apart"
-                else:
-                    # Skip mixed row contexts - not meaningful for column analysis
-                    continue
-                
-                # Code preference: 1 = chose smaller column separation, 0 = larger
-                chose_smaller_col_separation = 1 if chosen_col_sep < unchosen_col_sep else 0
-                
-                # Determine specific comparison type
-                smaller_sep = min(chosen_col_sep, unchosen_col_sep)
-                larger_sep = max(chosen_col_sep, unchosen_col_sep)
-                
-                if smaller_sep == 1 and larger_sep == 2:
-                    comparison_type = "adjacent_vs_2apart"
-                    comparison_desc = "adjacent (1 apart) vs 2 columns apart"
-                elif smaller_sep == 1 and larger_sep == 3:
-                    comparison_type = "adjacent_vs_3apart"
-                    comparison_desc = "adjacent (1 apart) vs 3 columns apart"
-                elif smaller_sep == 2 and larger_sep == 3:
-                    comparison_type = "2apart_vs_3apart"
-                    comparison_desc = "2 columns apart vs 3 columns apart"
-                else:
-                    comparison_type = "other"
-                    comparison_desc = f"{smaller_sep} vs {larger_sep} columns apart"
-                
-                instances.append({
-                    'user_id': row['user_id'],
-                    'chosen_bigram': chosen,
-                    'unchosen_bigram': unchosen,
-                    'chose_smaller_col_separation': chose_smaller_col_separation,
-                    'chosen_col_separation': chosen_col_sep,
-                    'unchosen_col_separation': unchosen_col_sep,
-                    'col_separation_difference': abs(chosen_col_sep - unchosen_col_sep),
-                    'row_context': context,
-                    'context_description': context_description,
-                    'comparison_type': comparison_type,
-                    'comparison_description': comparison_desc,
-                    'slider_value': row.get('sliderValue', 0),
-                    'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
-                    'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
-                })
+            # Determine row context - must be consistent
+            if chosen_row_sep == 0 and unchosen_row_sep == 0:
+                context = "same_row"
+                context_desc = "same row"
+            elif chosen_row_sep > 0 and unchosen_row_sep > 0:
+                context = "different_rows"  
+                context_desc = "different rows"
+            else:
+                continue  # Skip mixed row contexts
+            
+            # Code the preference: 1 = chose adjacent, 0 = chose distant
+            chose_adjacent = 1 if min(chosen_col_sep, unchosen_col_sep) == 1 else 0
+            distant_sep = max(chosen_col_sep, unchosen_col_sep)
+            
+            instances.append({
+                'user_id': row['user_id'],
+                'chosen_bigram': chosen,
+                'unchosen_bigram': unchosen,
+                'chose_adjacent': chose_adjacent,
+                'chosen_col_separation': chosen_col_sep,
+                'unchosen_col_separation': unchosen_col_sep,
+                'distant_separation': distant_sep,  # 2 or 3
+                'context': context,
+                'context_description': context_desc,
+                'slider_value': row.get('sliderValue', 0),
+                'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
+                'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
+            })
         
         return pd.DataFrame(instances)
 
     def _test_column_separation_preference(self) -> Dict[str, Any]:
-        """Test column separation preference for different-finger bigrams only."""
-        logger.info("Testing column separation preference (different-finger bigrams only)...")
+        """Test adjacent vs distant column preferences by row context."""
+        logger.info("Testing adjacent vs distant column preferences...")
         
         instances_df = self._extract_column_separation_instances()
         
         if instances_df.empty:
-            return {'error': 'No valid column separation instances found (after excluding same-finger bigrams)'}
+            return {'error': 'No valid adjacent vs distant column instances found'}
         
-        logger.info(f"Found {len(instances_df)} column separation instances from {instances_df['user_id'].nunique()} users")
-        logger.info("(Excluding same-finger bigrams to isolate spatial column effects)")
+        logger.info(f"Found {len(instances_df)} adjacent vs distant column instances from {instances_df['user_id'].nunique()} users")
+        logger.info("Testing: Adjacent (1 apart) vs Distant (2-3 apart) by row context")
         
         # Overall analysis
-        simple_test = self._simple_proportion_test(instances_df, 'chose_smaller_col_separation')
+        simple_test = self._simple_proportion_test(instances_df, 'chose_adjacent')
         model_results = self._fit_instance_level_model(
             instances_df,
-            'chose_smaller_col_separation', 
-            'column_separation_different_fingers_only'
+            'chose_adjacent', 
+            'adjacent_vs_distant_columns'
         )
         
         # Analysis by row context
         context_results = {}
-        context_interpretations = {}
-        
-        for context in instances_df['row_context'].unique():
-            context_data = instances_df[instances_df['row_context'] == context]
+        for context in ["same_row", "different_rows"]:
+            context_data = instances_df[instances_df['context'] == context]
             if len(context_data) >= 20:
-                context_simple = self._simple_proportion_test(context_data, 'chose_smaller_col_separation')
-                context_model = self._fit_instance_level_model(
-                    context_data,
-                    'chose_smaller_col_separation',
-                    f'column_separation_{context}_different_fingers'
-                )
+                context_simple = self._simple_proportion_test(context_data, 'chose_adjacent')
+                
+                # Count examples for clarity
+                examples = []
+                sample_bigrams = context_data[['chosen_bigram', 'unchosen_bigram', 'chose_adjacent']].head(3)
+                for _, sample_row in sample_bigrams.iterrows():
+                    chosen_bg = sample_row['chosen_bigram'].upper()
+                    unchosen_bg = sample_row['unchosen_bigram'].upper()
+                    if sample_row['chose_adjacent']:
+                        examples.append(f"chose {chosen_bg} over {unchosen_bg}")
+                    else:
+                        examples.append(f"chose {unchosen_bg} over {chosen_bg}")
                 
                 context_results[context] = {
                     'simple_test': context_simple,
-                    'model_results': context_model,
                     'n_instances': len(context_data),
-                    'interpretation': context_simple['interpretation']
+                    'preference_rate': context_simple['preference_rate'],
+                    'p_value': context_simple['p_value'],
+                    'examples': examples[:2],  # Show 2 examples
+                    'interpretation': f"{context.replace('_', ' ')}: {context_simple['preference_rate']:.1%} prefer adjacent over distant columns"
                 }
-                
-                # Create specific interpretation for this context
-                pref_rate = context_simple['preference_rate']
-                context_desc = context_data['context_description'].iloc[0]
-                
-                # Find most common comparison type in this context
-                common_comparison = context_data['comparison_description'].mode()
-                if len(common_comparison) > 0:
-                    comp_desc = common_comparison.iloc[0]
-                    context_interpretations[context] = f"{context_desc}: {pref_rate:.1%} prefer smaller column separation ({comp_desc})"
-                else:
-                    context_interpretations[context] = f"{context_desc}: {pref_rate:.1%} prefer smaller column separation"
             else:
                 logger.warning(f"Insufficient data for {context} context ({len(context_data)} instances)")
         
-        # Analysis by specific comparison types
-        comparison_results = {}
-        for comp_type in instances_df['comparison_type'].unique():
-            comp_data = instances_df[instances_df['comparison_type'] == comp_type]
-            if len(comp_data) >= 15:  # Slightly lower threshold for specific comparisons
-                comp_simple = self._simple_proportion_test(comp_data, 'chose_smaller_col_separation')
-                comp_desc = comp_data['comparison_description'].iloc[0]
-                
-                comparison_results[comp_type] = {
-                    'simple_test': comp_simple,
-                    'n_instances': len(comp_data),
-                    'description': comp_desc,
-                    'preference_rate': comp_simple['preference_rate'],
-                    'p_value': comp_simple['p_value'],
-                    'interpretation': f"{comp_desc}: {comp_simple['preference_rate']:.1%} prefer smaller separation"
-                }
-        
         return {
-            'description': 'Column separation preference (different-finger bigrams only)',
-            'method': 'spatial_column_analysis_no_same_finger',
+            'description': 'Adjacent vs distant column preferences by row context',
+            'method': 'binary_adjacent_vs_distant_analysis',
             'n_instances': len(instances_df),
             'n_users': instances_df['user_id'].nunique(),
             'simple_test': simple_test,
             'model_results': model_results,
+            'context_results': context_results,
             'p_value': simple_test['p_value'],
             'preference_rate': simple_test['preference_rate'],
-            'context_results': context_results,
-            'context_interpretations': context_interpretations,
-            'comparison_results': comparison_results,
             'instances_data': instances_df,
             'normalization_range': (0.0, 1.0),
-            'interpretation': self._interpret_clean_column_results(simple_test, context_interpretations, comparison_results)
+            'interpretation': self._interpret_clean_adjacent_vs_distant_results(simple_test, context_results)
         }
 
-    def _interpret_clean_column_results(self, overall_test: Dict, context_interp: Dict, comparison_results: Dict) -> str:
-        """Interpret clean column separation results."""
+    def _interpret_clean_adjacent_vs_distant_results(self, overall_test: Dict, context_results: Dict) -> str:
+        """Interpret clean adjacent vs distant column results."""
         overall_rate = overall_test['preference_rate']
         
-        # Build detailed interpretation
-        interpretation_parts = [f"Overall (different-finger only): {overall_rate:.1%} prefer smaller column separation"]
+        context_summaries = []
+        for context, results in context_results.items():
+            rate = results['preference_rate']
+            context_name = context.replace('_', ' ')
+            context_summaries.append(f"{context_name}: {rate:.1%} prefer adjacent")
         
-        # Add context-specific results
-        if context_interp:
-            context_summary = "; ".join([f"{ctx}: {interp.split(': ')[1]}" for ctx, interp in context_interp.items()])
-            interpretation_parts.append(f"By context - {context_summary}")
+        context_summary = "; ".join(context_summaries)
         
-        # Add specific comparison results
-        if comparison_results:
-            significant_comparisons = []
-            for comp_type, comp_data in comparison_results.items():
-                if comp_data.get('p_value', 1.0) < 0.05:
-                    rate = comp_data['preference_rate']
-                    desc = comp_data['description']
-                    significant_comparisons.append(f"{desc}: {rate:.1%}")
-            
-            if significant_comparisons:
-                interpretation_parts.append(f"Significant specific comparisons: {'; '.join(significant_comparisons)}")
-        
-        return ". ".join(interpretation_parts)
+        return f"Overall: {overall_rate:.1%} prefer adjacent (1 apart) over distant (2-3 apart) columns. By context: {context_summary}"
 
     def _bigram_matches_context(self, bigram: str, context: str) -> bool:
         """Check if bigram matches the specified context."""
@@ -2044,7 +1791,6 @@ class CompleteMOOObjectiveAnalyzer:
         thresholds = {
             'different_finger': 0.05,  # 5% preference difference is meaningful
             'key_preference': 0.05,    
-            'home_row': 0.05,          
             'row_separation': 0.05,   
             'column_separation': 0.05  
         }
@@ -2107,11 +1853,6 @@ class CompleteMOOObjectiveAnalyzer:
                 results['key_preference']
             )
         
-        if 'home_row' in results:
-            consistency_checks['home_row'] = self._check_home_row_advantage(
-                results['home_row']
-            )
-        
         if 'row_separation' in results:
             consistency_checks['row_reach'] = self._check_row_reach_principles(
                 results['row_separation']
@@ -2121,74 +1862,9 @@ class CompleteMOOObjectiveAnalyzer:
             consistency_checks['finger_independence'] = self._check_finger_independence(
                 results['different_finger']
             )
-        
-        # NEW: Home row redundancy test
-        if 'key_preference' in results and 'home_row' in results:
-            consistency_checks['home_row_redundancy'] = self._check_home_row_redundancy(
-                results['key_preference'], results['home_row']
-            )
-        
+                
         return consistency_checks
 
-    def _check_home_row_redundancy(self, key_pref_results: Dict[str, Any], 
-                                home_row_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Test if home row advantage is captured by key preferences."""
-        
-        if 'ranked_keys' not in key_pref_results:
-            return {'error': 'No key rankings available for redundancy test'}
-        
-        ranked_keys = key_pref_results['ranked_keys']
-        home_row_keys = {'a', 's', 'd', 'f'}
-        
-        # Get top-ranked keys
-        if len(ranked_keys) < 4:
-            return {'error': 'Insufficient key rankings for redundancy test'}
-        
-        top_4_keys = set([key for key, _ in ranked_keys[:4]])
-        top_6_keys = set([key for key, _ in ranked_keys[:6]])
-        
-        # Calculate overlap
-        home_in_top_4 = len(home_row_keys & top_4_keys)
-        home_in_top_6 = len(home_row_keys & top_6_keys) 
-        redundancy_top_4 = home_in_top_4 / 4  # Fraction of home row in top 4
-        redundancy_top_6 = home_in_top_6 / 4  # Fraction of home row in top 6
-        
-        # Get home row preference strength
-        home_row_strength = 0.0
-        if ('simple_test' in home_row_results and 
-            isinstance(home_row_results['simple_test'], dict)):
-            pref_rate = home_row_results['simple_test'].get('preference_rate', 0.5)
-            home_row_strength = abs(pref_rate - 0.5)  # Deviation from neutral
-        
-        # Determine redundancy level
-        if redundancy_top_4 >= 0.75:  # 3+ home row keys in top 4
-            redundancy_level = 'high'
-            recommendation = 'Consider removing home row objective - captured by key preferences'
-        elif redundancy_top_6 >= 0.75:  # 3+ home row keys in top 6
-            redundancy_level = 'moderate'  
-            recommendation = 'Home row partially captured by key preferences'
-        else:
-            redundancy_level = 'low'
-            recommendation = 'Keep both objectives - measuring different aspects'
-        
-        # Detailed analysis
-        home_key_ranks = {}
-        for i, (key, score) in enumerate(ranked_keys):
-            if key in home_row_keys:
-                home_key_ranks[key] = {'rank': i+1, 'score': score}
-        
-        return {
-            'redundancy_level': redundancy_level,
-            'home_in_top_4': home_in_top_4,
-            'home_in_top_6': home_in_top_6,
-            'redundancy_fraction_top_4': redundancy_top_4,
-            'redundancy_fraction_top_6': redundancy_top_6,
-            'home_row_preference_strength': home_row_strength,
-            'individual_home_key_ranks': home_key_ranks,
-            'recommendation': recommendation,
-            'interpretation': f"{redundancy_level.title()} redundancy: {home_in_top_4}/4 home keys in top 4 ranks"
-        }
-    
     def _check_finger_strength_hierarchy(self, key_pref_results: Dict[str, Any]) -> Dict[str, Any]:
         """Check if key preferences follow expected finger strength hierarchy."""
         if 'key_ranking' not in key_pref_results or 'ranked_keys' not in key_pref_results['key_ranking']:
@@ -2236,23 +1912,6 @@ class CompleteMOOObjectiveAnalyzer:
             return "Weak consistency with finger strength hierarchy"
         else:
             return "Results contradict expected finger strength hierarchy"
-    
-    def _check_home_row_advantage(self, home_row_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Check if home row shows expected mechanical advantage."""
-        
-        # Check simple test results first
-        if 'simple_test' in home_row_results and isinstance(home_row_results['simple_test'], dict):
-            pref_rate = home_row_results['simple_test'].get('preference_rate')
-            if isinstance(pref_rate, (int, float)):
-                expected_positive = pref_rate > 0.5  # Home row should be preferred
-                return {
-                    'home_preference_rate': pref_rate,
-                    'shows_expected_advantage': expected_positive,
-                    'magnitude': abs(pref_rate - 0.5),
-                    'interpretation': f"Home row shows {'expected' if expected_positive else 'unexpected'} preference direction"
-                }
-        
-        return {'error': 'No valid home row preference data available'}
     
     def _check_row_reach_principles(self, row_sep_results: Dict[str, Any]) -> Dict[str, Any]:
         """Check if row separation follows reach difficulty principles."""
@@ -2519,22 +2178,6 @@ class CompleteMOOObjectiveAnalyzer:
                 f"Least preferred keys: {', '.join(bottom_3)}. "
                 f"Based on {significance_info}.")
     
-    def _interpret_home_row_results(self, home_preference: Dict) -> str:
-        """Interpret home row results."""
-        if not home_preference or 'overall_home_preference' not in home_preference:
-            return "Home row analysis failed - insufficient data"
-        
-        coeff = home_preference['overall_home_preference']
-        
-        if abs(coeff) < 0.05:
-            return f"No significant home row preference detected (coeff={coeff:.3f})"
-        elif coeff > 0:
-            strength = "strong" if coeff > 0.15 else "moderate" if coeff > 0.08 else "weak"
-            return f"Significant home row preference detected (coeff={coeff:.3f}, {strength} effect)"
-        else:
-            strength = "strong" if abs(coeff) > 0.15 else "moderate" if abs(coeff) > 0.08 else "weak"
-            return f"Significant avoidance of home row detected (coeff={coeff:.3f}, {strength} effect)"
-    
     def _interpret_row_separation_results(self, row_function: Dict) -> str:
         """Interpret row separation results."""
         if not row_function or 'row_preference_ordering' not in row_function:
@@ -2775,13 +2418,6 @@ class CompleteMOOObjectiveAnalyzer:
                 'frequency_control': 'Controlled for English bigram frequencies in contexts where keys appeared',
                 'practical_meaning': 'Ranks individual keys by typing preference, likely reflecting finger strength, reach comfort, and motor control ease'
             },
-            'home_row': {
-                'title': 'HOME ROW ADVANTAGE',
-                'what_compared': 'Bigrams with different levels of home row involvement: both keys on home row (ASDF) vs. one key on home row vs. neither key on home row',
-                'method': 'Instance-level analysis: For each comparison between bigrams with different home row counts, recorded which was chosen. Tested if bigrams with more home row keys are preferred.',
-                'frequency_control': 'Controlled for English bigram frequencies to isolate ergonomic from linguistic preferences',
-                'practical_meaning': 'Measures ergonomic advantage of home row position - the rest position with optimal finger positioning and minimal hand movement'
-            },
             'row_separation': {
                 'title': 'ROW SEPARATION PREFERENCES',
                 'what_compared': 'Bigrams requiring different row movements: same row (no movement) vs. one row apart (small reach) vs. two rows apart (large reach)',
@@ -2977,19 +2613,6 @@ class CompleteMOOObjectiveAnalyzer:
                     "  " + " > ".join([f"{key.upper()}({score:.3f})" for key, score in ranked_keys[:6]])
                 ])
             report_lines.append("")
-    
-    def _add_home_row_results_to_report(self, results: Dict[str, Any], report_lines: List[str]) -> None:
-        """Add home row results to report."""
-        if 'overall_home_preference' in results:
-            home_pref = results['overall_home_preference']
-            if isinstance(home_pref, dict) and 'overall_home_preference' in home_pref:
-                coeff = home_pref['overall_home_preference']
-                confidence = home_pref.get('confidence', 'unknown')
-                report_lines.extend([
-                    f"Home Row Preference Coefficient: {coeff:.4f}",
-                    f"Confidence Level: {confidence}",
-                    ""
-                ])
     
     def _add_row_separation_results_to_report(self, results: Dict[str, Any], report_lines: List[str]) -> None:
         """Add row separation results to report."""
@@ -3243,16 +2866,6 @@ class CompleteMOOObjectiveAnalyzer:
                 if 'correlation_with_finger_strength' in check_results:
                     candidate = check_results.get('correlation_with_finger_strength', 0)
                     value = candidate if isinstance(candidate, (int, float)) else 0
-                elif 'home_preference_coefficient' in check_results:
-                    candidate = check_results.get('home_preference_coefficient', 0)
-                    if isinstance(candidate, (int, float)):
-                        value = candidate
-                    elif isinstance(candidate, dict):
-                        # Handle nested structure
-                        nested_val = candidate.get('overall_home_preference', 0)
-                        value = nested_val if isinstance(nested_val, (int, float)) else 0
-                    else:
-                        value = 0
                 elif check_results.get('matches_biomechanical_expectation', False):
                     value = 1.0
                 elif check_results.get('shows_expected_independence_preference', False):
