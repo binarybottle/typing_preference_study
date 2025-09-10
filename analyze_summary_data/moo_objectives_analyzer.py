@@ -7,10 +7,9 @@ controlling for English language frequency effects. These objectives are designe
 to create meaningful conflicts for multi-objective keyboard layout optimization.
 
 The 6 MOO objectives (not including trigram flow):
-1. different_finger: Preference for different-finger over same-finger bigrams
-2. key_preference: Individual key quality preferences (66 pairwise comparisons)  
-4. row_separation: Preferences for row transitions (same > reach > hurdle)
-5. column_separation: Context-dependent column spacing preferences
+1. key_preference: Individual key quality preferences (66 pairwise comparisons)  
+2. row_separation: Preferences for row transitions (same > reach > hurdle)
+3. column_separation: Context-dependent column spacing preferences
 
 Includes rigorous statistical validation with:
 - Multiple comparisons correction
@@ -91,7 +90,6 @@ class CompleteMOOObjectiveAnalyzer:
                 'min_comparisons': 20,
                 'bootstrap_iterations': 1000,
                 'confidence_level': 0.95,
-                'generate_visualizations': True,
                 'figure_dpi': 300
             }
     
@@ -159,7 +157,7 @@ class CompleteMOOObjectiveAnalyzer:
 
         except Exception as e:
             logger.warning(f"Error loading bigram frequencies: {e}.")
-
+        
     def analyze_moo_objectives(self, data_path: str, output_folder: str) -> Dict[str, Any]:
         """Run complete MOO objectives analysis with validation."""
         logger.info("Starting complete MOO objectives analysis with validation...")
@@ -176,18 +174,15 @@ class CompleteMOOObjectiveAnalyzer:
         
         # Run each objective test
         results = {}
-        
+
         logger.info("=== OBJECTIVE 1: KEY_PREFERENCE ===")
         results['key_preference'] = self._test_key_preference()
         
-        logger.info("=== OBJECTIVE 2: DIFFERENT_FINGER ===")
-        results['different_finger'] = self._test_different_finger_preference()
-
-        logger.info("=== OBJECTIVE 3: ROW_SEPARATION ===")
+        logger.info("=== OBJECTIVE 2: ROW_SEPARATION ===")
         results['row_separation'] = self._test_row_separation_preference()
 
-        logger.info("=== OBJECTIVE 4: COLUMN_SEPARATION ===")
-        results['column_separation'] = self._test_column_separation_preference()
+        logger.info("=== OBJECTIVE 3: COMBINED_COLUMN_SEPARATION ===")  
+        results['combined_column_separation'] = self._test_combined_column_separation()
         
         # Run validation framework
         logger.info("=== RUNNING VALIDATION FRAMEWORK ===")
@@ -203,10 +198,6 @@ class CompleteMOOObjectiveAnalyzer:
         # Generate comprehensive report
         logger.info("=== GENERATING REPORTS ===")
         self._generate_comprehensive_report(enhanced_results, output_folder)
-        
-        # Create visualizations
-        if self.config.get('generate_visualizations', True):
-            self._create_visualizations(enhanced_results, output_folder)
         
         # Save results
         self._save_results(enhanced_results, output_folder)
@@ -281,9 +272,6 @@ class CompleteMOOObjectiveAnalyzer:
                 # Skip non-left-hand bigrams for now
                 continue
                 
-            # Finger properties
-            same_finger = self._same_finger_bigram(bigram)
-            
             # Row separation
             row_separation = self._calculate_row_separation(bigram)
             row_category = ""
@@ -306,7 +294,6 @@ class CompleteMOOObjectiveAnalyzer:
                 'bigram': bigram.upper(),
                 'comparison_count': bigram_comparison_counts.get(bigram, 0),
                 'is_left_hand': is_left_hand,
-                'same_finger': same_finger,
                 'key1_finger': key1_pos.finger,
                 'key2_finger': key2_pos.finger,
                 'row_separation': row_separation,
@@ -329,8 +316,6 @@ class CompleteMOOObjectiveAnalyzer:
         # Add summary statistics
         summary_stats = {
             'total_left_hand_bigrams': len(df),
-            'same_finger_bigrams': len(df[df['same_finger'] == True]),
-            'different_finger_bigrams': len(df[df['same_finger'] == False]),
             'same_row_bigrams': len(df[df['row_category'] == 'same_row']),
             'one_row_apart_bigrams': len(df[df['row_category'] == 'one_row_apart']),
             'two_rows_apart_bigrams': len(df[df['row_category'] == 'two_rows_apart']),
@@ -351,7 +336,7 @@ class CompleteMOOObjectiveAnalyzer:
                 f.write(f"{key}: {value}\n")
             
             f.write(f"\nBigrams with most comparisons:\n")
-            top_bigrams = df.nlargest(10, 'comparison_count')[['bigram', 'comparison_count', 'same_finger', 'row_category']]
+            top_bigrams = df.nlargest(10, 'comparison_count')[['bigram', 'comparison_count', 'row_category']]
             f.write(top_bigrams.to_string(index=False))
         
         logger.info(f"Bigram classification diagnostic saved to {classification_path}")
@@ -466,236 +451,7 @@ class CompleteMOOObjectiveAnalyzer:
         return f"{info['variable']}: {rate:.1%} preference rate {direction} expectations ({strength} effect)"
 
     # =========================================================================
-    # OBJECTIVE 1: DIFFERENT FINGER
-    # =========================================================================
-    
-    def _extract_finger_difference_instances(self) -> pd.DataFrame:
-        """Extract finger difference instances controlling for row separation."""
-        instances = []
-        
-        for _, row in self.data.iterrows():
-            chosen = str(row['chosen_bigram']).lower()
-            unchosen = str(row['unchosen_bigram']).lower()
-            
-            if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
-                continue
-                
-            chosen_same_finger = self._same_finger_bigram(chosen)
-            unchosen_same_finger = self._same_finger_bigram(unchosen)
-            chosen_row_sep = self._calculate_row_separation(chosen)
-            unchosen_row_sep = self._calculate_row_separation(unchosen)
-            
-            # Only include if finger usage differs AND same row separation
-            if (chosen_same_finger != unchosen_same_finger and 
-                chosen_row_sep == unchosen_row_sep):
-                
-                row_context = f"{chosen_row_sep}_rows_apart"
-                chose_different_finger = 1 if not chosen_same_finger else 0
-                
-                instances.append({
-                    'user_id': row['user_id'],
-                    'chosen_bigram': chosen,
-                    'unchosen_bigram': unchosen,
-                    'chose_different_finger': chose_different_finger,
-                    'chosen_same_finger': chosen_same_finger,
-                    'unchosen_same_finger': unchosen_same_finger,
-                    'row_separation': chosen_row_sep,
-                    'row_context': row_context,
-                    'slider_value': row.get('sliderValue', 0),
-                    'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
-                    'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
-                })
-        
-        return pd.DataFrame(instances)
-
-    def _test_different_finger_preference(self) -> Dict[str, Any]:
-        """Test different-finger preference controlling for row separation."""
-        logger.info("Testing different-finger preference (controlling for row separation)...")
-        
-        instances_df = self._extract_finger_difference_instances()
-        
-        if instances_df.empty:
-            return {'error': 'No finger difference instances found'}
-        
-        logger.info(f"Found {len(instances_df)} finger difference instances from {instances_df['user_id'].nunique()} users")
-        logger.info("(Controlling for row separation - same vs different finger within each row context)")
-
-        # Overall analysis
-        simple_test = self._simple_proportion_test(instances_df, 'chose_different_finger')
-        model_results = self._fit_instance_level_model(
-            instances_df, 
-            'chose_different_finger',
-            'finger_difference_row_controlled'
-        )
-        
-        # Analysis by row context
-        context_results = {}
-        for row_context in instances_df['row_context'].unique():
-            context_data = instances_df[instances_df['row_context'] == row_context]
-            if len(context_data) >= 20:
-                context_simple = self._simple_proportion_test(context_data, 'chose_different_finger')
-                context_results[row_context] = {
-                    'simple_test': context_simple,
-                    'n_instances': len(context_data),
-                    'preference_rate': context_simple['preference_rate'],
-                    'p_value': context_simple['p_value']
-                }
-        
-        return {
-            'description': 'Different-finger vs same-finger preference (row-controlled)',
-            'method': 'row_controlled_instance_level_analysis',
-            'n_instances': len(instances_df),
-            'n_users': instances_df['user_id'].nunique(),
-            'simple_test': simple_test,
-            'model_results': model_results,
-            'context_results': context_results,
-            'p_value': simple_test['p_value'],
-            'preference_rate': simple_test['preference_rate'],
-            'instances_data': instances_df,
-            'normalization_range': (0.0, 1.0),
-            'interpretation': self._interpret_finger_context_results(simple_test, context_results)
-        }
-
-    def _interpret_finger_context_results(self, overall_test: Dict, context_results: Dict) -> str:
-        """Interpret finger preference results by row context."""
-        overall_rate = overall_test['preference_rate']
-        
-        context_summaries = []
-        for context, results in context_results.items():
-            rate = results['preference_rate']
-            rows_apart = context.split('_')[0]
-            context_summaries.append(f"{rows_apart} rows apart: {rate:.1%}")
-        
-        context_summary = "; ".join(context_summaries)
-        
-        return f"Overall: {overall_rate:.1%} prefer different finger. By row context: {context_summary}"
-
-    def _extract_controlled_finger_comparisons(self) -> List[Tuple[str, str, Dict]]:
-        """Extract controlled comparisons where bigrams share exactly one letter."""
-        comparisons = []
-        
-        # Get all bigrams from the data
-        all_bigrams = self._get_all_left_hand_bigrams()
-        
-        # For each left-hand letter, find controlled comparisons
-        for shared_letter in self.left_hand_keys:
-            # Find all bigrams containing this letter
-            bigrams_with_letter = [bg for bg in all_bigrams if shared_letter in bg]
-            
-            # Separate into same-finger and different-finger groups
-            same_finger_bigrams = []
-            different_finger_bigrams = []
-            
-            for bigram in bigrams_with_letter:
-                if self._same_finger_bigram(bigram):
-                    same_finger_bigrams.append(bigram)
-                else:
-                    different_finger_bigrams.append(bigram)
-            
-            # Compare same-finger vs different-finger bigrams sharing this letter
-            for sf_bigram in same_finger_bigrams:
-                for df_bigram in different_finger_bigrams:
-                    # Additional check: ensure they share exactly one letter
-                    if self._bigrams_share_exactly_one_letter(sf_bigram, df_bigram, shared_letter):
-                        comparison_data = self._extract_pairwise_comparison(sf_bigram, df_bigram)
-                        
-                        if comparison_data['total'] >= self.config.get('min_comparisons', 20):
-                            comparisons.append((sf_bigram, df_bigram, comparison_data))
-        
-        logger.info(f"Found {len(comparisons)} controlled finger difference comparisons")
-        return comparisons
-    
-    def _extract_general_finger_comparisons(self) -> List[Tuple[str, str, Dict]]:
-        """Extract general comparisons between same-finger and different-finger bigrams."""
-        comparisons = []
-        
-        # Get actual bigram pairs that were compared in the experiment
-        bigram_pairs = set()
-        for _, row in self.data.iterrows():
-            chosen = str(row['chosen_bigram']).lower()
-            unchosen = str(row['unchosen_bigram']).lower()
-            
-            if (len(chosen) == 2 and len(unchosen) == 2 and 
-                self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
-                # Store as sorted tuple to avoid duplicates
-                pair = tuple(sorted([chosen, unchosen]))
-                bigram_pairs.add(pair)
-        
-        logger.info(f"Found {len(bigram_pairs)} unique bigram pairs in experimental data")
-        
-        # Filter to pairs that test finger difference
-        finger_test_pairs = []
-        for bigram1, bigram2 in bigram_pairs:
-            same_finger_1 = self._same_finger_bigram(bigram1)
-            same_finger_2 = self._same_finger_bigram(bigram2)
-            
-            # Only include if one is same-finger and other is different-finger
-            if same_finger_1 != same_finger_2:
-                comparison_data = self._extract_pairwise_comparison(bigram1, bigram2)
-                if comparison_data['total'] >= self.config.get('min_comparisons', 20):
-                    finger_test_pairs.append((bigram1, bigram2, comparison_data))
-        
-        logger.info(f"Found {len(finger_test_pairs)} finger difference comparisons")
-        return finger_test_pairs
-    
-    def _bigrams_share_exactly_one_letter(self, bigram1: str, bigram2: str, expected_shared: str) -> bool:
-        """Check if two bigrams share exactly one letter (the expected one)."""
-        if len(bigram1) != 2 or len(bigram2) != 2:
-            return False
-        
-        # Count shared letters
-        shared_letters = set(bigram1) & set(bigram2)
-        
-        # Should have exactly one shared letter, and it should be the expected one
-        return len(shared_letters) == 1 and expected_shared in shared_letters
-    
-    def _analyze_finger_difference_patterns(self, test_comparisons: List) -> Dict[str, Any]:
-        """Debug the finger difference comparisons found."""
-        if not test_comparisons:
-            return {'message': 'No test comparisons to debug'}
-        
-        debug_info = {
-            'total_comparisons': len(test_comparisons),
-            'sample_comparisons': []
-        }
-        
-        # Analyze first few comparisons for debugging
-        for i, (bigram1, bigram2, comp_data) in enumerate(test_comparisons[:5]):
-            same_finger_1 = self._same_finger_bigram(bigram1)
-            same_finger_2 = self._same_finger_bigram(bigram2)
-            
-            debug_info['sample_comparisons'].append({
-                'bigram1': bigram1,
-                'bigram2': bigram2,
-                'bigram1_same_finger': same_finger_1,
-                'bigram2_same_finger': same_finger_2,
-                'total_observations': comp_data['total'],
-                'bigram1_wins': comp_data['wins_item1']
-            })
-        
-        return debug_info
-    
-    def _calculate_finger_difference(self, bigram1: str, bigram2: str) -> float:
-        """Calculate finger difference indicator (1 = different fingers, 0 = same finger)."""
-        same_finger_bg1 = self._same_finger_bigram(bigram1)
-        same_finger_bg2 = self._same_finger_bigram(bigram2)
-        
-        # Return 1 if one is same-finger and other is different-finger
-        return float(same_finger_bg1 != same_finger_bg2)
-    
-    def _same_finger_bigram(self, bigram: str) -> bool:
-        """Check if bigram uses same finger."""
-        if len(bigram) != 2:
-            return False
-        
-        key1, key2 = bigram[0], bigram[1]
-        if key1 in self.key_positions and key2 in self.key_positions:
-            return self.key_positions[key1].finger == self.key_positions[key2].finger
-        
-        return False
-
-    # =========================================================================
-    # OBJECTIVE 2: KEY PREFERENCE  
+    # OBJECTIVE 1: KEY PREFERENCE  
     # =========================================================================
 
     def _extract_key_preference_instances(self) -> pd.DataFrame:
@@ -774,8 +530,8 @@ class CompleteMOOObjectiveAnalyzer:
         return False
 
     def _test_key_preference(self) -> Dict[str, Any]:
-        """Test key preferences using instance-level analysis."""
-        logger.info("Testing key preferences (instance-level)...")
+        """Test key preferences using raw pairwise comparisons only."""
+        logger.info("Testing key preferences (raw pairwise comparisons)...")
         
         instances_df = self._extract_key_preference_instances()
         
@@ -784,17 +540,13 @@ class CompleteMOOObjectiveAnalyzer:
         
         logger.info(f"Found {len(instances_df)} key preference instances from {instances_df['user_id'].nunique()} users")
         
-        # Analyze preferences for each key pair that appears frequently enough
-        key_pair_results = {}
-        key_preference_scores = {}
-        
-        # Group by key pairs
+        # Group by key pairs and analyze each pair separately
         instances_df['key_pair'] = instances_df.apply(
             lambda row: tuple(sorted([row['chosen_key'], row['unchosen_key']])), axis=1
         )
         
         key_pair_counts = instances_df['key_pair'].value_counts()
-        total_significant_pairs = 0
+        pairwise_results = {}
         all_p_values = []
         
         for key_pair, count in key_pair_counts.items():
@@ -808,42 +560,58 @@ class CompleteMOOObjectiveAnalyzer:
                 # Run simple proportion test for this key pair
                 simple_test = self._simple_proportion_test(pair_data, 'chose_key1')
                 
-                # Store results
-                key_pair_results[key_pair] = {
+                # Calculate raw preference rate for key1 over key2
+                key1_preference_rate = simple_test['preference_rate']
+                
+                # Store results with clear interpretation
+                pairwise_results[key_pair] = {
                     'key1': key1,
                     'key2': key2,
-                    'n_instances': count,
-                    'key1_preference_rate': simple_test['preference_rate'],
+                    'key1_wins': int(pair_data['chose_key1'].sum()),
+                    'key2_wins': int((1 - pair_data['chose_key1']).sum()),
+                    'total_comparisons': count,
+                    'key1_preference_rate': key1_preference_rate,
+                    'key2_preference_rate': 1.0 - key1_preference_rate,
                     'p_value': simple_test['p_value'],
                     'significant': simple_test['significant'],
                     'effect_size': simple_test['effect_size'],
-                    'interpretation': simple_test['interpretation']
+                    'winner': key1 if key1_preference_rate > 0.5 else key2,
+                    'winner_rate': max(key1_preference_rate, 1.0 - key1_preference_rate),
+                    'interpretation': f"{key1.upper()} vs {key2.upper()}: {key1.upper()} preferred {key1_preference_rate:.1%} of time"
                 }
                 
                 all_p_values.append(simple_test['p_value'])
-                if simple_test['significant']:
-                    total_significant_pairs += 1
-                
-                # Update individual key scores
-                key1_score = simple_test['preference_rate'] - 0.5  # Deviation from neutral
-                key2_score = -key1_score
-                
-                key_preference_scores[key1] = key_preference_scores.get(key1, []) + [key1_score]
-                key_preference_scores[key2] = key_preference_scores.get(key2, []) + [key2_score]
         
-        # Calculate overall key rankings
-        key_rankings = {}
-        for key, scores in key_preference_scores.items():
-            key_rankings[key] = {
-                'mean_score': np.mean(scores),
-                'n_comparisons': len(scores),
-                'std_score': np.std(scores)
-            }
+        # Create summary without Bradley-Terry aggregation
+        # Just report the significant pairwise preferences
+        significant_pairs = []
+        for pair, results in pairwise_results.items():
+            if results['significant']:
+                winner = results['winner']
+                loser = results['key2'] if winner == results['key1'] else results['key1']
+                rate = results['winner_rate']
+                significant_pairs.append(f"{winner.upper()} > {loser.upper()} ({rate:.1%})")
         
-        # Sort keys by preference score
-        ranked_keys = sorted(key_rankings.items(), key=lambda x: x[1]['mean_score'], reverse=True)
+        # Export complete pairwise results for inspection
+        pairwise_export = []
+        for pair, results in pairwise_results.items():
+            pairwise_export.append({
+                'key_pair': f"{results['key1'].upper()}-{results['key2'].upper()}",
+                'key1': results['key1'].upper(),
+                'key2': results['key2'].upper(),
+                'key1_wins': results['key1_wins'],
+                'key2_wins': results['key2_wins'],
+                'total_comparisons': results['total_comparisons'],
+                'key1_preference_rate': results['key1_preference_rate'],
+                'key2_preference_rate': results['key2_preference_rate'],
+                'winner': results['winner'].upper(),
+                'winner_preference_rate': results['winner_rate'],
+                'p_value': results['p_value'],
+                'significant': results['significant'],
+                'effect_size': results['effect_size']
+            })
         
-        # Create overall summary test (combine all p-values using Fisher's method)
+        # Use Fisher's method to combine p-values for overall significance
         overall_test = None
         if all_p_values:
             try:
@@ -857,7 +625,6 @@ class CompleteMOOObjectiveAnalyzer:
                 }
             except Exception as e:
                 logger.warning(f"Failed to combine p-values: {e}")
-                # Fallback: use most significant p-value
                 overall_test = {
                     'min_p_value': min(all_p_values),
                     'significant': min(all_p_values) < 0.05,
@@ -866,23 +633,69 @@ class CompleteMOOObjectiveAnalyzer:
                 }
         
         return {
-            'description': 'Individual key preferences (instance-level)',
-            'method': 'pairwise_instance_level_analysis',
+            'description': 'Raw pairwise key preferences (no Bradley-Terry aggregation)',
+            'method': 'raw_pairwise_comparisons',
             'n_instances': len(instances_df),
-            'n_users': instances_df['user_id'].nunique() if not instances_df.empty else 0,
-            'n_key_pairs': len(key_pair_results),
-            'n_significant_pairs': total_significant_pairs,
-            'key_pair_results': key_pair_results,
-            'key_rankings': dict(key_rankings),
-            'ranked_keys': ranked_keys,
-            'instances_data': instances_df,
+            'n_users': instances_df['user_id'].nunique(),
+            'n_key_pairs': len(pairwise_results),
+            'n_significant_pairs': len(significant_pairs),
+            'pairwise_results': pairwise_results,
+            'pairwise_export': pairwise_export,  # For CSV export
+            'significant_preferences': significant_pairs,
             'simple_test': overall_test,  # For validation framework
-            'p_value': overall_test['combined_p_value'] if overall_test else 1.0,  # For validation
-            'preference_rate': total_significant_pairs / len(key_pair_results) if key_pair_results else 0.0,  # For validation
+            'p_value': overall_test['combined_p_value'] if overall_test else 1.0,
+            'preference_rate': len(significant_pairs) / len(pairwise_results) if pairwise_results else 0.0,
+            'instances_data': instances_df,
             'normalization_range': (0.0, 1.0),
-            'interpretation': self._interpret_key_rankings(ranked_keys, total_significant_pairs, len(key_pair_results))
+            'interpretation': self._interpret_raw_pairwise_results(significant_pairs, len(pairwise_results))
         }
 
+    def _interpret_raw_pairwise_results(self, significant_pairs: List[str], total_pairs: int) -> str:
+        """Interpret raw pairwise key preference results."""
+        n_significant = len(significant_pairs)
+        
+        if n_significant == 0:
+            return f"No significant key preferences detected from {total_pairs} pairwise comparisons"
+        
+        # Show top significant preferences
+        top_preferences = significant_pairs[:5]  # Show first 5
+        preferences_text = "; ".join(top_preferences)
+        
+        return f"Significant preferences ({n_significant}/{total_pairs} pairs): {preferences_text}{'...' if n_significant > 5 else ''}"
+
+    def _save_key_pairwise_results(self, key_pref_results: Dict[str, Any], output_folder: str) -> None:
+        """Save complete pairwise key comparison results."""
+        if 'pairwise_export' not in key_pref_results:
+            return
+        
+        pairwise_df = pd.DataFrame(key_pref_results['pairwise_export'])
+        
+        # Sort by significance and effect size
+        pairwise_df = pairwise_df.sort_values(['significant', 'effect_size'], ascending=[False, False])
+        
+        csv_path = os.path.join(output_folder, 'key_pairwise_comparisons.csv')
+        pairwise_df.to_csv(csv_path, index=False)
+        logger.info(f"Complete pairwise key comparisons saved to {csv_path}")
+        
+        # Create summary of significant preferences
+        significant_df = pairwise_df[pairwise_df['significant'] == True]
+        if len(significant_df) > 0:
+            summary_path = os.path.join(output_folder, 'significant_key_preferences.csv')
+            significant_df.to_csv(summary_path, index=False)
+            logger.info(f"Significant key preferences saved to {summary_path}")
+            
+            # Print verification for R vs V
+            rv_comparison = pairwise_df[
+                ((pairwise_df['key1'] == 'R') & (pairwise_df['key2'] == 'V')) |
+                ((pairwise_df['key1'] == 'V') & (pairwise_df['key2'] == 'R'))
+            ]
+            
+            if len(rv_comparison) > 0:
+                rv_row = rv_comparison.iloc[0]
+                print(f"\nR vs V verification:")
+                print(f"Winner: {rv_row['winner']} ({rv_row['winner_preference_rate']:.1%})")
+                print(f"Raw rates: R={rv_row['key1_preference_rate']:.1%}, V={rv_row['key2_preference_rate']:.1%}")
+       
     def _are_matched_bigrams_for_key_test(self, bg1: str, bg2: str, key1: str, key2: str) -> bool:
         """Check if two bigrams are well-matched for testing key preference."""
         # Bigrams should differ primarily in the key being tested
@@ -983,7 +796,7 @@ class CompleteMOOObjectiveAnalyzer:
         }
 
     # =========================================================================
-    # OBJECTIVE 3: ROW SEPARATION
+    # OBJECTIVE 2: ROW SEPARATION
     # =========================================================================
     
     def _extract_row_separation_instances(self) -> pd.DataFrame:
@@ -1220,11 +1033,11 @@ class CompleteMOOObjectiveAnalyzer:
         return sorted(row_scores.keys(), key=lambda x: row_scores[x], reverse=True)
 
     # =========================================================================
-    # OBJECTIVE 4: COLUMN SEPARATION
+    # OBJECTIVE 3: COLUMN SEPARATION
     # =========================================================================
-    
-    def _extract_column_separation_instances(self) -> pd.DataFrame:
-        """Extract clean adjacent vs distant column comparisons by row context."""
+
+    def _extract_combined_column_instances(self) -> pd.DataFrame:
+        """Extract instances for systematic column separation analysis."""
         instances = []
         
         for _, row in self.data.iterrows():
@@ -1234,128 +1047,177 @@ class CompleteMOOObjectiveAnalyzer:
             if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
                 continue
                 
-            # CRITICAL: Exclude same-finger bigrams
-            if self._same_finger_bigram(chosen) or self._same_finger_bigram(unchosen):
-                continue
-                
             chosen_col_sep = self._calculate_column_separation(chosen)
             unchosen_col_sep = self._calculate_column_separation(unchosen)
             chosen_row_sep = self._calculate_row_separation(chosen)
             unchosen_row_sep = self._calculate_row_separation(unchosen)
             
-            # Only compare adjacent (1) vs distant (2 or 3)
+            # Determine comparison type
             separations = {chosen_col_sep, unchosen_col_sep}
-            if not (1 in separations and (2 in separations or 3 in separations)):
-                continue
+            comparison_type = None
+            preference_var = None
+            context = None
+            
+            # Test 1: Same column (0, same finger) vs Adjacent column (1, different finger)
+            if separations == {0, 1}:
+                comparison_type = "same_vs_adjacent_column"
+                preference_var = "chose_adjacent"  # 1 = chose adjacent (different finger), 0 = chose same (same finger)
+                context = f"row_sep_{min(chosen_row_sep, unchosen_row_sep)}_{max(chosen_row_sep, unchosen_row_sep)}"
                 
-            # Determine row context - must be consistent
-            if chosen_row_sep == 0 and unchosen_row_sep == 0:
-                context = "same_row"
-                context_desc = "same row"
-            elif chosen_row_sep > 0 and unchosen_row_sep > 0:
-                context = "different_rows"  
-                context_desc = "different rows"
+                chose_adjacent = 1 if max(chosen_col_sep, unchosen_col_sep) == 1 else 0
+            
+            # Test 2 & 3: Adjacent column (1) vs Remote column (2-3) - only different finger
+            elif separations in [{1, 2}, {1, 3}] and chosen_col_sep > 0 and unchosen_col_sep > 0:
+                # Both are different finger (column > 0)
+                if chosen_row_sep == 0 and unchosen_row_sep == 0:
+                    comparison_type = "adjacent_vs_remote_same_row"
+                    context = "same_row"
+                elif chosen_row_sep > 0 and unchosen_row_sep > 0:
+                    comparison_type = "adjacent_vs_remote_different_rows"
+                    context = "different_rows"
+                else:
+                    continue  # Skip mixed row contexts
+                
+                preference_var = "chose_adjacent"
+                chose_adjacent = 1 if min(chosen_col_sep, unchosen_col_sep) == 1 else 0
+            
             else:
-                continue  # Skip mixed row contexts
+                continue  # Skip other separation combinations
             
-            # Code the preference: 1 = chose adjacent, 0 = chose distant
-            chose_adjacent = 1 if min(chosen_col_sep, unchosen_col_sep) == 1 else 0
-            distant_sep = max(chosen_col_sep, unchosen_col_sep)
-            
-            instances.append({
-                'user_id': row['user_id'],
-                'chosen_bigram': chosen,
-                'unchosen_bigram': unchosen,
-                'chose_adjacent': chose_adjacent,
-                'chosen_col_separation': chosen_col_sep,
-                'unchosen_col_separation': unchosen_col_sep,
-                'distant_separation': distant_sep,  # 2 or 3
-                'context': context,
-                'context_description': context_desc,
-                'slider_value': row.get('sliderValue', 0),
-                'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
-                'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
-            })
+            if comparison_type:
+                instances.append({
+                    'user_id': row['user_id'],
+                    'chosen_bigram': chosen,
+                    'unchosen_bigram': unchosen,
+                    'comparison_type': comparison_type,
+                    'context': context,
+                    'chose_adjacent': chose_adjacent,
+                    'chosen_col_separation': chosen_col_sep,
+                    'unchosen_col_separation': unchosen_col_sep,
+                    'chosen_row_separation': chosen_row_sep,
+                    'unchosen_row_separation': unchosen_row_sep,
+                    'slider_value': row.get('sliderValue', 0),
+                    'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
+                    'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
+                })
         
         return pd.DataFrame(instances)
 
-    def _test_column_separation_preference(self) -> Dict[str, Any]:
-        """Test adjacent vs distant column preferences by row context."""
-        logger.info("Testing adjacent vs distant column preferences...")
+    def _test_combined_column_separation(self) -> Dict[str, Any]:
+        """Test systematic column separation preferences."""
+        logger.info("Testing systematic column separation preferences...")
         
-        instances_df = self._extract_column_separation_instances()
+        instances_df = self._extract_combined_column_instances()
         
         if instances_df.empty:
-            return {'error': 'No valid adjacent vs distant column instances found'}
+            return {'error': 'No combined column separation instances found'}
         
-        logger.info(f"Found {len(instances_df)} adjacent vs distant column instances from {instances_df['user_id'].nunique()} users")
-        logger.info("Testing: Adjacent (1 apart) vs Distant (2-3 apart) by row context")
+        logger.info(f"Found {len(instances_df)} combined column instances from {instances_df['user_id'].nunique()} users")
         
         # Overall analysis
         simple_test = self._simple_proportion_test(instances_df, 'chose_adjacent')
         model_results = self._fit_instance_level_model(
             instances_df,
             'chose_adjacent', 
-            'adjacent_vs_distant_columns'
+            'combined_column_separation'
         )
         
-        # Analysis by row context
-        context_results = {}
-        for context in ["same_row", "different_rows"]:
-            context_data = instances_df[instances_df['context'] == context]
-            if len(context_data) >= 20:
-                context_simple = self._simple_proportion_test(context_data, 'chose_adjacent')
+        # Analysis by comparison type
+        comparison_results = {}
+        for comp_type in instances_df['comparison_type'].unique():
+            comp_data = instances_df[instances_df['comparison_type'] == comp_type]
+            if len(comp_data) >= 15:
+                comp_simple = self._simple_proportion_test(comp_data, 'chose_adjacent')
                 
-                # Count examples for clarity
-                examples = []
-                sample_bigrams = context_data[['chosen_bigram', 'unchosen_bigram', 'chose_adjacent']].head(3)
-                for _, sample_row in sample_bigrams.iterrows():
-                    chosen_bg = sample_row['chosen_bigram'].upper()
-                    unchosen_bg = sample_row['unchosen_bigram'].upper()
-                    if sample_row['chose_adjacent']:
-                        examples.append(f"chose {chosen_bg} over {unchosen_bg}")
-                    else:
-                        examples.append(f"chose {unchosen_bg} over {chosen_bg}")
+                # Create interpretation based on comparison type
+                if comp_type == "same_vs_adjacent_column":
+                    interpretation = f"Same finger (same column) vs Different finger (adjacent column): {(1-comp_simple['preference_rate']):.1%} prefer same finger"
+                elif comp_type == "adjacent_vs_remote_same_row":
+                    interpretation = f"Adjacent vs Remote columns (same row): {comp_simple['preference_rate']:.1%} prefer adjacent"
+                elif comp_type == "adjacent_vs_remote_different_rows":
+                    interpretation = f"Adjacent vs Remote columns (different rows): {comp_simple['preference_rate']:.1%} prefer adjacent"
                 
-                context_results[context] = {
-                    'simple_test': context_simple,
-                    'n_instances': len(context_data),
-                    'preference_rate': context_simple['preference_rate'],
-                    'p_value': context_simple['p_value'],
-                    'examples': examples[:2],  # Show 2 examples
-                    'interpretation': f"{context.replace('_', ' ')}: {context_simple['preference_rate']:.1%} prefer adjacent over distant columns"
+                comparison_results[comp_type] = {
+                    'simple_test': comp_simple,
+                    'n_instances': len(comp_data),
+                    'preference_rate': comp_simple['preference_rate'],
+                    'p_value': comp_simple['p_value'],
+                    'interpretation': interpretation,
+                    'examples': self._get_comparison_examples(comp_data, comp_type)
                 }
-            else:
-                logger.warning(f"Insufficient data for {context} context ({len(context_data)} instances)")
+        
+        # Context analysis for same vs adjacent (controlling for row separation)
+        context_results = {}
+        if 'same_vs_adjacent_column' in comparison_results:
+            same_vs_adj_data = instances_df[instances_df['comparison_type'] == 'same_vs_adjacent_column']
+            
+            for context in same_vs_adj_data['context'].unique():
+                context_data = same_vs_adj_data[same_vs_adj_data['context'] == context]
+                if len(context_data) >= 10:
+                    context_simple = self._simple_proportion_test(context_data, 'chose_adjacent')
+                    
+                    # Parse context
+                    row_seps = context.replace('row_sep_', '').split('_')
+                    row_context_desc = f"Row separations {row_seps[0]}-{row_seps[1]}"
+                    
+                    context_results[context] = {
+                        'simple_test': context_simple,
+                        'n_instances': len(context_data),
+                        'preference_rate': context_simple['preference_rate'],
+                        'description': row_context_desc,
+                        'interpretation': f"{row_context_desc}: {(1-context_simple['preference_rate']):.1%} prefer same finger"
+                    }
         
         return {
-            'description': 'Adjacent vs distant column preferences by row context',
-            'method': 'binary_adjacent_vs_distant_analysis',
+            'description': 'Systematic column separation preferences',
+            'method': 'hierarchical_column_analysis',
             'n_instances': len(instances_df),
             'n_users': instances_df['user_id'].nunique(),
             'simple_test': simple_test,
             'model_results': model_results,
+            'comparison_results': comparison_results,
             'context_results': context_results,
             'p_value': simple_test['p_value'],
             'preference_rate': simple_test['preference_rate'],
             'instances_data': instances_df,
             'normalization_range': (0.0, 1.0),
-            'interpretation': self._interpret_clean_adjacent_vs_distant_results(simple_test, context_results)
+            'interpretation': self._interpret_combined_column_results(simple_test, comparison_results)
         }
 
-    def _interpret_clean_adjacent_vs_distant_results(self, overall_test: Dict, context_results: Dict) -> str:
-        """Interpret clean adjacent vs distant column results."""
-        overall_rate = overall_test['preference_rate']
+    def _get_comparison_examples(self, comp_data: pd.DataFrame, comp_type: str) -> List[str]:
+        """Get example comparisons for each type."""
+        examples = []
+        sample_rows = comp_data.head(3)
         
-        context_summaries = []
-        for context, results in context_results.items():
-            rate = results['preference_rate']
-            context_name = context.replace('_', ' ')
-            context_summaries.append(f"{context_name}: {rate:.1%} prefer adjacent")
+        for _, row in sample_rows.iterrows():
+            chosen = row['chosen_bigram'].upper()
+            unchosen = row['unchosen_bigram'].upper()
+            chose_adj = row['chose_adjacent']
+            
+            if comp_type == "same_vs_adjacent_column":
+                if chose_adj:
+                    examples.append(f"Chose {chosen} (different finger) over {unchosen} (same finger)")
+                else:
+                    examples.append(f"Chose {unchosen} (same finger) over {chosen} (different finger)")
+            else:
+                adj_bigram = chosen if row['chosen_col_separation'] < row['unchosen_col_separation'] else unchosen
+                remote_bigram = unchosen if adj_bigram == chosen else chosen
+                
+                if chose_adj:
+                    examples.append(f"Chose {adj_bigram} (adjacent) over {remote_bigram} (remote)")
+                else:
+                    examples.append(f"Chose {remote_bigram} (remote) over {adj_bigram} (adjacent)")
         
-        context_summary = "; ".join(context_summaries)
+        return examples
+
+    def _interpret_combined_column_results(self, overall_test: Dict, comparison_results: Dict) -> str:
+        """Interpret combined column separation results."""
+        interpretations = []
         
-        return f"Overall: {overall_rate:.1%} prefer adjacent (1 apart) over distant (2-3 apart) columns. By context: {context_summary}"
+        for comp_type, results in comparison_results.items():
+            interpretations.append(results['interpretation'])
+        
+        return "; ".join(interpretations)
 
     def _bigram_matches_context(self, bigram: str, context: str) -> bool:
         """Check if bigram matches the specified context."""
@@ -1623,7 +1485,6 @@ class CompleteMOOObjectiveAnalyzer:
             'multiple_comparisons_correction': self._correct_multiple_comparisons(results),
             'effect_size_validation': self._validate_effect_sizes(results),
             'cross_validation': self._cross_validate_models(results),
-            'biomechanical_consistency': self._check_biomechanical_consistency(results),
             'confound_analysis': self._analyze_confounds(results),
             'statistical_power': self._assess_statistical_power(results),
             'overall_validity': self._assess_overall_validity(results)
@@ -1789,7 +1650,6 @@ class CompleteMOOObjectiveAnalyzer:
         
         # Context-dependent thresholds
         thresholds = {
-            'different_finger': 0.05,  # 5% preference difference is meaningful
             'key_preference': 0.05,    
             'row_separation': 0.05,   
             'column_separation': 0.05  
@@ -1843,76 +1703,6 @@ class CompleteMOOObjectiveAnalyzer:
         except Exception as e:
             return {'error': f'Cross-validation failed: {str(e)}'}
     
-    def _check_biomechanical_consistency(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Check if results are consistent with known biomechanical principles."""
-        consistency_checks = {}
-        
-        # Existing checks...
-        if 'key_preference' in results:
-            consistency_checks['finger_strength'] = self._check_finger_strength_hierarchy(
-                results['key_preference']
-            )
-        
-        if 'row_separation' in results:
-            consistency_checks['row_reach'] = self._check_row_reach_principles(
-                results['row_separation']
-            )
-        
-        if 'different_finger' in results:
-            consistency_checks['finger_independence'] = self._check_finger_independence(
-                results['different_finger']
-            )
-                
-        return consistency_checks
-
-    def _check_finger_strength_hierarchy(self, key_pref_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Check if key preferences follow expected finger strength hierarchy."""
-        if 'key_ranking' not in key_pref_results or 'ranked_keys' not in key_pref_results['key_ranking']:
-            return {'error': 'No key ranking available'}
-        
-        ranked_keys = key_pref_results['key_ranking']['ranked_keys']
-        
-        # Expected finger strength: index > middle > ring > pinky
-        finger_map = {
-            'f': 4, 'd': 3, 's': 2, 'a': 1,  # Home row
-            'r': 4, 'e': 3, 'w': 2, 'q': 1,  # Upper row
-            'v': 4, 'c': 3, 'x': 2, 'z': 1   # Lower row
-        }
-        
-        # Calculate correlation with expected strength
-        key_scores = {key: score for key, score in ranked_keys}
-        keys_with_fingers = [(key, finger_map.get(key, 0), score) 
-                           for key, score in key_scores.items() 
-                           if key in finger_map]
-        
-        if len(keys_with_fingers) < 4:
-            return {'insufficient_data': True}
-        
-        finger_strengths = [finger for _, finger, _ in keys_with_fingers]
-        preference_scores = [score for _, _, score in keys_with_fingers]
-        
-        correlation, p_value = stats.spearmanr(finger_strengths, preference_scores)
-        
-        return {
-            'correlation_with_finger_strength': correlation,
-            'p_value': p_value,
-            'consistent': correlation > 0.3 and p_value < 0.05,
-            'interpretation': self._interpret_finger_consistency(correlation, p_value)
-        }
-    
-    def _interpret_finger_consistency(self, correlation: float, p_value: float) -> str:
-        """Interpret finger strength consistency results."""
-        if p_value >= 0.05:
-            return "No significant correlation with finger strength hierarchy"
-        elif correlation > 0.5:
-            return "Strong consistency with finger strength hierarchy"
-        elif correlation > 0.3:
-            return "Moderate consistency with finger strength hierarchy"
-        elif correlation > 0:
-            return "Weak consistency with finger strength hierarchy"
-        else:
-            return "Results contradict expected finger strength hierarchy"
-    
     def _check_row_reach_principles(self, row_sep_results: Dict[str, Any]) -> Dict[str, Any]:
         """Check if row separation follows reach difficulty principles."""
         if 'preference_function' not in row_sep_results:
@@ -1946,37 +1736,6 @@ class CompleteMOOObjectiveAnalyzer:
             return "Correctly identifies same-row preference, but other ordering differs"
         else:
             return "Does not match biomechanical expectations"
-    
-    def _check_finger_independence(self, finger_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Check if different-finger preference is detected."""
-        
-        # Check simple test results
-        if 'simple_test' in finger_results and isinstance(finger_results['simple_test'], dict):
-            pref_rate = finger_results['simple_test'].get('preference_rate')
-            p_val = finger_results['simple_test'].get('p_value', 1.0)
-            
-            if isinstance(pref_rate, (int, float)):
-                expected_positive = pref_rate > 0.5  # Different fingers should be preferred
-                significant = p_val < 0.05
-                
-                return {
-                    'preference_rate': pref_rate,
-                    'p_value': p_val,
-                    'shows_expected_independence_preference': expected_positive and significant,
-                    'interpretation': self._interpret_finger_independence(pref_rate, p_val, expected_positive, significant)
-                }
-        
-        return {'error': 'No valid finger independence data available'}
-
-    def _interpret_finger_independence(self, pref_rate: float, p_val: float, 
-                                    expected_pos: bool, significant: bool) -> str:
-        """Interpret finger independence results."""
-        if not significant:
-            return "No significant finger independence preference detected"
-        elif expected_pos:
-            return f"Confirms expected preference for finger independence ({pref_rate:.1%} preference rate)"
-        else:
-            return f"Unexpected preference for same-finger combinations ({pref_rate:.1%} preference rate)"
     
     def _analyze_confounds(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze potential confounding variables and their control."""
@@ -2129,24 +1888,6 @@ class CompleteMOOObjectiveAnalyzer:
     # =========================================================================
     # INTERPRETATION METHODS
     # =========================================================================
-    
-    def _interpret_finger_difference_result(self, model_results: Dict) -> str:
-        """Interpret finger difference results."""
-        if 'error' in model_results:
-            return "Analysis failed - insufficient data"
-        
-        coeff = model_results['coefficient']
-        p_value = model_results['p_value']
-        
-        if p_value < 0.05:
-            if coeff > 0:
-                strength = "strong" if abs(coeff) > 0.1 else "moderate" if abs(coeff) > 0.05 else "weak"
-                return f"Significant preference for different-finger bigrams (coeff={coeff:.3f}, {strength} effect)"
-            else:
-                strength = "strong" if abs(coeff) > 0.1 else "moderate" if abs(coeff) > 0.05 else "weak"
-                return f"Significant preference for same-finger bigrams (coeff={coeff:.3f}, {strength} effect)"
-        else:
-            return f"No significant finger preference detected (p={p_value:.3f})"
     
     def _interpret_key_preference_results(self, key_ranking: Dict) -> str:
         """Interpret key preference results."""
@@ -2360,7 +2101,7 @@ class CompleteMOOObjectiveAnalyzer:
             return f"No significant column preference detected (p={p_value:.3f})"
 
     # =========================================================================
-    # REPORT GENERATION AND VISUALIZATION
+    # REPORT GENERATION
     # =========================================================================
     
     def _generate_comprehensive_report(self, enhanced_results: Dict[str, Any], output_folder: str) -> None:
@@ -2404,13 +2145,6 @@ class CompleteMOOObjectiveAnalyzer:
         
         # Detailed descriptions for each objective
         objective_details = {
-            'different_finger': {
-                'title': 'DIFFERENT FINGER PREFERENCE',
-                'what_compared': 'Bigrams using same finger (e.g., "qa", "ws") vs. bigrams using different fingers (e.g., "as", "sf")',
-                'method': 'Instance-level analysis: For each comparison where one bigram used same finger and another used different fingers, recorded which was chosen. Applied simple proportion test to determine if different-finger bigrams are preferred.',
-                'frequency_control': 'Controlled for English bigram frequencies to isolate typing mechanics from language familiarity',
-                'practical_meaning': 'Measures finger independence preference - whether users prefer alternating between fingers vs. repeated finger use'
-            },
             'key_preference': {
                 'title': 'INDIVIDUAL KEY PREFERENCES',
                 'what_compared': 'All pairwise comparisons between individual keys (48 pairs total from 12 left-hand keys)',
@@ -2425,7 +2159,7 @@ class CompleteMOOObjectiveAnalyzer:
                 'frequency_control': 'Controlled for English bigram frequencies to isolate motor control from linguistic preferences',
                 'practical_meaning': 'Measures typing effort preferences related to vertical finger movement - strong preference (81.1%) for smaller row separations indicates reaching difficulty'
             },
-                'column_separation': {
+            'hierarchical_column_analysis': {
                 'title': 'COLUMN SEPARATION PREFERENCES (DIFFERENT FINGERS ONLY)',
                 'what_compared': 'Different-finger bigrams with different horizontal spacing: adjacent columns (1 apart) vs separated columns (2-3 apart). Excludes same-finger bigrams to isolate spatial effects.',
                 'methodology': 'Instance-level analysis: For each comparison between different-finger bigrams with different column separations, recorded which was chosen. Analyzed by row context (same row vs different rows) and specific separation distances.',
@@ -2587,22 +2321,6 @@ class CompleteMOOObjectiveAnalyzer:
         
         logger.info(f"Enhanced comprehensive report saved to {report_path}")
                     
-    def _add_finger_results_to_report(self, results: Dict[str, Any], report_lines: List[str]) -> None:
-        """Add detailed finger difference results to report."""
-        if 'debug_info' in results and 'sample_comparisons' in results['debug_info']:
-            debug_info = results['debug_info']
-            report_lines.extend([
-                "Sample Comparisons Found:",
-            ])
-            
-            for i, comp in enumerate(debug_info['sample_comparisons'][:3], 1):
-                report_lines.extend([
-                    f"  {i}. {comp['bigram1'].upper()} vs {comp['bigram2'].upper()}:",
-                    f"     Same finger: {comp['bigram1_same_finger']} vs {comp['bigram2_same_finger']}",
-                    f"     Observations: {comp['total_observations']} ({comp['bigram1_wins']} chose {comp['bigram1'].upper()})",
-                ])
-            report_lines.append("")
-    
     def _add_key_preference_results_to_report(self, results: Dict[str, Any], report_lines: List[str]) -> None:
         """Add key preference results to report."""
         if 'key_ranking' in results and 'ranked_keys' in results['key_ranking']:
@@ -2632,267 +2350,7 @@ class CompleteMOOObjectiveAnalyzer:
                 f"Context Dependent: {'Yes' if context_dep else 'No'}",
                 ""
             ])
-    
-    def _create_visualizations(self, enhanced_results: Dict[str, Any], output_folder: str) -> None:
-        """Create visualizations for MOO objectives and validation results."""
-        logger.info("Creating visualizations...")
-        
-        # Set style
-        plt.style.use('seaborn-v0_8-whitegrid')
-        plt.rcParams.update({'font.size': 10, 'figure.dpi': self.config.get('figure_dpi', 300)})
-
-        results = enhanced_results['objectives']
-        validation = enhanced_results['validation']
-        
-        # Create summary visualization
-        self._plot_objectives_summary(results, validation, output_folder)
-        
-        # Create validation summary plot
-        self._plot_validation_summary(validation, output_folder)
-        
-        # Create effect size plot
-        if 'effect_size_validation' in validation:
-            self._plot_effect_sizes(validation['effect_size_validation'], output_folder)
-        
-        # Create biomechanical consistency plot
-        if 'biomechanical_consistency' in validation:
-            self._plot_biomechanical_consistency(validation['biomechanical_consistency'], output_folder)
-    
-    def _plot_objectives_summary(self, results: Dict[str, Any], validation: Dict[str, Any], output_folder: str) -> None:
-        """Create enhanced summary plot of all objectives."""
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-        
-        # Plot 1: Extraction success
-        objective_names = []
-        success_status = []
-        significance_status = []
-        
-        for obj_name, obj_results in results.items():
-            objective_names.append(obj_name.replace('_', ' ').title())
-            success_status.append('Success' if 'error' not in obj_results else 'Failed')
             
-            # Check for significance
-            has_significance = False
-            if 'error' not in obj_results:
-                if (obj_results.get('p_value', 1.0) < 0.05 or
-                    any(pr.get('p_value', 1.0) < 0.05 for pr in obj_results.get('pairwise_results', {}).values()) or
-                    any(tr.get('p_value', 1.0) < 0.05 for tr in obj_results.get('test_results', {}).values())):
-                    has_significance = True
-            
-            significance_status.append('Significant' if has_significance else 'Not Significant')
-        
-        # Create stacked bar plot
-        y_pos = np.arange(len(objective_names))
-        
-        success_counts = [1 if status == 'Success' else 0 for status in success_status]
-        sig_counts = [1 if status == 'Significant' else 0 for status in significance_status]
-        
-        ax1.barh(y_pos, success_counts, color='lightblue', alpha=0.7, label='Extracted')
-        ax1.barh(y_pos, sig_counts, color='darkblue', alpha=0.7, label='Significant')
-        
-        ax1.set_yticks(y_pos)
-        ax1.set_yticklabels(objective_names)
-        ax1.set_xlabel('Status')
-        ax1.set_title('MOO Objectives Extraction & Significance')
-        ax1.legend()
-        ax1.set_xlim(0, 1.2)
-        
-        # Plot 2: Validation metrics
-        if 'overall_validity' in validation:
-            validity_metrics = validation['overall_validity']
-            
-            metrics = ['Success Rate', 'Significance Rate', 'Overall Validity']
-            values = [
-                validity_metrics.get('success_rate', 0),
-                validity_metrics.get('significance_rate', 0),
-                {'high': 1.0, 'medium': 0.6, 'low': 0.3}.get(validity_metrics.get('overall_validity', 'low'), 0.3)
-            ]
-            
-            bars = ax2.bar(metrics, values, color=['green', 'blue', 'purple'], alpha=0.7)
-            ax2.set_ylabel('Score')
-            ax2.set_title('Validation Summary')
-            ax2.set_ylim(0, 1.0)
-            
-            # Add value labels on bars
-            for bar, value in zip(bars, values):
-                height = bar.get_height()
-                ax2.text(bar.get_x() + bar.get_width()/2., height + 0.02,
-                        f'{value:.2f}', ha='center', va='bottom')
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'objectives_summary.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
-    def _plot_validation_summary(self, validation: Dict[str, Any], output_folder: str) -> None:
-        """Create validation summary plot."""
-        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-        
-        # Plot 1: Multiple comparisons correction
-        if 'multiple_comparisons_correction' in validation:
-            mc_data = validation['multiple_comparisons_correction']
-            
-            methods = ['Original', 'Bonferroni', 'FDR', 'Holm']
-            significant_counts = [
-                mc_data.get('original_significant', 0),
-                mc_data.get('bonferroni_significant', 0),
-                mc_data.get('fdr_significant', 0),
-                mc_data.get('holm_significant', 0)
-            ]
-            
-            ax1.bar(methods, significant_counts, color=['red', 'orange', 'green', 'blue'], alpha=0.7)
-            ax1.set_ylabel('Significant Tests')
-            ax1.set_title('Multiple Comparisons Correction Impact')
-            ax1.tick_params(axis='x', rotation=45)
-        
-        # Plot 2: Effect sizes
-        if 'effect_size_validation' in validation:
-            effect_data = validation['effect_size_validation']
-            
-            obj_names = []
-            mean_effects = []
-            
-            for obj_name, effect_info in effect_data.items():
-                obj_names.append(obj_name.replace('_', ' ').title())
-                mean_effects.append(effect_info.get('mean_effect', 0))
-            
-            if obj_names and mean_effects:
-                ax2.barh(obj_names, mean_effects, color='purple', alpha=0.7)
-                ax2.set_xlabel('Mean Effect Size')
-                ax2.set_title('Effect Size by Objective')
-        
-        # Plot 3: Statistical power
-        if 'statistical_power' in validation:
-            power_data = validation['statistical_power']
-            
-            power_levels = {'high': 0, 'medium': 0, 'low': 0}
-            
-            for obj_name, power_info in power_data.items():
-                level = power_info.get('power_level', 'low')
-                power_levels[level] += 1
-            
-            ax3.pie(power_levels.values(), labels=power_levels.keys(), autopct='%1.0f%%',
-                   colors=['green', 'orange', 'red'])
-            ax3.set_title('Statistical Power Distribution')
-        
-        # Plot 4: Biomechanical consistency
-        if 'biomechanical_consistency' in validation:
-            biomech_data = validation['biomechanical_consistency']
-            
-            consistency_scores = []
-            check_names = []
-            
-            for check_name, check_results in biomech_data.items():
-                if isinstance(check_results, dict):
-                    check_names.append(check_name.replace('_', ' ').title())
-                    
-                    # Simple scoring based on whether check passed
-                    score = 0
-                    if (check_results.get('consistent', False) or 
-                        check_results.get('shows_expected_advantage', False) or
-                        check_results.get('matches_biomechanical_expectation', False) or
-                        check_results.get('shows_expected_independence_preference', False)):
-                        score = 1
-                    
-                    consistency_scores.append(score)
-            
-            if check_names and consistency_scores:
-                colors = ['green' if score > 0 else 'red' for score in consistency_scores]
-                ax4.barh(check_names, consistency_scores, color=colors, alpha=0.7)
-                ax4.set_xlabel('Consistent (1) / Inconsistent (0)')
-                ax4.set_title('Biomechanical Consistency')
-                ax4.set_xlim(0, 1.2)
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'validation_summary.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
-    def _plot_effect_sizes(self, effect_data: Dict[str, Any], output_folder: str) -> None:
-        """Create effect size visualization."""
-        fig, ax = plt.subplots(figsize=(12, 6))
-        
-        obj_names = []
-        mean_effects = []
-        interpretations = []
-        
-        for obj_name, effect_info in effect_data.items():
-            obj_names.append(obj_name.replace('_', ' ').title())
-            mean_effects.append(effect_info.get('mean_effect', 0))
-            interpretations.append(effect_info.get('interpretation', 'unknown'))
-        
-        # Color code by interpretation
-        color_map = {
-            'negligible effect': 'lightgray',
-            'small effect': 'lightblue',
-            'medium effect': 'orange',
-            'large effect': 'red',
-            'unknown': 'gray'
-        }
-        
-        colors = [color_map.get(interp, 'gray') for interp in interpretations]
-        
-        bars = ax.bar(obj_names, mean_effects, color=colors, alpha=0.7)
-        ax.set_ylabel('Mean Effect Size')
-        ax.set_title('Effect Sizes by Objective')
-        ax.tick_params(axis='x', rotation=45)
-        
-        # Add horizontal lines for effect size thresholds
-        ax.axhline(y=0.02, color='gray', linestyle='--', alpha=0.5, label='Small (0.02)')
-        ax.axhline(y=0.05, color='orange', linestyle='--', alpha=0.5, label='Medium (0.05)')
-        ax.axhline(y=0.10, color='red', linestyle='--', alpha=0.5, label='Large (0.10)')
-        
-        ax.legend()
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'effect_sizes.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
-    def _plot_biomechanical_consistency(self, biomech_data: Dict[str, Any], output_folder: str) -> None:
-        """Create biomechanical consistency visualization."""
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        check_names = []
-        consistency_values = []
-        
-        for check_name, check_results in biomech_data.items():
-            if isinstance(check_results, dict):
-                check_names.append(check_name.replace('_', ' ').title())
-                
-                # Extract relevant consistency metric
-                value = 0.5  # Default neutral
-                
-                if 'correlation_with_finger_strength' in check_results:
-                    candidate = check_results.get('correlation_with_finger_strength', 0)
-                    value = candidate if isinstance(candidate, (int, float)) else 0
-                elif check_results.get('matches_biomechanical_expectation', False):
-                    value = 1.0
-                elif check_results.get('shows_expected_independence_preference', False):
-                    value = 1.0
-                
-                consistency_values.append(value)
-        
-        if check_names and consistency_values:
-            # Color code: positive = good, negative = bad, near zero = neutral
-            colors = ['green' if v > 0.2 else 'red' if v < -0.2 else 'orange' for v in consistency_values]
-            
-            bars = ax.barh(check_names, consistency_values, color=colors, alpha=0.7)
-            ax.set_xlabel('Consistency Score')
-            ax.set_title('Biomechanical Consistency by Check')
-            ax.axvline(x=0, color='black', linestyle='-', alpha=0.3)
-            
-            # Add value labels
-            for bar, value in zip(bars, consistency_values):
-                width = bar.get_width()
-                ax.text(width + (0.02 if width >= 0 else -0.02), bar.get_y() + bar.get_height()/2.,
-                       f'{value:.3f}', ha='left' if width >= 0 else 'right', va='center')
-        
-        plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'biomechanical_consistency.png'), 
-                   dpi=self.config.get('figure_dpi', 300), bbox_inches='tight')
-        plt.close()
-    
     def _save_key_scores_for_moo(self, results: Dict[str, Any], output_folder: str) -> None:
         """Save key preference scores in MOO-ready formats."""
         
@@ -3066,7 +2524,14 @@ class CompleteMOOObjectiveAnalyzer:
             validation_path = os.path.join(output_folder, 'validation_summary.csv')
             validation_df.to_csv(validation_path, index=False)
             logger.info(f"Validation summary saved to {validation_path}")
-            
+
+        # Key preference export
+        if 'key_preference' in enhanced_results['objectives']:
+            self._save_key_pairwise_results(
+                enhanced_results['objectives']['key_preference'], 
+                output_folder
+            )
+
 def main():
     """Main function for command-line usage."""
     parser = argparse.ArgumentParser(
@@ -3102,7 +2567,6 @@ def main():
         print(f"Objectives extracted: {summary['objectives_extracted']}/6")
         print(f"Significant objectives: {summary['objectives_significant']}")
         print(f"Overall validity: {summary['overall_validity']}")
-        print(f"Biomechanically consistent: {summary['biomechanical_consistency']}")
         print(f"FDR-corrected significant tests: {summary['multiple_comparisons_impact']}")
         
         return 0
