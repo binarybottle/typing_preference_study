@@ -14,7 +14,6 @@ The 6 MOO objectives (not including trigram flow):
 Includes rigorous statistical validation with:
 - Multiple comparisons correction
 - Effect size validation
-- Biomechanical consistency checks
 - Cross-validation
 - Enhanced confound controls
 
@@ -1037,7 +1036,7 @@ class CompleteMOOObjectiveAnalyzer:
     # =========================================================================
 
     def _extract_combined_column_instances(self) -> pd.DataFrame:
-        """Extract instances for systematic column separation analysis."""
+        """Extract instances controlling for row separation - FIXED."""
         instances = []
         
         for _, row in self.data.iterrows():
@@ -1052,45 +1051,38 @@ class CompleteMOOObjectiveAnalyzer:
             chosen_row_sep = self._calculate_row_separation(chosen)
             unchosen_row_sep = self._calculate_row_separation(unchosen)
             
-            # Determine comparison type
+            # CRITICAL FIX: Only compare bigrams with SAME row separation
+            if chosen_row_sep != unchosen_row_sep:
+                continue
+            
+            row_context = chosen_row_sep  # Same for both bigrams
             separations = {chosen_col_sep, unchosen_col_sep}
             comparison_type = None
-            preference_var = None
-            context = None
+            chose_adjacent = None
             
-            # Test 1: Same column (0, same finger) vs Adjacent column (1, different finger)
+            # Test 1: Same column (0) vs Adjacent column (1) - same row context
             if separations == {0, 1}:
                 comparison_type = "same_vs_adjacent_column"
-                preference_var = "chose_adjacent"  # 1 = chose adjacent (different finger), 0 = chose same (same finger)
-                context = f"row_sep_{min(chosen_row_sep, unchosen_row_sep)}_{max(chosen_row_sep, unchosen_row_sep)}"
-                
-                chose_adjacent = 1 if max(chosen_col_sep, unchosen_col_sep) == 1 else 0
+                context = f"{row_context}_row_separation"
+                chose_adjacent = 1 if chosen_col_sep == 1 else 0
             
-            # Test 2 & 3: Adjacent column (1) vs Remote column (2-3) - only different finger
+            # Test 2: Adjacent (1) vs Remote (2-3) - same row context, different fingers only
             elif separations in [{1, 2}, {1, 3}] and chosen_col_sep > 0 and unchosen_col_sep > 0:
-                # Both are different finger (column > 0)
-                if chosen_row_sep == 0 and unchosen_row_sep == 0:
-                    comparison_type = "adjacent_vs_remote_same_row"
-                    context = "same_row"
-                elif chosen_row_sep > 0 and unchosen_row_sep > 0:
-                    comparison_type = "adjacent_vs_remote_different_rows"
-                    context = "different_rows"
-                else:
-                    continue  # Skip mixed row contexts
-                
-                preference_var = "chose_adjacent"
-                chose_adjacent = 1 if min(chosen_col_sep, unchosen_col_sep) == 1 else 0
+                comparison_type = "adjacent_vs_remote_column"
+                context = f"{row_context}_row_separation"
+                chose_adjacent = 1 if chosen_col_sep == 1 else 0
             
             else:
-                continue  # Skip other separation combinations
+                continue
             
-            if comparison_type:
+            if comparison_type and chose_adjacent is not None:
                 instances.append({
                     'user_id': row['user_id'],
                     'chosen_bigram': chosen,
                     'unchosen_bigram': unchosen,
                     'comparison_type': comparison_type,
                     'context': context,
+                    'row_separation_context': row_context,
                     'chose_adjacent': chose_adjacent,
                     'chosen_col_separation': chosen_col_sep,
                     'unchosen_col_separation': unchosen_col_sep,
@@ -1131,12 +1123,13 @@ class CompleteMOOObjectiveAnalyzer:
                 
                 # Create interpretation based on comparison type
                 if comp_type == "same_vs_adjacent_column":
-                    interpretation = f"Same finger (same column) vs Different finger (adjacent column): {(1-comp_simple['preference_rate']):.1%} prefer same finger"
-                elif comp_type == "adjacent_vs_remote_same_row":
+                    interpretation = f"Same finger (same column) vs Different finger (adjacent column): {(comp_simple['preference_rate']):.1%} prefer adjacent"
+                elif comp_type == "adjacent_vs_remote_column":
                     interpretation = f"Adjacent vs Remote columns (same row): {comp_simple['preference_rate']:.1%} prefer adjacent"
                 elif comp_type == "adjacent_vs_remote_different_rows":
                     interpretation = f"Adjacent vs Remote columns (different rows): {comp_simple['preference_rate']:.1%} prefer adjacent"
                 
+                print(interpretation)
                 comparison_results[comp_type] = {
                     'simple_test': comp_simple,
                     'n_instances': len(comp_data),
@@ -1157,13 +1150,24 @@ class CompleteMOOObjectiveAnalyzer:
                     context_simple = self._simple_proportion_test(context_data, 'chose_adjacent')
                     
                     # Parse context
-                    row_seps = context.replace('row_sep_', '').split('_')
-                    row_context_desc = f"Row separations {row_seps[0]}-{row_seps[1]}"
-                    
+                    if context.endswith('_row_separation'):
+                        row_sep = context.replace('_row_separation', '')
+                        if row_sep == '0':
+                            row_context_desc = "Same row (0 row separation)"
+                        elif row_sep == '1':
+                            row_context_desc = "1 row separation"
+                        elif row_sep == '2':
+                            row_context_desc = "2 row separation"
+                        else:
+                            row_context_desc = f"{row_sep} row separation"
+                    else:
+                        row_context_desc = context
+
                     context_results[context] = {
                         'simple_test': context_simple,
                         'n_instances': len(context_data),
                         'preference_rate': context_simple['preference_rate'],
+                        'same_finger_rate': 1.0 - context_simple['preference_rate'],
                         'description': row_context_desc,
                         'interpretation': f"{row_context_desc}: {(1-context_simple['preference_rate']):.1%} prefer same finger"
                     }
@@ -1181,32 +1185,41 @@ class CompleteMOOObjectiveAnalyzer:
             'preference_rate': simple_test['preference_rate'],
             'instances_data': instances_df,
             'normalization_range': (0.0, 1.0),
-            'interpretation': self._interpret_combined_column_results(simple_test, comparison_results)
+            'interpretation': f"Overall: {simple_test['preference_rate']:.1%} prefer adjacent columns",
         }
 
     def _get_comparison_examples(self, comp_data: pd.DataFrame, comp_type: str) -> List[str]:
-        """Get example comparisons for each type."""
+        """Get example comparisons for each type - FIXED."""
         examples = []
         sample_rows = comp_data.head(3)
         
         for _, row in sample_rows.iterrows():
             chosen = row['chosen_bigram'].upper()
             unchosen = row['unchosen_bigram'].upper()
-            chose_adj = row['chose_adjacent']
+            chosen_col_sep = row['chosen_col_separation']
+            unchosen_col_sep = row['unchosen_col_separation']
             
             if comp_type == "same_vs_adjacent_column":
-                if chose_adj:
-                    examples.append(f"Chose {chosen} (different finger) over {unchosen} (same finger)")
-                else:
-                    examples.append(f"Chose {unchosen} (same finger) over {chosen} (different finger)")
-            else:
-                adj_bigram = chosen if row['chosen_col_separation'] < row['unchosen_col_separation'] else unchosen
-                remote_bigram = unchosen if adj_bigram == chosen else chosen
-                
-                if chose_adj:
-                    examples.append(f"Chose {adj_bigram} (adjacent) over {remote_bigram} (remote)")
-                else:
-                    examples.append(f"Chose {remote_bigram} (remote) over {adj_bigram} (adjacent)")
+                # Determine which bigram is same column (0) vs adjacent column (1)
+                if chosen_col_sep == 0:
+                    same_col_bigram = chosen
+                    adj_col_bigram = unchosen
+                    examples.append(f"Chose {same_col_bigram} (same finger) over {adj_col_bigram} (different finger)")
+                else:  # chosen_col_sep == 1
+                    same_col_bigram = unchosen
+                    adj_col_bigram = chosen
+                    examples.append(f"Chose {adj_col_bigram} (different finger) over {same_col_bigram} (same finger)")
+            
+            else:  # adjacent vs remote cases
+                # Determine which bigram is adjacent (1) vs remote (2-3)
+                if chosen_col_sep == 1:
+                    adj_bigram = chosen
+                    remote_bigram = unchosen
+                    examples.append(f"Chose {adj_bigram} (adjacent columns) over {remote_bigram} (remote columns)")
+                else:  # chosen_col_sep > 1
+                    adj_bigram = unchosen
+                    remote_bigram = chosen
+                    examples.append(f"Chose {remote_bigram} (remote columns) over {adj_bigram} (adjacent columns)")
         
         return examples
 
@@ -1724,18 +1737,17 @@ class CompleteMOOObjectiveAnalyzer:
         return {
             'actual_ordering': ordering,
             'expected_ordering': expected_order,
-            'matches_biomechanical_expectation': matches_expected,
             'interpretation': self._interpret_row_ordering(ordering, expected_order)
         }
     
     def _interpret_row_ordering(self, actual: List[str], expected: List[str]) -> str:
         """Interpret row ordering results."""
         if actual == expected:
-            return "Perfect match with biomechanical expectations"
+            return "Perfect match with expectations"
         elif actual[0] == expected[0]:
             return "Correctly identifies same-row preference, but other ordering differs"
         else:
-            return "Does not match biomechanical expectations"
+            return "Does not match expectations"
     
     def _analyze_confounds(self, results: Dict[str, Any]) -> Dict[str, Any]:
         """Analyze potential confounding variables and their control."""
@@ -1866,24 +1878,8 @@ class CompleteMOOObjectiveAnalyzer:
             'objectives_significant': validation.get('overall_validity', {}).get('significant_objectives', 0),
             'overall_validity': validation.get('overall_validity', {}).get('overall_validity', 'unknown'),
             'multiple_comparisons_impact': fdr_significant,
-            'biomechanical_consistency': self._count_consistent_objectives(validation),
             'recommendations': validation.get('overall_validity', {}).get('recommendations', [])
         }
-    
-    def _count_consistent_objectives(self, validation: Dict[str, Any]) -> int:
-        """Count objectives consistent with biomechanical principles."""
-        consistent_count = 0
-        biomech = validation.get('biomechanical_consistency', {})
-        
-        for check_name, check_results in biomech.items():
-            if isinstance(check_results, dict):
-                if (check_results.get('consistent', False) or 
-                    check_results.get('shows_expected_advantage', False) or
-                    check_results.get('matches_biomechanical_expectation', False) or
-                    check_results.get('shows_expected_independence_preference', False)):
-                    consistent_count += 1
-        
-        return consistent_count
 
     # =========================================================================
     # INTERPRETATION METHODS
@@ -2131,7 +2127,6 @@ class CompleteMOOObjectiveAnalyzer:
             f"Objectives successfully extracted: {summary.get('objectives_extracted', 'unknown')}/6",
             f"Objectives with significant results: {summary.get('objectives_significant', 'unknown')}",
             f"Overall validity assessment: {summary.get('overall_validity', 'unknown')}",
-            f"Biomechanically consistent objectives: {summary.get('biomechanical_consistency', 'unknown')}",
             "",
             "MULTIPLE COMPARISONS CORRECTION:",
             f"Tests performed: {total_tests}",
@@ -2150,21 +2145,21 @@ class CompleteMOOObjectiveAnalyzer:
                 'what_compared': 'All pairwise comparisons between individual keys (48 pairs total from 12 left-hand keys)',
                 'method': 'Pairwise analysis: For each key pair with sufficient data (≥10 comparisons), not including pinky/index comparisons or outside left finger-columns, determined preference rate using proportion tests. Combined results using Fisher\'s method for overall significance.',
                 'frequency_control': 'Controlled for English bigram frequencies in contexts where keys appeared',
-                'practical_meaning': 'Ranks individual keys by typing preference, likely reflecting finger strength, reach comfort, and motor control ease'
+                'practical_meaning': 'Ranks individual keys by typing preference'
             },
             'row_separation': {
                 'title': 'ROW SEPARATION PREFERENCES',
                 'what_compared': 'Bigrams requiring different row movements: same row (no movement) vs. one row apart (small reach) vs. two rows apart (large reach)',
                 'method': 'Instance-level analysis: For each comparison between bigrams with different row separations, recorded which was chosen. Tested preference for smaller vs. larger row movements.',
                 'frequency_control': 'Controlled for English bigram frequencies to isolate motor control from linguistic preferences',
-                'practical_meaning': 'Measures typing effort preferences related to vertical finger movement - strong preference (81.1%) for smaller row separations indicates reaching difficulty'
+                'practical_meaning': 'Measures typing effort preferences related to vertical finger movement'
             },
-            'hierarchical_column_analysis': {
-                'title': 'COLUMN SEPARATION PREFERENCES (DIFFERENT FINGERS ONLY)',
+            'combined_column_separation': { 
+                'title': 'COLUMN SEPARATION PREFERENCES',
                 'what_compared': 'Different-finger bigrams with different horizontal spacing: adjacent columns (1 apart) vs separated columns (2-3 apart). Excludes same-finger bigrams to isolate spatial effects.',
-                'methodology': 'Instance-level analysis: For each comparison between different-finger bigrams with different column separations, recorded which was chosen. Analyzed by row context (same row vs different rows) and specific separation distances.',
+                'method': 'Instance-level analysis: For each comparison between different-finger bigrams with different column separations, recorded which was chosen. Analyzed by row context (same row vs different rows) and specific separation distances.',
                 'frequency_control': 'Controlled for English bigram frequencies to isolate spatial motor preferences from linguistic familiarity',
-                'practical_meaning': 'Measures pure horizontal reach preferences independent of finger independence effects - preference for closer vs more distant finger combinations'
+                'practical_meaning': 'Measures pure horizontal reach preferences independent of finger independence effects'
             },
         }
         
@@ -2241,6 +2236,10 @@ class CompleteMOOObjectiveAnalyzer:
                     ""
                 ])
         
+                # Add combined column detailed results
+                if obj_name == 'combined_column_separation':
+                    self._add_combined_column_results_to_report(obj_results, report_lines)
+
         # Add validation summary with safe access
         report_lines.extend([
             "",
@@ -2265,20 +2264,6 @@ class CompleteMOOObjectiveAnalyzer:
                     practical_sig = effect_analysis.get('practical_significance', 'N/A')
                     mean_effect = effect_analysis.get('mean_effect', 'N/A')
                     report_lines.append(f"{obj_name}: {interpretation} (mean={mean_effect:.1%}, {practical_sig})" if isinstance(mean_effect, (int, float)) else f"{obj_name}: {interpretation} ({practical_sig})")
-            report_lines.append("")
-        
-        # Biomechanical consistency
-        biomech_validation = validation.get('biomechanical_consistency', {})
-        if biomech_validation:
-            report_lines.extend([
-                "Biomechanical Consistency:",
-                "-" * 25,
-                "Checks whether results align with expected typing biomechanics:",
-                ""
-            ])
-            for check_name, check_results in biomech_validation.items():
-                if isinstance(check_results, dict) and 'interpretation' in check_results:
-                    report_lines.append(f"{check_name}: {check_results['interpretation']}")
             report_lines.append("")
         
         # Multiple comparisons impact
@@ -2321,36 +2306,80 @@ class CompleteMOOObjectiveAnalyzer:
         
         logger.info(f"Enhanced comprehensive report saved to {report_path}")
                     
-    def _add_key_preference_results_to_report(self, results: Dict[str, Any], report_lines: List[str]) -> None:
-        """Add key preference results to report."""
-        if 'key_ranking' in results and 'ranked_keys' in results['key_ranking']:
-            ranked_keys = results['key_ranking']['ranked_keys']
-            if ranked_keys:
-                report_lines.extend([
-                    "Key Preference Ranking:",
-                    "  " + " > ".join([f"{key.upper()}({score:.3f})" for key, score in ranked_keys[:6]])
-                ])
-            report_lines.append("")
-    
-    def _add_row_separation_results_to_report(self, results: Dict[str, Any], report_lines: List[str]) -> None:
-        """Add row separation results to report."""
-        if 'preference_function' in results and 'row_preference_ordering' in results['preference_function']:
-            ordering = results['preference_function']['row_preference_ordering']
-            if ordering:
-                report_lines.extend([
-                    f"Row Preference Order: {' > '.join(ordering)}",
-                    ""
-                ])
-    
-    def _add_column_separation_results_to_report(self, results: Dict[str, Any], report_lines: List[str]) -> None:
-        """Add column separation results to report."""
-        if 'preference_function' in results and 'context_dependent' in results['preference_function']:
-            context_dep = results['preference_function']['context_dependent']
+    def _add_combined_column_results_to_report(self, results: Dict[str, Any], report_lines: List[str]) -> None:
+        """Add detailed combined column results to report."""
+        if 'comparison_results' in results:
             report_lines.extend([
-                f"Context Dependent: {'Yes' if context_dep else 'No'}",
+                "DETAILED STATISTICS BY COMPARISON TYPE:",
                 ""
             ])
             
+            for comp_type, comp_results in results['comparison_results'].items():
+                simple_test = comp_results['simple_test']
+                
+                # Clean up comparison type name
+                if comp_type == "same_vs_adjacent_column":
+                    title = "Same Finger vs Different Finger"
+                elif comp_type == "adjacent_vs_remote_same_row":
+                    title = "Adjacent vs Remote (Same Row)"
+                elif comp_type == "adjacent_vs_remote_different_rows":
+                    title = "Adjacent vs Remote (Different Rows)"
+                else:
+                    title = comp_type.replace('_', ' ').title()
+                
+                report_lines.extend([
+                    f"{title}:",
+                    f"  Instances: {comp_results['n_instances']}",
+                    f"  Preference rate: {comp_results['preference_rate']:.1%}",
+                    f"  P-value: {comp_results['p_value']:.2e}" if comp_results['p_value'] > 0 else f"  P-value: <1e-16",
+                    f"  Effect size: {simple_test.get('effect_size', 'N/A'):.3f}" if isinstance(simple_test.get('effect_size'), (int, float)) else f"  Effect size: N/A",
+                    f"  Significant: {'Yes' if comp_results['p_value'] < 0.05 else 'No'}",
+                    f"  Result: {comp_results['interpretation']}",
+                    ""
+                ])
+                
+                # Add examples if available
+                if 'examples' in comp_results and comp_results['examples']:
+                    report_lines.extend([
+                        "  Examples:",
+                        *[f"    • {example}" for example in comp_results['examples'][:2]],
+                        ""
+                    ])
+        
+        # Context results for same vs adjacent
+        if 'context_results' in results and results['context_results']:
+            report_lines.extend([
+                "SAME COLUMN VS ADJACENT COLUMN BY ROW CONTEXT:",
+                "(Same column = same finger; Adjacent column = different finger)",
+                ""
+            ])
+            
+            for context, context_data in results['context_results'].items():
+                # Parse the row context more clearly
+                if context.startswith('row_sep_'):
+                    row_parts = context.replace('row_sep_', '').split('_')
+                    if len(row_parts) == 2:
+                        row1, row2 = row_parts
+                        if row1 == row2:
+                            context_desc = f"Both bigrams on row {row1} apart from home"
+                        else:
+                            context_desc = f"One bigram {row1} rows apart, other {row2} rows apart from home"
+                    else:
+                        context_desc = context_data['description']
+                else:
+                    context_desc = context_data['description']
+                
+                report_lines.extend([
+                    f"{context_desc}:",
+                    f"  What's compared: Same column (same finger) vs Adjacent column (different finger)",
+                    f"  Instances: {context_data['n_instances']}",
+                    f"  Adjacent column preference: {(1.0 - context_data['same_finger_rate']):.1%}",
+                    f"  Same column preference: {context_data['same_finger_rate']:.1%}", 
+                    f"  P-value: {context_data['simple_test']['p_value']:.2e}",
+                    f"  Result: In this row context, {context_data['same_finger_rate']:.1%} prefer same column/finger",
+                    ""
+                ])
+                                            
     def _save_key_scores_for_moo(self, results: Dict[str, Any], output_folder: str) -> None:
         """Save key preference scores in MOO-ready formats."""
         
@@ -2505,8 +2534,7 @@ class CompleteMOOObjectiveAnalyzer:
                 'Objective': obj_name,
                 'Extracted': 'error' not in enhanced_results['objectives'][obj_name],
                 'Effect_Size': 'N/A',
-                'Power': 'N/A',
-                'Biomech_Consistent': 'N/A'
+                'Power': 'N/A'
             }
             
             if 'effect_size_validation' in enhanced_results['validation']:
