@@ -500,34 +500,38 @@ class CompleteMOOObjectiveAnalyzer:
     # =========================================================================
     
     def _extract_finger_difference_instances(self) -> pd.DataFrame:
-        """Extract all instances where same-finger and different-finger bigrams were compared."""
+        """Extract finger difference instances controlling for row separation."""
         instances = []
         
         for _, row in self.data.iterrows():
             chosen = str(row['chosen_bigram']).lower()
             unchosen = str(row['unchosen_bigram']).lower()
             
-            # Only analyze left-hand bigrams
             if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
                 continue
                 
-            same_finger_chosen = self._same_finger_bigram(chosen)
-            same_finger_unchosen = self._same_finger_bigram(unchosen)
+            chosen_same_finger = self._same_finger_bigram(chosen)
+            unchosen_same_finger = self._same_finger_bigram(unchosen)
+            chosen_row_sep = self._calculate_row_separation(chosen)
+            unchosen_row_sep = self._calculate_row_separation(unchosen)
             
-            # Only include if one is same-finger and other is different-finger
-            if same_finger_chosen != same_finger_unchosen:
-                # Code the preference: 1 = chose different-finger, 0 = chose same-finger
-                chose_different_finger = 1 if not same_finger_chosen else 0
+            # Only include if finger usage differs AND same row separation
+            if (chosen_same_finger != unchosen_same_finger and 
+                chosen_row_sep == unchosen_row_sep):
+                
+                row_context = f"{chosen_row_sep}_rows_apart"
+                chose_different_finger = 1 if not chosen_same_finger else 0
                 
                 instances.append({
                     'user_id': row['user_id'],
                     'chosen_bigram': chosen,
                     'unchosen_bigram': unchosen,
                     'chose_different_finger': chose_different_finger,
-                    'chosen_same_finger': same_finger_chosen,
-                    'unchosen_same_finger': same_finger_unchosen,
+                    'chosen_same_finger': chosen_same_finger,
+                    'unchosen_same_finger': unchosen_same_finger,
+                    'row_separation': chosen_row_sep,
+                    'row_context': row_context,
                     'slider_value': row.get('sliderValue', 0),
-                    # Only control for bigram frequencies, not individual letters
                     'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
                     'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
                 })
@@ -535,8 +539,8 @@ class CompleteMOOObjectiveAnalyzer:
         return pd.DataFrame(instances)
 
     def _test_different_finger_preference(self) -> Dict[str, Any]:
-        """Test different-finger preference using instance-level analysis."""
-        logger.info("Testing different-finger preference (instance-level)...")
+        """Test different-finger preference controlling for row separation."""
+        logger.info("Testing different-finger preference (controlling for row separation)...")
         
         instances_df = self._extract_finger_difference_instances()
         
@@ -544,35 +548,58 @@ class CompleteMOOObjectiveAnalyzer:
             return {'error': 'No finger difference instances found'}
         
         logger.info(f"Found {len(instances_df)} finger difference instances from {instances_df['user_id'].nunique()} users")
+        logger.info("(Controlling for row separation - same vs different finger within each row context)")
 
-        raw_preference_rate = instances_df['chose_different_finger'].mean()
-        logger.info(f"Raw different-finger preference rate: {raw_preference_rate:.1%}")
+        # Overall analysis
         simple_test = self._simple_proportion_test(instances_df, 'chose_different_finger')
-        logger.info(f"Simple test: {simple_test['interpretation']}")
-
-        # Fit model
         model_results = self._fit_instance_level_model(
             instances_df, 
             'chose_different_finger',
-            'finger_difference_instance_level'
+            'finger_difference_row_controlled'
         )
-
-        simple_test = self._simple_proportion_test(instances_df, 'chose_different_finger')
-
+        
+        # Analysis by row context
+        context_results = {}
+        for row_context in instances_df['row_context'].unique():
+            context_data = instances_df[instances_df['row_context'] == row_context]
+            if len(context_data) >= 20:
+                context_simple = self._simple_proportion_test(context_data, 'chose_different_finger')
+                context_results[row_context] = {
+                    'simple_test': context_simple,
+                    'n_instances': len(context_data),
+                    'preference_rate': context_simple['preference_rate'],
+                    'p_value': context_simple['p_value']
+                }
+        
         return {
-            'description': 'Different-finger vs same-finger preference (instance-level)',
-            'method': 'instance_level_analysis',
+            'description': 'Different-finger vs same-finger preference (row-controlled)',
+            'method': 'row_controlled_instance_level_analysis',
             'n_instances': len(instances_df),
-            'n_users': instances_df['user_id'].nunique() if not instances_df.empty else 0,
+            'n_users': instances_df['user_id'].nunique(),
+            'simple_test': simple_test,
             'model_results': model_results,
+            'context_results': context_results,
+            'p_value': simple_test['p_value'],
+            'preference_rate': simple_test['preference_rate'],
             'instances_data': instances_df,
             'normalization_range': (0.0, 1.0),
-            'simple_test': simple_test,          
-            'p_value': simple_test['p_value'],      
-            'preference_rate': simple_test['preference_rate'],  
-            'interpretation': model_results.get('interpretation', 'No interpretation available')
+            'interpretation': self._interpret_finger_context_results(simple_test, context_results)
         }
-    
+
+    def _interpret_finger_context_results(self, overall_test: Dict, context_results: Dict) -> str:
+        """Interpret finger preference results by row context."""
+        overall_rate = overall_test['preference_rate']
+        
+        context_summaries = []
+        for context, results in context_results.items():
+            rate = results['preference_rate']
+            rows_apart = context.split('_')[0]
+            context_summaries.append(f"{rows_apart} rows apart: {rate:.1%}")
+        
+        context_summary = "; ".join(context_summaries)
+        
+        return f"Overall: {overall_rate:.1%} prefer different finger. By row context: {context_summary}"
+
     def _extract_controlled_finger_comparisons(self) -> List[Tuple[str, str, Dict]]:
         """Extract controlled comparisons where bigrams share exactly one letter."""
         comparisons = []
@@ -1159,7 +1186,7 @@ class CompleteMOOObjectiveAnalyzer:
     # =========================================================================
     
     def _extract_row_separation_instances(self) -> pd.DataFrame:
-        """Extract all instances where bigrams with different row separations were compared."""
+        """Extract specific pairwise row separation comparisons."""
         instances = []
         
         for _, row in self.data.iterrows():
@@ -1172,30 +1199,37 @@ class CompleteMOOObjectiveAnalyzer:
             chosen_row_sep = self._calculate_row_separation(chosen)
             unchosen_row_sep = self._calculate_row_separation(unchosen)
             
-            # Only include if different row separations
-            if chosen_row_sep != unchosen_row_sep:
-                # Code preference: 1 = chose bigram with smaller row separation, 0 = larger separation
-                chose_smaller_separation = 1 if chosen_row_sep < unchosen_row_sep else 0
-                
-                instances.append({
-                    'user_id': row['user_id'],
-                    'chosen_bigram': chosen,
-                    'unchosen_bigram': unchosen,
-                    'chose_smaller_separation': chose_smaller_separation,
-                    'chosen_row_separation': chosen_row_sep,
-                    'unchosen_row_separation': unchosen_row_sep,
-                    'separation_difference': abs(chosen_row_sep - unchosen_row_sep),
-                    'slider_value': row.get('sliderValue', 0),
-                    # Only bigram frequency controls
-                    'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
-                    'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
-                })
+            # Specific pairwise comparisons only
+            comparison_type = None
+            chose_smaller = None
+            
+            if {chosen_row_sep, unchosen_row_sep} == {0, 1}:
+                comparison_type = "same_row_vs_1_apart"
+                chose_smaller = 1 if min(chosen_row_sep, unchosen_row_sep) == chosen_row_sep else 0
+            elif {chosen_row_sep, unchosen_row_sep} == {1, 2}:
+                comparison_type = "1_apart_vs_2_apart"
+                chose_smaller = 1 if min(chosen_row_sep, unchosen_row_sep) == chosen_row_sep else 0
+            else:
+                continue  # Skip other combinations
+            
+            instances.append({
+                'user_id': row['user_id'],
+                'chosen_bigram': chosen,
+                'unchosen_bigram': unchosen,
+                'chose_smaller_separation': chose_smaller,
+                'chosen_row_separation': chosen_row_sep,
+                'unchosen_row_separation': unchosen_row_sep,
+                'comparison_type': comparison_type,
+                'slider_value': row.get('sliderValue', 0),
+                'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
+                'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
+            })
         
         return pd.DataFrame(instances)
 
     def _test_row_separation_preference(self) -> Dict[str, Any]:
-        """Test row separation preference using instance-level analysis."""
-        logger.info("Testing row separation preference (instance-level)...")
+        """Test specific pairwise row separation preferences."""
+        logger.info("Testing pairwise row separation preferences...")
         
         instances_df = self._extract_row_separation_instances()
         
@@ -1204,39 +1238,56 @@ class CompleteMOOObjectiveAnalyzer:
         
         logger.info(f"Found {len(instances_df)} row separation instances from {instances_df['user_id'].nunique()} users")
         
-        raw_row_rate = instances_df['chose_smaller_separation'].mean()
-        logger.info(f"Raw smaller row separation preference rate: {raw_row_rate:.1%}")
+        # Overall analysis
         simple_test = self._simple_proportion_test(instances_df, 'chose_smaller_separation')
-        logger.info(f"Simple test: {simple_test['interpretation']}")
-
-        # Fit model  
         model_results = self._fit_instance_level_model(
             instances_df,
             'chose_smaller_separation', 
-            'row_separation_instance_level'
+            'pairwise_row_separation'
         )
         
-        # Additional analysis by separation difference magnitude
-        separation_breakdown = instances_df.groupby('separation_difference').agg({
-            'chose_smaller_separation': ['count', 'mean']
-        }).round(3)
+        # Analysis by specific comparison type
+        comparison_results = {}
+        for comp_type in instances_df['comparison_type'].unique():
+            comp_data = instances_df[instances_df['comparison_type'] == comp_type]
+            if len(comp_data) >= 20:
+                comp_simple = self._simple_proportion_test(comp_data, 'chose_smaller_separation')
+                comparison_results[comp_type] = {
+                    'simple_test': comp_simple,
+                    'n_instances': len(comp_data),
+                    'preference_rate': comp_simple['preference_rate'],
+                    'p_value': comp_simple['p_value'],
+                    'interpretation': f"{comp_type.replace('_', ' ')}: {comp_simple['preference_rate']:.1%} prefer smaller separation"
+                }
         
-        simple_test = self._simple_proportion_test(instances_df, 'chose_smaller_separation')
-
         return {
-            'description': 'Row separation preference (instance-level)',
-            'method': 'instance_level_analysis',
+            'description': 'Pairwise row separation preferences',
+            'method': 'pairwise_row_separation_analysis',
             'n_instances': len(instances_df),
-            'n_users': instances_df['user_id'].nunique() if not instances_df.empty else 0,
+            'n_users': instances_df['user_id'].nunique(),
+            'simple_test': simple_test,
             'model_results': model_results,
-            'separation_breakdown': separation_breakdown,
+            'comparison_results': comparison_results,
+            'p_value': simple_test['p_value'],
+            'preference_rate': simple_test['preference_rate'],
             'instances_data': instances_df,
             'normalization_range': (0.0, 1.0),
-            'simple_test': simple_test,          
-            'p_value': simple_test['p_value'],      
-            'preference_rate': simple_test['preference_rate'],  
-            'interpretation': model_results.get('interpretation', 'No interpretation available')
+            'interpretation': self._interpret_pairwise_row_results(simple_test, comparison_results)
         }
+
+    def _interpret_pairwise_row_results(self, overall_test: Dict, comparison_results: Dict) -> str:
+        """Interpret pairwise row separation results."""
+        overall_rate = overall_test['preference_rate']
+        
+        comparison_summaries = []
+        for comp_type, results in comparison_results.items():
+            rate = results['preference_rate']
+            clean_name = comp_type.replace('_', ' ')
+            comparison_summaries.append(f"{clean_name}: {rate:.1%}")
+        
+        comparison_summary = "; ".join(comparison_summaries)
+        
+        return f"Overall: {overall_rate:.1%} prefer smaller row separation. Specific comparisons: {comparison_summary}"
         
     def _extract_row_separation_comparisons(self, test: Tuple[str, str]) -> List[Tuple[str, str, Dict]]:
         """Extract comparisons testing row separation preferences."""
