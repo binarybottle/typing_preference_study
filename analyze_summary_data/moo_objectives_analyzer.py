@@ -2331,13 +2331,7 @@ class CompleteMOOObjectiveAnalyzer:
                     'Normalization_Range': 'N/A',
                     'Interpretation': 'Analysis failed'
                 })
-        
-        if summary_data:
-            summary_df = pd.DataFrame(summary_data)
-            summary_path = os.path.join(output_folder, 'complete_moo_objectives_summary.csv')
-            summary_df.to_csv(summary_path, index=False)
-            logger.info(f"Enhanced summary saved to {summary_path}")
-        
+                
         # Save detailed multiple comparisons results
         mc_data = enhanced_results['validation'].get('multiple_comparisons_correction', {})
         if 'detailed_significant_tests' in mc_data and mc_data['detailed_significant_tests']:
@@ -2376,38 +2370,6 @@ class CompleteMOOObjectiveAnalyzer:
             bias_df.to_csv(bias_path, index=False)
             logger.info(f"Frequency bias impact analysis saved to {bias_path}")
         
-        # Enhanced validation summary
-        validation_summary = []
-        for obj_name in enhanced_results['objectives'].keys():
-            validation_info = {
-                'Objective': obj_name,
-                'Extracted': 'error' not in enhanced_results['objectives'][obj_name],
-                'Effect_Size': 'N/A',
-                'Power': 'N/A',
-                'Frequency_Bias_Severity': 'N/A'
-            }
-            
-            if 'effect_size_validation' in enhanced_results['validation']:
-                effect_data = enhanced_results['validation']['effect_size_validation'].get(obj_name, {})
-                validation_info['Effect_Size'] = effect_data.get('interpretation', 'N/A')
-            
-            if 'statistical_power' in enhanced_results['validation']:
-                power_data = enhanced_results['validation']['statistical_power'].get(obj_name, {})
-                validation_info['Power'] = power_data.get('power_level', 'N/A')
-            
-            if 'frequency_bias_impact' in enhanced_results['validation']:
-                bias_data = enhanced_results['validation']['frequency_bias_impact'].get('individual_analysis', {})
-                if obj_name in bias_data:
-                    validation_info['Frequency_Bias_Severity'] = bias_data[obj_name].get('bias_severity', 'N/A')
-            
-            validation_summary.append(validation_info)
-        
-        if validation_summary:
-            validation_df = pd.DataFrame(validation_summary)
-            validation_path = os.path.join(output_folder, 'enhanced_validation_summary.csv')
-            validation_df.to_csv(validation_path, index=False)
-            logger.info(f"Enhanced validation summary saved to {validation_path}")
-
         # Key preference export with frequency bias info
         if 'key_preference' in enhanced_results['objectives']:
             self._save_key_pairwise_results_enhanced(
@@ -2453,51 +2415,6 @@ class CompleteMOOObjectiveAnalyzer:
             csv_path = os.path.join(output_folder, 'frequency_corrected_key_preference_scores.csv')
             key_scores_df.to_csv(csv_path, index=False)
             logger.info(f"Frequency-corrected key preference scores saved to {csv_path}")
-                        
-            # Create enhanced MOO implementation template
-            key_score_lines = []
-            for key in key_scores:
-                key_score_lines.append(f'    "{key}": {key_scores[key]:.4f},')
-            
-            # Save MOO implementation code template with frequency correction notes
-            moo_template = f"""# Frequency-Corrected Key Preference Scores for MOO Implementation
-    # Generated from typing preference analysis with standardized frequency weighting
-
-    KEY_PREFERENCE_SCORES = {{
-    {chr(10).join(key_score_lines)}
-    }}
-
-    def calculate_key_preference_objective(layout, letter_frequencies):
-        \"\"\"Calculate frequency-corrected key preference objective for keyboard layout.
-        
-        These scores are corrected for bigram presentation frequency bias using
-        standardized inverse frequency weighting.
-        
-        Args:
-            layout: Dict mapping letters to positions
-            letter_frequencies: Dict with letter frequency weights
-            
-        Returns:
-            float: Key preference score (higher = better)
-        \"\"\"
-        score = 0.0
-        for letter, frequency in letter_frequencies.items():
-            if letter in KEY_PREFERENCE_SCORES:
-                score += frequency * KEY_PREFERENCE_SCORES[letter]
-        return score
-
-    # Usage example:
-    # english_letter_freq = {{'e': 0.127, 't': 0.091, 'a': 0.082, ...}}
-    # layout_score = calculate_key_preference_objective(my_layout, english_letter_freq)
-    
-    # Note: These scores incorporate frequency bias correction and strategic subset optimization
-    # for enhanced statistical power and practical relevance.
-    """
-            
-            template_path = os.path.join(output_folder, 'frequency_corrected_key_preference_moo_template.py')
-            with open(template_path, 'w') as f:
-                f.write(moo_template)
-            logger.info(f"Enhanced MOO implementation template saved to {template_path}")
 
     def _save_key_pairwise_results_enhanced(self, key_pref_results: Dict[str, Any], output_folder: str) -> None:
         """Save complete pairwise key comparison results with frequency bias info."""
