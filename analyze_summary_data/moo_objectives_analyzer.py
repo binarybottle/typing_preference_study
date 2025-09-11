@@ -19,7 +19,7 @@ Includes rigorous statistical validation with:
 - Multiple comparisons correction with detailed reporting
 - Effect size validation
 - Cross-validation
-- Enhanced confound controls
+- Confound controls
 
 Usage:
     poetry run python3 moo_objectives_analyzer.py --data output/nonProlific/process_data/tables/processed_consistent_choices.csv --output results
@@ -228,7 +228,7 @@ class CompleteMOOObjectiveAnalyzer:
         enhanced_results = {
             'objectives': results,
             'validation': validation_results,
-            'summary': self._generate_enhanced_summary(results, validation_results)
+            'summary': self._generate_summary(results, validation_results)
         }
         
         # Generate comprehensive report
@@ -1223,7 +1223,7 @@ class CompleteMOOObjectiveAnalyzer:
         }
 
     def _interpret_weighted_column_results(self, weighted_test: Dict, weighted_metrics: Dict) -> str:
-        """Interpret frequency-weighted column results with enhanced detail."""
+        """Interpret frequency-weighted column results."""
         weighted_rate = weighted_test['weighted_preference_rate']
         unweighted_rate = weighted_metrics['unweighted_preference_rate']
         bias_magnitude = weighted_metrics['bias_magnitude']
@@ -1573,10 +1573,36 @@ class CompleteMOOObjectiveAnalyzer:
                             if isinstance(pair_results, dict) and 'p_value' in pair_results:
                                 p_val = pair_results['p_value']
                                 if isinstance(p_val, (int, float)) and not pd.isna(p_val):
-                                    test_name = f"key_preference_{key_pair[0]}_vs_{key_pair[1]}"
+                                    
+                                    # Get winner and method info
+                                    winner = pair_results.get('winner', 'unknown')
+                                    loser = pair_results['key2'] if winner == pair_results['key1'] else pair_results['key1']
+                                    method = pair_results.get('primary_method', 'unknown')
+                                    winner_rate = pair_results.get('winner_rate', 0.5)
+                                    
+                                    # Create descriptive test name showing winner, method, and strength
+                                    if method == 'direct':
+                                        method_label = "direct_repeated_bigram"
+                                    elif method == 'inferred':
+                                        method_label = "inferred_shared_key" 
+                                    else:
+                                        method_label = "unknown_method"
+                                    
+                                    # Indicate strength of preference
+                                    if winner_rate > 0.8:
+                                        strength = "strong"
+                                    elif winner_rate > 0.65:
+                                        strength = "moderate"
+                                    else:
+                                        strength = "weak"
+                                    
+                                    # Clear test name: winner_beats_loser_method_strength
+                                    test_name = f"key_preference_{winner}_beats_{loser}_{method_label}_{strength}"
+                                    
                                     p_values.append(p_val)
                                     test_names.append(test_name)
                                     test_categories[test_name] = 'key_preference'
+                                    
         
         if not p_values:
             return {'error': 'No valid p-values found for correction'}
@@ -1951,11 +1977,11 @@ class CompleteMOOObjectiveAnalyzer:
         }
     
     def _assess_overall_validity(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Provide overall validity assessment with enhanced significance detection."""
+        """Provide overall validity assessment with significance detection."""
         successful_objectives = sum(1 for r in results.values() if 'error' not in r)
         total_objectives = len(results)
         
-        # Count objectives with significant results (enhanced logic)
+        # Count objectives with significant results
         significant_objectives = 0
         objective_significance = {}
         
@@ -2016,9 +2042,9 @@ class CompleteMOOObjectiveAnalyzer:
     # REPORT GENERATION
     # =========================================================================
 
-    def _generate_enhanced_summary(self, results: Dict[str, Any], 
+    def _generate_summary(self, results: Dict[str, Any], 
                                 validation: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate enhanced summary with validation insights and frequency bias impact."""
+        """Generate summary with validation insights and frequency bias impact."""
         
         # Get multiple comparisons data safely
         mc_data = validation.get('multiple_comparisons_correction', {})
@@ -2221,7 +2247,7 @@ class CompleteMOOObjectiveAnalyzer:
                                 ""
                             ])
                     
-                    # Add enhanced context analysis
+                    # Add context analysis
                     if 'context_results' in obj_results:
                         report_lines.extend([
                             "ROW CONTEXT BREAKDOWN:",
@@ -2363,16 +2389,13 @@ class CompleteMOOObjectiveAnalyzer:
         report_path = os.path.join(output_folder, 'complete_moo_objectives_report.txt')
         with open(report_path, 'w') as f:
             f.write('\n'.join(report_lines))
-        
-        logger.info(f"Enhanced comprehensive report saved to {report_path}")
+
+        logger.info(f"Comprehensive report saved to {report_path}")
 
     def _save_results(self, enhanced_results: Dict[str, Any], output_folder: str) -> None:
-        """Save enhanced results including frequency bias analysis and corrected significance."""
+        """Save results including frequency bias analysis and corrected significance."""
         
-        # Save key scores first
-        self._save_key_scores_for_moo(enhanced_results['objectives'], output_folder)
-        
-        # Save enhanced summary with frequency bias info
+        # Save summary with frequency bias info
         summary_data = []
         for obj_name, obj_results in enhanced_results['objectives'].items():
             if 'error' not in obj_results:
@@ -2419,15 +2442,44 @@ class CompleteMOOObjectiveAnalyzer:
         if 'detailed_significant_tests' in mc_data and mc_data['detailed_significant_tests']:
             sig_tests_data = []
             for test_name, test_info in mc_data['detailed_significant_tests'].items():
-                sig_tests_data.append({
-                    'Test_Name': test_name,
-                    'Objective': test_info['objective'],
-                    'Original_P_Value': test_info['original_p'],
-                    'FDR_Corrected_P_Value': test_info['fdr_corrected_p']
-                })
+                
+                # Parse the test name for key preferences
+                if test_info['objective'] == 'key_preference' and '_beats_' in test_name:
+                    # Extract info from test name: key_preference_f_beats_a_direct_repeated_bigram_strong
+                    parts = test_name.split('_')
+                    if len(parts) >= 6:
+                        winner = parts[2]
+                        loser = parts[4] 
+                        method = '_'.join(parts[5:-1])  # Everything between loser and strength
+                        strength = parts[-1]
+                        
+                        sig_tests_data.append({
+                            'Test_Name': test_name,
+                            'Objective': test_info['objective'],
+                            'Winner': winner.upper(),
+                            'Loser': loser.upper(),
+                            'Evidence_Type': method.replace('_', ' ').title(),
+                            'Preference_Strength': strength.title(),
+                            'Original_P_Value': test_info['original_p'],
+                            'FDR_Corrected_P_Value': test_info['fdr_corrected_p'],
+                            'Interpretation': f"{winner.upper()} preferred over {loser.upper()} ({method.replace('_', ' ')}, {strength} preference)"
+                        })
+                else:
+                    # Non-key-preference tests or old format
+                    sig_tests_data.append({
+                        'Test_Name': test_name,
+                        'Objective': test_info['objective'],
+                        'Winner': 'N/A',
+                        'Loser': 'N/A', 
+                        'Evidence_Type': 'N/A',
+                        'Preference_Strength': 'N/A',
+                        'Original_P_Value': test_info['original_p'],
+                        'FDR_Corrected_P_Value': test_info['fdr_corrected_p'],
+                        'Interpretation': 'Non-key-preference test'
+                    })
             
             sig_tests_df = pd.DataFrame(sig_tests_data)
-            sig_tests_path = os.path.join(output_folder, 'fdr_corrected_significant_tests.csv')
+            sig_tests_path = os.path.join(output_folder, 'key_preference_samekey_bigrams_fdr_corrected_significant.csv')
             sig_tests_df.to_csv(sig_tests_path, index=False)
             logger.info(f"FDR-corrected significant tests saved to {sig_tests_path}")
         
@@ -2454,51 +2506,54 @@ class CompleteMOOObjectiveAnalyzer:
         
         # Key preference export with frequency bias info
         if 'key_preference' in enhanced_results['objectives']:
-            self._save_key_pairwise_results_enhanced(
+            self._save_key_preference_summary(
                 enhanced_results['objectives']['key_preference'], 
                 output_folder
             )
 
-    def _save_key_scores_for_moo(self, results: Dict[str, Any], output_folder: str) -> None:
-        """Save key preference scores in MOO-ready formats with frequency bias info."""
-        
-        if 'key_preference' not in results or 'error' in results['key_preference']:
-            logger.warning("No key preference results to save")
+    def _save_key_preference_summary(self, key_pref_results: Dict[str, Any], output_folder: str) -> None:
+        """Save clear summary of key preference results."""
+        if 'pairwise_results' not in key_pref_results:
             return
         
-        key_pref_results = results['key_preference']
+        summary_data = []
+        for key_pair, results in key_pref_results['pairwise_results'].items():
+            winner = results.get('winner', 'unknown')
+            loser = results['key2'] if winner == results['key1'] else results['key1']
+            method = results.get('primary_method', 'unknown')
+            
+            # Evidence type description
+            if method == 'direct':
+                evidence_desc = f"Direct repeated bigram evidence ({winner.upper()}{winner.upper()} vs {loser.upper()}{loser.upper()})"
+            elif method == 'inferred':
+                evidence_desc = f"Inferred from shared-key bigrams"
+            else:
+                evidence_desc = "Unknown evidence type"
+            
+            summary_data.append({
+                'Winner': winner.upper(),
+                'Loser': loser.upper(),
+                'Winner_Preference_Rate': f"{results.get('winner_rate', 0.5):.1%}",
+                'Evidence_Type': method.title(),
+                'Evidence_Description': evidence_desc,
+                'Direct_Comparisons': results.get('direct_comparisons', 0),
+                'Inferred_Comparisons': results.get('inferred_comparisons', 0),
+                'Total_Comparisons': results.get('n_comparisons', 0),
+                'P_Value': results.get('p_value', 1.0),
+                'Significant': results.get('significant', False),
+                'Frequency_Bias': f"{results.get('frequency_bias', 0):.1%}",
+                'Interpretation': f"{winner.upper()} preferred over {loser.upper()} {results.get('winner_rate', 0.5):.1%} of time ({method} evidence)"
+            })
         
-        # Extract ranked key scores
-        if 'ranked_keys' in key_pref_results:
-            ranked_keys = key_pref_results['ranked_keys']
-            
-            # Create simple key -> score mapping with safe extraction
-            key_scores = {}
-            for key, score_data in ranked_keys:
-                # Extract numeric score safely
-                if isinstance(score_data, dict):
-                    numeric_score = score_data.get('mean_score', 0.0)
-                elif isinstance(score_data, (int, float)):
-                    numeric_score = float(score_data)
-                else:
-                    numeric_score = 0.0
-                key_scores[key] = numeric_score
-            
-            # Save as CSV for easy loading
-            key_scores_df = pd.DataFrame([
-                {
-                    'key': key, 
-                    'preference_score': key_scores[key],
-                    'rank': i+1
-                }
-                for i, (key, _) in enumerate(ranked_keys)
-            ])
-            
-            csv_path = os.path.join(output_folder, 'frequency_corrected_key_preference_scores.csv')
-            key_scores_df.to_csv(csv_path, index=False)
-            logger.info(f"Frequency-corrected key preference scores saved to {csv_path}")
-
-    def _save_key_pairwise_results_enhanced(self, key_pref_results: Dict[str, Any], output_folder: str) -> None:
+        # Sort by winner preference rate (strongest preferences first)
+        summary_df = pd.DataFrame(summary_data)
+        summary_df = summary_df.sort_values(['Significant', 'Winner_Preference_Rate'], ascending=[False, False])
+        
+        summary_path = os.path.join(output_folder, 'key_preference_bigram_extracted.csv')
+        summary_df.to_csv(summary_path, index=False)
+        logger.info(f"Clear key preference summary saved to {summary_path}")
+        
+    def _save_key_pairwise_results(self, key_pref_results: Dict[str, Any], output_folder: str) -> None:
         """Save complete pairwise key comparison results with frequency bias info."""
         if 'pairwise_export' not in key_pref_results:
             return
