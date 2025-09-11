@@ -772,10 +772,13 @@ class CompleteMOOObjectiveAnalyzer:
                 'significant': results['significant'],
                 'effect_size': results['effect_size']
             })
-        
+
         return {
             'description': 'Hybrid key preferences: direct repeated bigrams + inferred for gaps',
             'method': 'hybrid_direct_and_inferred',
+            'coverage_approach': 'hybrid',  # ADD THIS
+            'direct_pairs_found': direct_pairs,  # ADD THIS 
+            'inferred_pairs_added': inferred_pairs,  # ADD THIS
             'n_instances': len(combined_instances),
             'n_users': combined_instances['user_id'].nunique(),
             'n_key_pairs': covered_pairs_count,
@@ -800,7 +803,7 @@ class CompleteMOOObjectiveAnalyzer:
             'interpretation': self._interpret_hybrid_results(pairwise_results, coverage_info, weighted_metrics),
             'data_quality_improved': True
         }
-
+    
     def _interpret_hybrid_results(self, pairwise_results: Dict, coverage_info: Dict, weighted_metrics: Dict) -> str:
         """Interpret hybrid key preference results."""
         n_significant = sum(1 for r in pairwise_results.values() if r['significant'])
@@ -1083,16 +1086,15 @@ class CompleteMOOObjectiveAnalyzer:
             
             # Test 1: Same column (0) vs Adjacent column (1) - same row context
             if separations == {0, 1}:
-                comparison_type = "same_vs_adjacent_column"
+                comparison_type = "same_finger_vs_different_finger"  # RENAMED for clarity
                 context = f"{row_context}_row_separation"
-                chose_adjacent = 1 if chosen_col_sep == 1 else 0
-            
+                chose_different_finger = 1 if chosen_col_sep == 1 else 0  # RENAMED for clarity
+
             # Test 2: Adjacent (1) vs Remote (2-3) - same row context, different fingers only
             elif separations in [{1, 2}, {1, 3}] and chosen_col_sep > 0 and unchosen_col_sep > 0:
-                comparison_type = "adjacent_vs_remote_column"
+                comparison_type = "adjacent_vs_remote_columns"  # RENAMED for clarity  
                 context = f"{row_context}_row_separation"
-                chose_adjacent = 1 if chosen_col_sep == 1 else 0
-            
+                chose_adjacent = 1 if chosen_col_sep == 1 else 0  # Keep this name
             else:
                 continue
             
@@ -1147,60 +1149,61 @@ class CompleteMOOObjectiveAnalyzer:
         for comp_type in weighted_data['comparison_type'].unique():
             comp_data = weighted_data[weighted_data['comparison_type'] == comp_type]
             if len(comp_data) >= 10:
-                comp_weighted_test = self._weighted_proportion_test(comp_data, 'chose_adjacent', 'frequency_weight')
+                # Use different outcome variable based on comparison type
+                if comp_type == "same_finger_vs_different_finger":
+                    outcome_var = 'chose_different_finger'
+                    interpretation_template = "Same finger vs Different finger: {rate:.1%} prefer different finger"
+                elif comp_type == "adjacent_vs_remote_columns":
+                    outcome_var = 'chose_adjacent'
+                    interpretation_template = "Adjacent vs Remote columns: {rate:.1%} prefer adjacent columns"
                 
-                # Create interpretation based on comparison type
-                if comp_type == "same_vs_adjacent_column":
-                    interpretation = f"Same finger vs Different finger: {comp_weighted_test['weighted_preference_rate']:.1%} prefer different finger (frequency-corrected)"
-                elif comp_type == "adjacent_vs_remote_column":
-                    interpretation = f"Adjacent vs Remote columns: {comp_weighted_test['weighted_preference_rate']:.1%} prefer adjacent (frequency-corrected)"
+                comp_weighted_test = self._weighted_proportion_test(comp_data, outcome_var, 'frequency_weight')
                 
                 comparison_results[comp_type] = {
                     'weighted_test': comp_weighted_test,
                     'n_instances': len(comp_data),
-                    'unweighted_rate': comp_data['chose_adjacent'].mean(),
+                    'unweighted_rate': comp_data[outcome_var].mean(),
                     'weighted_rate': comp_weighted_test['weighted_preference_rate'],
-                    'frequency_bias': abs(comp_weighted_test['weighted_preference_rate'] - comp_data['chose_adjacent'].mean()),
+                    'frequency_bias': abs(comp_weighted_test['weighted_preference_rate'] - comp_data[outcome_var].mean()),
                     'p_value': comp_weighted_test['p_value'],
-                    'interpretation': interpretation,
+                    'interpretation': interpretation_template.format(rate=comp_weighted_test['weighted_preference_rate']),
                     'examples': self._get_comparison_examples(comp_data, comp_type)
                 }
         
         # Context analysis for same vs adjacent (controlling for row separation)
         context_results = {}
-        if 'same_vs_adjacent_column' in comparison_results:
-            same_vs_adj_data = weighted_data[weighted_data['comparison_type'] == 'same_vs_adjacent_column']
+        for row_context in weighted_data['row_separation_context'].unique():
+            context_data = weighted_data[weighted_data['row_separation_context'] == row_context]
             
-            for context in same_vs_adj_data['context'].unique():
-                context_data = same_vs_adj_data[same_vs_adj_data['context'] == context]
-                if len(context_data) >= 10:
-                    context_weighted_test = self._weighted_proportion_test(context_data, 'chose_adjacent', 'frequency_weight')
-                    
-                    # Parse context
-                    if context.endswith('_row_separation'):
-                        row_sep = context.replace('_row_separation', '')
-                        if row_sep == '0':
-                            row_context_desc = "Same row (0 row separation)"
-                        elif row_sep == '1':
-                            row_context_desc = "1-row separation"
-                        elif row_sep == '2':
-                            row_context_desc = "2-row separation"
-                        else:
-                            row_context_desc = f"{row_sep}-row separation"
-                    else:
-                        row_context_desc = context
-
-                    context_results[context] = {
-                        'weighted_test': context_weighted_test,
-                        'n_instances': len(context_data),
-                        'unweighted_rate': context_data['chose_adjacent'].mean(),
-                        'weighted_rate': context_weighted_test['weighted_preference_rate'],
-                        'frequency_bias': abs(context_weighted_test['weighted_preference_rate'] - context_data['chose_adjacent'].mean()),
-                        'same_finger_rate': 1.0 - context_weighted_test['weighted_preference_rate'],
-                        'description': row_context_desc,
-                        'interpretation': f"{row_context_desc}: {context_weighted_test['weighted_preference_rate']:.1%} prefer different finger (frequency-corrected)"
-                    }
-        
+            context_results[f"row_{row_context}"] = {
+                'description': f"{row_context}-row separation",
+                'total_instances': len(context_data)
+            }
+            
+            # Analyze same finger vs different finger within this row context
+            same_vs_diff = context_data[context_data['comparison_type'] == 'same_finger_vs_different_finger']
+            if len(same_vs_diff) >= 10:
+                same_diff_test = self._weighted_proportion_test(same_vs_diff, 'chose_different_finger', 'frequency_weight')
+                context_results[f"row_{row_context}"]['same_vs_different'] = {
+                    'n_instances': len(same_vs_diff),
+                    'prefer_different_finger_rate': same_diff_test['weighted_preference_rate'],
+                    'prefer_same_finger_rate': 1.0 - same_diff_test['weighted_preference_rate'],
+                    'p_value': same_diff_test['p_value'],
+                    'interpretation': f"Same vs Different finger: {same_diff_test['weighted_preference_rate']:.1%} prefer different finger"
+                }
+            
+            # Analyze adjacent vs remote within this row context  
+            adj_vs_remote = context_data[context_data['comparison_type'] == 'adjacent_vs_remote_columns']
+            if len(adj_vs_remote) >= 10:
+                adj_remote_test = self._weighted_proportion_test(adj_vs_remote, 'chose_adjacent', 'frequency_weight')
+                context_results[f"row_{row_context}"]['adjacent_vs_remote'] = {
+                    'n_instances': len(adj_vs_remote),
+                    'prefer_adjacent_rate': adj_remote_test['weighted_preference_rate'],
+                    'prefer_remote_rate': 1.0 - adj_remote_test['weighted_preference_rate'],
+                    'p_value': adj_remote_test['p_value'],
+                    'interpretation': f"Adjacent vs Remote: {adj_remote_test['weighted_preference_rate']:.1%} prefer adjacent columns"
+                }
+                        
         return {
             'description': 'Column separation preferences with standardized frequency weighting',
             'method': 'frequency_weighted_column_analysis',
@@ -1220,15 +1223,29 @@ class CompleteMOOObjectiveAnalyzer:
         }
 
     def _interpret_weighted_column_results(self, weighted_test: Dict, weighted_metrics: Dict) -> str:
-        """Interpret frequency-weighted column results."""
+        """Interpret frequency-weighted column results with enhanced detail."""
         weighted_rate = weighted_test['weighted_preference_rate']
         unweighted_rate = weighted_metrics['unweighted_preference_rate']
         bias_magnitude = weighted_metrics['bias_magnitude']
         
-        interpretation = f"Preference for adjacent columns: {weighted_rate:.1%} (frequency-corrected)"
+        # Main interpretation
+        if weighted_rate > 0.6:
+            strength = "strong"
+        elif weighted_rate > 0.55:
+            strength = "moderate" 
+        else:
+            strength = "weak"
         
-        if bias_magnitude > 0.02:  # 2% threshold
+        interpretation = f"Overall preference for adjacent columns: {weighted_rate:.1%} (frequency-corrected, {strength} effect)"
+        
+        if bias_magnitude > 0.02:
             interpretation += f"; Unweighted: {unweighted_rate:.1%} (bias: {bias_magnitude:.1%})"
+        
+        # Add insight about what this means
+        if weighted_rate > 0.5:
+            interpretation += f". Users prefer different fingers over same finger by {(weighted_rate - 0.5) * 2:.0%}."
+        else:
+            interpretation += f". Users prefer same finger over different fingers by {(0.5 - weighted_rate) * 2:.0%}."
         
         return interpretation
 
@@ -2080,11 +2097,11 @@ class CompleteMOOObjectiveAnalyzer:
         # Detailed descriptions for each objective
         objective_details = {
             'key_preference': {
-                'title': 'INDIVIDUAL KEY PREFERENCES WITH STRATEGIC SUBSET',
-                'what_compared': 'Strategic subset of pairwise key comparisons (24-36 pairs) selected for ergonomic relevance and statistical power',
-                'method': 'Frequency-weighted pairwise analysis: For each strategic key pair, applied standardized frequency weighting to control for bigram presentation frequency, then combined results using Fisher\'s method.',
+                'title': 'INDIVIDUAL KEY PREFERENCES WITH HYBRID APPROACH',
+                'what_compared': 'Hybrid approach: Direct comparisons from repeated bigrams (AA vs BB) plus inferred comparisons from shared-key bigrams (QA vs QW) for uncovered pairs',
+                'method': 'Frequency-weighted hybrid analysis: Applied standardized frequency weighting to both direct repeated bigram comparisons and inferred shared-key comparisons, prioritizing direct evidence where available.',
                 'frequency_control': 'Standardized inverse frequency weighting plus English bigram frequency controls',
-                'practical_meaning': 'Ranks individual keys by typing preference with reduced multiple comparisons burden'
+                'practical_meaning': 'Ranks individual keys by typing preference using clean direct evidence where possible, with inferred evidence filling gaps'
             },
             'row_separation': {
                 'title': 'ROW SEPARATION PREFERENCES WITH FREQUENCY WEIGHTING',
@@ -2175,6 +2192,71 @@ class CompleteMOOObjectiveAnalyzer:
                         f"  Result: {obj_results.get('interpretation', 'No interpretation available')}",
                         ""
                     ])
+
+                if obj_name == 'column_separation':
+                    # Add detailed comparison type breakdown
+                    if 'comparison_results' in obj_results:
+                        report_lines.extend([
+                            "DETAILED COMPARISON TYPE ANALYSIS:",
+                            ""
+                        ])
+                        for comp_type, comp_data in obj_results['comparison_results'].items():
+                            if comp_type == 'same_finger_vs_different_finger':
+                                title = "SAME FINGER vs DIFFERENT FINGER"
+                                rate_desc = "prefer different finger"
+                                opposite_rate = f"prefer same finger: {(1.0 - comp_data['weighted_rate']):.1%}"
+                            elif comp_type == 'adjacent_vs_remote_columns':
+                                title = "ADJACENT vs REMOTE COLUMNS"  
+                                rate_desc = "prefer adjacent columns"
+                                opposite_rate = f"prefer remote columns: {(1.0 - comp_data['weighted_rate']):.1%}"
+                            
+                            report_lines.extend([
+                                f"  {title}:",
+                                f"    Instances: {comp_data['n_instances']}",
+                                f"    {rate_desc.title()}: {comp_data['weighted_rate']:.1%}",
+                                f"    {opposite_rate}",
+                                f"    Frequency bias: {comp_data['frequency_bias']:.1%}",
+                                f"    P-value: {comp_data['p_value']:.2e}",
+                                f"    Interpretation: {comp_data['interpretation']}",
+                                ""
+                            ])
+                    
+                    # Add enhanced context analysis
+                    if 'context_results' in obj_results:
+                        report_lines.extend([
+                            "ROW CONTEXT BREAKDOWN:",
+                            "Shows how column preferences change by row separation",
+                            ""
+                        ])
+                        for context_key, context_data in obj_results['context_results'].items():
+                            report_lines.extend([
+                                f"  {context_data['description'].upper()}:",
+                                f"    Total instances: {context_data['total_instances']}",
+                                ""
+                            ])
+                            
+                            if 'same_vs_different' in context_data:
+                                same_diff = context_data['same_vs_different']
+                                report_lines.extend([
+                                    f"    Same finger vs Different finger:",
+                                    f"      Prefer different finger: {same_diff['prefer_different_finger_rate']:.1%}",
+                                    f"      Prefer same finger: {same_diff['prefer_same_finger_rate']:.1%}",
+                                    f"      P-value: {same_diff['p_value']:.2e}",
+                                    ""
+                                ])
+                            
+                            if 'adjacent_vs_remote' in context_data:
+                                adj_rem = context_data['adjacent_vs_remote']
+                                report_lines.extend([
+                                    f"    Adjacent vs Remote columns:",
+                                    f"      Prefer adjacent: {adj_rem['prefer_adjacent_rate']:.1%}",
+                                    f"      Prefer remote: {adj_rem['prefer_remote_rate']:.1%}",
+                                    f"      P-value: {adj_rem['p_value']:.2e}",
+                                    ""
+                                ])
+                                
+                            report_lines.append("")
+                            
                 
                 # Add key preference specific details
                 if obj_name == 'key_preference':
@@ -2200,7 +2282,7 @@ class CompleteMOOObjectiveAnalyzer:
                     ""
                 ])
         
-        # Add enhanced validation summary
+        # Add validation summary
         report_lines.extend([
             "",
             "VALIDATION AND STATISTICAL ROBUSTNESS:",
