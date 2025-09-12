@@ -40,6 +40,7 @@ from scipy.stats import combine_pvalues, norm
 import statsmodels.api as sm
 from statsmodels.stats.multitest import multipletests
 import traceback
+import matplotlib.pyplot as plt
 
 # Set up logging
 logging.basicConfig(
@@ -201,12 +202,10 @@ class CompleteMOOObjectiveAnalyzer:
         self.data = self._load_and_validate_data(data_path)
         logger.info(f"Loaded {len(self.data)} rows from {self.data['user_id'].nunique()} participants")
         
-        logger.info("=== DIAGNOSING REPEATED BIGRAM COVERAGE ===")
-        self.diagnose_repeated_bigram_coverage()
-
-        # Export bigram classification diagnostic table
-        self.export_bigram_classification_table(output_folder)
-
+        # Store output folder for methods that need it
+        self._current_output_folder = output_folder  # ADD THIS LINE
+        logger.info(f"Output folder set to: {output_folder}")  # ADD THIS LINE
+        
         # Create output directories
         os.makedirs(output_folder, exist_ok=True)
         
@@ -248,7 +247,7 @@ class CompleteMOOObjectiveAnalyzer:
         return enhanced_results
 
     def apply_frequency_weights(self, instances_df: pd.DataFrame) -> pd.DataFrame:
-        """Apply standardized frequency weighting to instance-level data."""
+        """Apply standardized frequency weighting with better debugging."""
         if instances_df.empty:
             return instances_df
         
@@ -258,25 +257,107 @@ class CompleteMOOObjectiveAnalyzer:
                 lambda row: tuple(sorted([row['chosen_bigram'], row['unchosen_bigram']])), axis=1
             )
         
-        # Calculate frequency weights based on config
+        # Calculate frequency weights
         freq_counts = instances_df['comparison'].value_counts()
         method = self.config.get('frequency_weighting_method', 'inverse_frequency')
         
+        logger.info(f"Applying frequency weighting method: {method}")
+        logger.info(f"Comparison frequency range: {freq_counts.min()} - {freq_counts.max()}")
+        
         if method == 'inverse_frequency':
-            # Weight = 1 / frequency (gives more weight to rare comparisons)
             instances_df['frequency_weight'] = instances_df['comparison'].map(lambda x: 1.0 / freq_counts[x])
         elif method == 'max_frequency_ratio':
-            # Weight = max_frequency / frequency (alternative approach)
             max_frequency = freq_counts.max()
             instances_df['frequency_weight'] = instances_df['comparison'].map(lambda x: max_frequency / freq_counts[x])
         else:
-            # Equal weighting (no correction)
             instances_df['frequency_weight'] = 1.0
         
-        # Store frequency statistics for reporting
+        # Store frequency statistics and DEBUG INFO
         instances_df['comparison_frequency'] = instances_df['comparison'].map(freq_counts)
         
+        # DEBUG: Show weight distribution
+        weight_range = instances_df['frequency_weight'].max() - instances_df['frequency_weight'].min()
+        logger.info(f"Applied frequency weights range: {instances_df['frequency_weight'].min():.3f} - {instances_df['frequency_weight'].max():.3f}")
+        logger.info(f"Weight variation: {weight_range:.3f}")
+        
+        if weight_range < 0.001:
+            logger.warning("⚠️  Frequency weights have very little variation - weighting will have minimal effect")
+        
         return instances_df
+
+    def diagnose_frequency_control(self, direct_df: pd.DataFrame) -> None:
+        """Diagnose whether frequency control is working properly - FIXED VERSION."""
+        
+        logger.info("=== FREQUENCY CONTROL DIAGNOSIS ===")
+        
+        # Apply frequency weights to get the weighted version for diagnosis
+        weighted_df = self.apply_frequency_weights(direct_df.copy())  # FIXED: Apply weighting first
+        
+        # Check comparison frequency distribution
+        comparison_counts = weighted_df.apply(
+            lambda row: tuple(sorted([row['chosen_bigram'], row['unchosen_bigram']])), axis=1
+        ).value_counts()
+        
+        logger.info(f"Unique comparison types: {len(comparison_counts)}")
+        logger.info(f"Comparison frequency range: {comparison_counts.min()} - {comparison_counts.max()}")
+        logger.info(f"Frequency ratio (max/min): {comparison_counts.max() / comparison_counts.min():.1f}")
+        
+        # Show most and least frequent comparisons
+        logger.info("\nMost frequent comparisons:")
+        for comp, count in comparison_counts.head(5).items():
+            logger.info(f"  {comp}: {count} instances")
+        
+        logger.info("\nLeast frequent comparisons:")
+        for comp, count in comparison_counts.tail(5).items():
+            logger.info(f"  {comp}: {count} instances")
+        
+        # Check English bigram frequencies
+        english_freq_available = len(self.english_bigram_frequencies) > 0
+        logger.info(f"\nEnglish bigram frequencies loaded: {english_freq_available}")
+        
+        if english_freq_available:
+            # Check frequency distribution of bigrams in our dataset
+            chosen_freqs = [self.english_bigram_frequencies.get(bigram, 0) for bigram in weighted_df['chosen_bigram']]
+            unchosen_freqs = [self.english_bigram_frequencies.get(bigram, 0) for bigram in weighted_df['unchosen_bigram']]
+            
+            logger.info(f"English freq range for chosen bigrams: {min(chosen_freqs):.2e} - {max(chosen_freqs):.2e}")
+            logger.info(f"English freq range for unchosen bigrams: {min(unchosen_freqs):.2e} - {max(unchosen_freqs):.2e}")
+            
+            # Check for frequency bias in specific comparisons
+            bias_examples = []
+            for _, row in weighted_df.head(10).iterrows():
+                chosen_freq = self.english_bigram_frequencies.get(row['chosen_bigram'], 0)
+                unchosen_freq = self.english_bigram_frequencies.get(row['unchosen_bigram'], 0)
+                if chosen_freq > 0 and unchosen_freq > 0:
+                    freq_ratio = chosen_freq / unchosen_freq
+                    if freq_ratio > 2 or freq_ratio < 0.5:  # Significant frequency difference
+                        bias_examples.append(f"{row['chosen_bigram']} vs {row['unchosen_bigram']}: {freq_ratio:.1f}x freq ratio")
+            
+            if bias_examples:
+                logger.info("Examples of frequency-biased comparisons:")
+                for example in bias_examples[:3]:
+                    logger.info(f"  {example}")
+            
+        # Check if frequency weighting is actually being applied - FIXED
+        if 'frequency_weight' in weighted_df.columns:
+            weight_range = weighted_df['frequency_weight'].max() - weighted_df['frequency_weight'].min()
+            logger.info(f"\nFrequency weight range: {weighted_df['frequency_weight'].min():.3f} - {weighted_df['frequency_weight'].max():.3f}")
+            logger.info(f"Weight variation: {weight_range:.3f}")
+            
+            if weight_range < 0.001:
+                logger.warning("Frequency weights are nearly identical - weighting has no effect")
+            else:
+                logger.info("✅ Frequency weighting is working properly")
+                
+            # Show how weights affect outcomes
+            high_weight_rows = weighted_df[weighted_df['frequency_weight'] > weighted_df['frequency_weight'].median()]
+            low_weight_rows = weighted_df[weighted_df['frequency_weight'] <= weighted_df['frequency_weight'].median()]
+            
+            logger.info(f"High-weight comparisons (rare): {len(high_weight_rows)} instances, {high_weight_rows['chose_chosen_key'].mean():.1%} preference rate")
+            logger.info(f"Low-weight comparisons (common): {len(low_weight_rows)} instances, {low_weight_rows['chose_chosen_key'].mean():.1%} preference rate")
+            
+        else:
+            logger.error("❌ No frequency_weight column found - weighting not applied")
 
     def calculate_weighted_preference_metrics(self, instances_df: pd.DataFrame, outcome_var: str) -> Dict[str, Any]:
         """Calculate comprehensive preference metrics with frequency weighting."""
@@ -537,11 +618,9 @@ class CompleteMOOObjectiveAnalyzer:
             return df
 
     def _test_key_preference(self) -> Dict[str, Any]:
-        """
-        Test key preferences using ONLY direct repeated bigrams to get preference rates.
-        """
+        """Test key preferences with both direct-only and direct+inferred approaches."""
         logger.info("Testing key preferences with direct repeated bigrams only...")
-
+        
         # Extract ONLY direct preferences (no hybrid/inferred)
         direct_instances = []
         
@@ -561,11 +640,11 @@ class CompleteMOOObjectiveAnalyzer:
                 if chosen_key in self.left_hand_keys and unchosen_key in self.left_hand_keys:
                     direct_instances.append({
                         'user_id': row['user_id'],
-                        'chosen_bigram': chosen,  # Keep original column names for compatibility
-                        'unchosen_bigram': unchosen,  # Keep original column names for compatibility
+                        'chosen_bigram': chosen,
+                        'unchosen_bigram': unchosen,
                         'chosen_key': chosen_key,
                         'unchosen_key': unchosen_key,
-                        'chose_chosen_key': 1,  # By definition, chosen_key was preferred
+                        'chose_chosen_key': 1,
                         'key_pair': tuple(sorted([chosen_key, unchosen_key])),
                         'slider_value': row.get('sliderValue', 0),
                         'comparison_type': 'direct_repeated_bigram',
@@ -580,21 +659,26 @@ class CompleteMOOObjectiveAnalyzer:
         
         logger.info(f"Found {len(direct_df)} direct instances from {direct_df['user_id'].nunique()} users")
         
-        # Apply frequency weighting (now works because we have the expected column names)
+        # Apply frequency weighting
         weighted_metrics = self.calculate_weighted_preference_metrics(direct_df, 'chose_chosen_key')
         weighted_data = weighted_metrics['weighted_data']
         
-        # Analyze each key pair with Wilson confidence intervals
-        pairwise_results = {}
+        # APPROACH 1: DIRECT EVIDENCE ONLY
+        logger.info("=== APPROACH 1: DIRECT EVIDENCE ONLY ===")
+        
+        # Analyze direct pairwise results
+        direct_pairwise_results = {}
+        direct_covered_pairs = set()
         all_p_values = []
         
         for key_pair in weighted_data['key_pair'].unique():
             pair_data = weighted_data[weighted_data['key_pair'] == key_pair].copy()
             
-            if len(pair_data) < 1:  # Minimum threshold
+            if len(pair_data) < 5:  # Minimum threshold
                 continue
             
             key1, key2 = key_pair
+            direct_covered_pairs.add(key_pair)
             
             # Calculate win rate for key1
             pair_data['chose_key1'] = pair_data.apply(
@@ -609,16 +693,15 @@ class CompleteMOOObjectiveAnalyzer:
             total_weight = pair_data['frequency_weight'].sum()
             weighted_win_rate = (pair_data['chose_key1'] * pair_data['frequency_weight']).sum() / total_weight
             
-            # Wilson score confidence interval using effective sample size
-            from scipy import stats
-            z = stats.norm.ppf(0.975)  # 95% CI
-            
-            # Use weighted rate and effective sample size for CI
+            # Wilson confidence interval
             effective_n = (total_weight ** 2) / (pair_data['frequency_weight'] ** 2).sum()
             p_hat = weighted_win_rate
             n = effective_n
             
             if n > 0:
+                alpha = 0.05
+                z = norm.ppf(1 - alpha/2)
+                
                 denominator = 1 + z**2 / n
                 center = (p_hat + z**2 / (2*n)) / denominator
                 margin = z * np.sqrt(p_hat * (1 - p_hat) / n + z**2 / (4*n**2)) / denominator
@@ -628,22 +711,20 @@ class CompleteMOOObjectiveAnalyzer:
             else:
                 ci_lower = ci_upper = weighted_win_rate
             
-            # Test against null hypothesis of no preference (50%) using weighted rate
+            # Statistical test
             if effective_n > 0:
                 z_score = (weighted_win_rate - 0.5) / np.sqrt(0.25 / effective_n)
-                p_value = 2 * (1 - stats.norm.cdf(abs(z_score)))
+                p_value = 2 * (1 - norm.cdf(abs(z_score)))
             else:
                 p_value = 1.0
             
-            # Determine winner based on weighted win rate
+            # Determine winner
             winner = key1 if weighted_win_rate > 0.5 else key2
             winner_rate = max(weighted_win_rate, 1 - weighted_win_rate)
             effect_size = abs(weighted_win_rate - 0.5)
-            
-            # Calculate frequency bias
             frequency_bias = abs(weighted_win_rate - win_rate)
             
-            pairwise_results[key_pair] = {
+            direct_pairwise_results[key_pair] = {
                 'key1': key1,
                 'key2': key2,
                 'n_comparisons': n_total,
@@ -659,33 +740,231 @@ class CompleteMOOObjectiveAnalyzer:
                 'effect_size': effect_size,
                 'p_value': p_value,
                 'significant': p_value < 0.05,
-                'primary_method': 'direct',  # All are direct for this analysis
+                'primary_method': 'direct',
                 'interpretation': f"{winner.upper()} > {key2.upper() if winner == key1 else key1.upper()}: {winner_rate:.1%} preference (direct evidence)"
             }
             
             all_p_values.append(p_value)
         
-        # Calculate individual key scores using weighted win-loss method
-        individual_scores, ranked_keys = self._calculate_frequency_weighted_key_scores(pairwise_results)
+        logger.info(f"Direct evidence covers {len(direct_pairwise_results)} key pairs")
         
+        # APPROACH 2: DIRECT + INFERRED EVIDENCE  
+        logger.info("=== APPROACH 2: DIRECT + INFERRED EVIDENCE ===")
+        
+        # Extract inferred preferences for missing pairs
+        inferred_df = self._extract_inferred_key_preferences_for_missing_pairs(direct_covered_pairs)
+        inferred_analysis = self._analyze_inferred_preferences(inferred_df)
+        
+        # Combine direct and inferred results
+        combined_pairwise_results = direct_pairwise_results.copy()
+        if 'inferred_results' in inferred_analysis:
+            for key_pair, inferred_result in inferred_analysis['inferred_results'].items():
+                if key_pair not in combined_pairwise_results:  # Don't override direct evidence
+                    combined_pairwise_results[key_pair] = inferred_result
+                    all_p_values.append(inferred_result['p_value'])
+        
+        logger.info(f"Combined evidence covers {len(combined_pairwise_results)} key pairs")
+        logger.info(f"Added {len(combined_pairwise_results) - len(direct_pairwise_results)} inferred pairs")
+        
+        # Generate outputs for both approaches
+        output_folder = getattr(self, '_current_output_folder', None)
+        
+        if len(direct_pairwise_results) > 0 and output_folder:
+            try:
+                # APPROACH 1 OUTPUTS: Direct evidence only
+                logger.info("Generating direct-evidence-only outputs...")
+                
+                # Calculate key scores from direct evidence only
+                direct_key_scores = self._calculate_individual_key_scores_with_ci(direct_pairwise_results)
+                direct_tiers = self._create_practical_moo_tiers(direct_key_scores)
+                
+                # Export direct-only results
+                direct_constraints_df = self._export_pairwise_moo_constraints(direct_pairwise_results, output_folder)
+                
+                # Save direct-only tier data
+                direct_tier_data = []
+                for tier_num in sorted(direct_tiers.keys()):
+                    for key in direct_tiers[tier_num]:
+                        key_row = direct_key_scores[direct_key_scores['key'] == key].iloc[0]
+                        direct_tier_data.append({
+                            'approach': 'direct_only',
+                            'tier': tier_num,
+                            'key': key,
+                            'win_rate': key_row['win_rate'],
+                            'ci_lower': key_row['ci_lower'],
+                            'ci_upper': key_row['ci_upper'],
+                            'moo_weight': 1.0 / tier_num,
+                            'evidence_type': 'direct_AA_vs_BB'
+                        })
+                
+                direct_tier_df = pd.DataFrame(direct_tier_data)
+                direct_tier_df.to_csv(os.path.join(output_folder, 'moo_tiers_direct_only.csv'), index=False)
+                
+                # APPROACH 2 OUTPUTS: Direct + inferred evidence
+                if len(combined_pairwise_results) > len(direct_pairwise_results):
+                    logger.info("Generating direct+inferred outputs...")
+                    
+                    # Calculate key scores from combined evidence
+                    combined_key_scores = self._calculate_individual_key_scores_with_ci(combined_pairwise_results)
+                    combined_tiers = self._create_practical_moo_tiers(combined_key_scores)
+                    
+                    # Export combined results  
+                    combined_constraints_df = self._export_pairwise_moo_constraints(combined_pairwise_results, output_folder)
+                    
+                    # Save combined tier data
+                    combined_tier_data = []
+                    for tier_num in sorted(combined_tiers.keys()):
+                        for key in combined_tiers[tier_num]:
+                            key_row = combined_key_scores[combined_key_scores['key'] == key].iloc[0]
+                            combined_tier_data.append({
+                                'approach': 'direct_plus_inferred',
+                                'tier': tier_num,
+                                'key': key,
+                                'win_rate': key_row['win_rate'],
+                                'ci_lower': key_row['ci_lower'],
+                                'ci_upper': key_row['ci_upper'],
+                                'moo_weight': 1.0 / tier_num,
+                                'evidence_type': 'mixed'
+                            })
+                    
+                    combined_tier_df = pd.DataFrame(combined_tier_data)
+                    combined_tier_df.to_csv(os.path.join(output_folder, 'moo_tiers_direct_plus_inferred.csv'), index=False)
+                    
+                    # Create comparison analysis
+                    self._compare_approaches(direct_key_scores, combined_key_scores, 
+                                        direct_tiers, combined_tiers, output_folder)
+                else:
+                    logger.info("No additional inferred evidence found - approaches are identical")
+                    combined_key_scores = direct_key_scores
+                    combined_tiers = direct_tiers
+                
+                # Generate complete preference matrix
+                complete_matrix = self._create_complete_preference_matrix(
+                    direct_pairwise_results, inferred_analysis
+                )
+                complete_matrix.to_csv(os.path.join(output_folder, 'complete_preference_matrix.csv'), index=False)
+                
+                # Create visualizations for primary approach (direct+inferred if available)
+                primary_scores = combined_key_scores if len(combined_pairwise_results) > len(direct_pairwise_results) else direct_key_scores
+                primary_tiers = combined_tiers if len(combined_pairwise_results) > len(direct_pairwise_results) else direct_tiers
+                
+                self._plot_key_preferences_with_tiers(primary_scores, primary_tiers, output_folder)
+                
+                # Export comprehensive MOO specification
+                primary_constraints = combined_constraints_df if len(combined_pairwise_results) > len(direct_pairwise_results) else direct_constraints_df
+                self._export_combined_moo_objectives(primary_scores, primary_tiers, primary_constraints, output_folder)
+                
+                # Run diagnostics
+                self.diagnose_frequency_control(direct_df)
+                self._diagnose_100_percent_rates(direct_pairwise_results)
+                
+                logger.info("Both approaches generated successfully")
+                
+            except Exception as e:
+                logger.error(f"Key preference analysis failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+                
+                # Fallback to basic results
+                primary_scores = direct_key_scores if 'direct_key_scores' in locals() else None
+                primary_tiers = direct_tiers if 'direct_tiers' in locals() else None
+        
+        # Return comprehensive results
         return {
-            'description': 'Key preferences from direct repeated bigrams only',
-            'method': 'direct_repeated_bigrams_only',
-            'n_instances': len(direct_df),
+            'description': 'Key preferences with both direct and inferred evidence approaches',
+            'method': 'direct_and_inferred_comparison',
+            'direct_approach': {
+                'n_instances': len(direct_df),
+                'n_pairs': len(direct_pairwise_results),
+                'pairwise_results': direct_pairwise_results,
+                'coverage': f"{len(direct_pairwise_results)}/{len(list(self.left_hand_keys)) * (len(list(self.left_hand_keys)) - 1) // 2}"
+            },
+            'inferred_approach': {
+                'n_inferred_instances': len(inferred_df) if not inferred_df.empty else 0,
+                'n_additional_pairs': len(combined_pairwise_results) - len(direct_pairwise_results),
+                'inferred_analysis': inferred_analysis,
+                'total_coverage': f"{len(combined_pairwise_results)}/{len(list(self.left_hand_keys)) * (len(list(self.left_hand_keys)) - 1) // 2}"
+            },
             'n_users': direct_df['user_id'].nunique(),
-            'n_key_pairs': len(pairwise_results),
-            'n_significant_pairs': sum(1 for r in pairwise_results.values() if r['significant']),
-            'pairwise_results': pairwise_results,
             'frequency_bias_analysis': weighted_metrics,
-            'key_preference_rates': True,
-            'p_values_for_correction': all_p_values,  # For FDR correction later
-            'instances_data': direct_df,  # For validation framework
-            'normalization_range': (0.0, 1.0),  # Preference rates are 0-100%
+            'p_values_for_correction': all_p_values,
+            'instances_data': direct_df,
+            'normalization_range': (0.0, 1.0),
             'p_value': min(all_p_values) if all_p_values else 1.0,
             'preference_rate': weighted_metrics.get('weighted_preference_rate', 0.5),
-            'interpretation': self._interpret_key_results(pairwise_results, weighted_metrics)
+            'interpretation': f"Direct evidence: {len(direct_pairwise_results)} pairs; Combined: {len(combined_pairwise_results)} pairs"
         }
 
+    def _compare_approaches(self, direct_scores: pd.DataFrame, combined_scores: pd.DataFrame,
+                        direct_tiers: Dict, combined_tiers: Dict, output_folder: str) -> None:
+        """Compare direct-only vs direct+inferred approaches."""
+        
+        logger.info("=== COMPARING DIRECT VS DIRECT+INFERRED APPROACHES ===")
+        
+        comparison_data = []
+        
+        # Compare individual key scores
+        all_keys = set(direct_scores['key']) | set(combined_scores['key'])
+        
+        for key in all_keys:
+            direct_row = direct_scores[direct_scores['key'] == key]
+            combined_row = combined_scores[combined_scores['key'] == key]
+            
+            direct_score = direct_row['win_rate'].iloc[0] if len(direct_row) > 0 else None
+            combined_score = combined_row['win_rate'].iloc[0] if len(combined_row) > 0 else None
+            
+            # Find tiers
+            direct_tier = None
+            combined_tier = None
+            
+            for tier_num, tier_keys in direct_tiers.items():
+                if key in tier_keys:
+                    direct_tier = tier_num
+                    break
+            
+            for tier_num, tier_keys in combined_tiers.items():
+                if key in tier_keys:
+                    combined_tier = tier_num
+                    break
+            
+            score_change = combined_score - direct_score if (direct_score is not None and combined_score is not None) else 0
+            tier_change = (combined_tier - direct_tier) if (direct_tier is not None and combined_tier is not None) else 0
+            
+            comparison_data.append({
+                'key': key,
+                'direct_score': direct_score,
+                'combined_score': combined_score,
+                'score_change': score_change,
+                'direct_tier': direct_tier,
+                'combined_tier': combined_tier,
+                'tier_change': tier_change,
+                'substantial_change': abs(score_change) > 0.1 or abs(tier_change) > 1
+            })
+        
+        comparison_df = pd.DataFrame(comparison_data)
+        comparison_df.to_csv(os.path.join(output_folder, 'approach_comparison.csv'), index=False)
+        
+        # Summary statistics
+        substantial_changes = len(comparison_df[comparison_df['substantial_change'] == True])
+        mean_score_change = comparison_df['score_change'].abs().mean()
+        
+        logger.info(f"Approach comparison: {substantial_changes}/{len(comparison_df)} keys changed substantially")
+        logger.info(f"Mean absolute score change: {mean_score_change:.3f}")
+        
+        if substantial_changes > len(comparison_df) * 0.3:
+            logger.warning("⚠️  Inferred evidence substantially changes >30% of key rankings")
+        else:
+            logger.info("✅ Approaches are largely consistent")
+        
+        # Log major changes
+        major_changes = comparison_df[comparison_df['substantial_change'] == True].nlargest(5, 'score_change')
+        if len(major_changes) > 0:
+            logger.info("Largest changes from adding inferred evidence:")
+            for _, row in major_changes.iterrows():
+                logger.info(f"  {row['key']}: {row['direct_score']:.1%} → {row['combined_score']:.1%} (tier {row['direct_tier']} → {row['combined_tier']})")
+        
+        logger.info(f"Approach comparison saved to: {os.path.join(output_folder, 'approach_comparison.csv')}")
+        
     def _interpret_key_results(self, pairwise_results: Dict, weighted_metrics: Dict) -> str:
         """Interpret key preference results with frequency bias info."""
         if not pairwise_results:
@@ -709,53 +988,6 @@ class CompleteMOOObjectiveAnalyzer:
             interpretation += f", frequency bias: {mean_bias:.1%} (overall: {overall_bias:.1%})"
         
         return interpretation
-
-    def _calculate_frequency_weighted_key_scores(self, pairwise_results: Dict) -> Tuple[Dict[str, float], List[Tuple[str, float]]]:
-        """Calculate individual key scores using frequency-weighted win-loss method."""
-        key_scores = {}
-        all_keys = set()
-        
-        # Collect all keys
-        for pair, results in pairwise_results.items():
-            if 'error' not in results:
-                all_keys.update([results['key1'], results['key2']])
-        
-        # Initialize scores
-        for key in all_keys:
-            key_scores[key] = {'wins': 0, 'losses': 0, 'total_weight': 0}
-        
-        # Calculate weighted wins/losses
-        for pair, results in pairwise_results.items():
-            if 'error' not in results:
-                key1, key2 = results['key1'], results['key2']
-                
-                # Use inverse of frequency bias as weight (higher weight for less biased comparisons)
-                comparison_weight = 1.0 / (1.0 + results.get('frequency_bias', 0))
-                
-                # Determine winner based on weighted preference rate
-                if results.get('weighted_key1_rate', results.get('unweighted_key1_rate', 0.5)) > 0.5:
-                    key_scores[key1]['wins'] += comparison_weight
-                    key_scores[key2]['losses'] += comparison_weight
-                else:
-                    key_scores[key2]['wins'] += comparison_weight
-                    key_scores[key1]['losses'] += comparison_weight
-                
-                key_scores[key1]['total_weight'] += comparison_weight
-                key_scores[key2]['total_weight'] += comparison_weight
-        
-        # Calculate final scores (win rate)
-        final_scores = {}
-        for key in all_keys:
-            total_games = key_scores[key]['wins'] + key_scores[key]['losses']
-            if total_games > 0:
-                final_scores[key] = key_scores[key]['wins'] / total_games
-            else:
-                final_scores[key] = 0.5  # Neutral if no data
-        
-        # Sort by score
-        ranked_keys = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
-        
-        return final_scores, ranked_keys
 
     def _weighted_proportion_test(self, data: pd.DataFrame, outcome_var: str, weight_var: str) -> Dict[str, Any]:
             """Perform proportion test with frequency weights."""
@@ -789,6 +1021,753 @@ class CompleteMOOObjectiveAnalyzer:
                 'effect_size': effect_size,
                 'significant': p_value < 0.05
             }
+
+    def _calculate_individual_key_scores_with_ci(self, pairwise_results: Dict, 
+                                            confidence_level: float = 0.95) -> pd.DataFrame:
+        """Calculate key scores with more realistic confidence intervals."""
+        
+        # Collect all keys and their detailed performance
+        all_keys = set()
+        key_performances = {}  # key -> list of (win_rate, n_comparisons, opponent)
+        
+        for pair, results in pairwise_results.items():
+            key1, key2 = results['key1'], results['key2']
+            all_keys.update([key1, key2])
+            
+            # Initialize performance tracking
+            if key1 not in key_performances:
+                key_performances[key1] = []
+            if key2 not in key_performances:
+                key_performances[key2] = []
+            
+            # Get the actual win rate (use frequency bias to assess reliability)
+            win_rate_key1 = results.get('weighted_key1_rate', results.get('unweighted_key1_rate', 0.5))
+            n_comparisons = results['n_comparisons']
+            
+            # Store individual comparison results (not aggregated)
+            key_performances[key1].append({
+                'win_rate': win_rate_key1,
+                'n_comparisons': n_comparisons,
+                'opponent': key2,
+                'reliability': 1.0 / (1.0 + results.get('frequency_bias', 0))
+            })
+            
+            key_performances[key2].append({
+                'win_rate': 1.0 - win_rate_key1,
+                'n_comparisons': n_comparisons,
+                'opponent': key1,
+                'reliability': 1.0 / (1.0 + results.get('frequency_bias', 0))
+            })
+        
+        # Calculate key scores with better confidence intervals
+        key_data = {}
+        
+        for key in all_keys:
+            performances = key_performances[key]
+            
+            if not performances:
+                # No data for this key
+                key_data[key] = {
+                    'key': key.upper(),
+                    'win_rate': 0.5,
+                    'ci_lower': 0.0,
+                    'ci_upper': 1.0,
+                    'ci_width': 1.0,
+                    'n_comparisons': 0,
+                    'n_opponents': 0,
+                    'finger': self.key_positions.get(key, KeyPosition('', 0, 0, 0)).finger,
+                    'row': self.key_positions.get(key, KeyPosition('', 0, 0, 0)).row
+                }
+                continue
+            
+            # Calculate weighted average win rate
+            total_weight = sum(p['reliability'] * p['n_comparisons'] for p in performances)
+            if total_weight > 0:
+                weighted_win_rate = sum(p['win_rate'] * p['reliability'] * p['n_comparisons'] for p in performances) / total_weight
+            else:
+                weighted_win_rate = 0.5
+            
+            # Total effective sample size
+            total_n = sum(p['n_comparisons'] for p in performances)
+            
+            # Calculate confidence interval using Beta distribution (better for extreme rates)
+            # Add small pseudocounts to prevent 0% and 100% rates
+            alpha_pseudo = 1  # Prior "wins"
+            beta_pseudo = 1   # Prior "losses"
+            
+            observed_wins = weighted_win_rate * total_n + alpha_pseudo
+            observed_losses = (1 - weighted_win_rate) * total_n + beta_pseudo
+            total_trials = total_n + alpha_pseudo + beta_pseudo
+            
+            # Adjusted win rate with pseudocounts
+            adjusted_win_rate = observed_wins / total_trials
+            
+            # Wilson score interval with adjustment
+            if total_n > 0:
+                alpha = 1 - confidence_level
+                z = norm.ppf(1 - alpha/2)
+                
+                p_hat = adjusted_win_rate
+                n = total_trials
+                
+                denominator = 1 + z**2 / n
+                center = (p_hat + z**2 / (2*n)) / denominator
+                margin = z * np.sqrt(p_hat * (1 - p_hat) / n + z**2 / (4*n**2)) / denominator
+                
+                ci_lower = max(0, center - margin)
+                ci_upper = min(1, center + margin)
+            else:
+                ci_lower = ci_upper = adjusted_win_rate
+            
+            # Get opponent info
+            opponents = [p['opponent'] for p in performances]
+            
+            key_data[key] = {
+                'key': key.upper(),
+                'win_rate': adjusted_win_rate,  # Use adjusted rate to avoid 100%
+                'ci_lower': ci_lower,
+                'ci_upper': ci_upper,
+                'ci_width': ci_upper - ci_lower,
+                'n_comparisons': total_n,
+                'n_opponents': len(set(opponents)),
+                'opponents': sorted(set(opponents)),
+                'finger': self.key_positions.get(key, KeyPosition('', 0, 0, 0)).finger,
+                'row': self.key_positions.get(key, KeyPosition('', 0, 0, 0)).row,
+                'raw_win_rate': weighted_win_rate,  # Store original for comparison
+                'adjustment_applied': abs(weighted_win_rate - adjusted_win_rate) > 0.01
+            }
+        
+        df = pd.DataFrame(key_data.values()).sort_values('win_rate', ascending=False)
+        
+        # Log adjustments made
+        adjusted_keys = df[df['adjustment_applied'] == True]
+        if len(adjusted_keys) > 0:
+            logger.info(f"Applied statistical adjustments to {len(adjusted_keys)} keys to prevent extreme rates:")
+            for _, row in adjusted_keys.iterrows():
+                logger.info(f"  {row['key']}: {row['raw_win_rate']:.1%} → {row['win_rate']:.1%}")
+        
+        return df
+
+    def _identify_statistical_tiers_with_transitivity(self, key_scores: pd.DataFrame) -> Dict[int, List[str]]:
+        """Identify tiers with more granular groupings."""
+        
+        # Sort keys by win rate
+        sorted_keys = key_scores.sort_values('win_rate', ascending=False)
+        
+        tiers = {}
+        tier_num = 1
+        used_keys = set()
+        
+        for _, current_key_row in sorted_keys.iterrows():
+            if current_key_row['key'] in used_keys:
+                continue
+            
+            # Start new tier
+            tier_keys = [current_key_row['key']]
+            tier_ci = (current_key_row['ci_lower'], current_key_row['ci_upper'])
+            used_keys.add(current_key_row['key'])
+            
+            # Find keys with significantly overlapping CIs
+            for _, other_key_row in sorted_keys.iterrows():
+                if other_key_row['key'] in used_keys:
+                    continue
+                
+                other_ci = (other_key_row['ci_lower'], other_key_row['ci_upper'])
+                
+                # Check for substantial overlap (not just touching)
+                overlap_start = max(tier_ci[0], other_ci[0])
+                overlap_end = min(tier_ci[1], other_ci[1])
+                overlap_size = max(0, overlap_end - overlap_start)
+                
+                tier_ci_width = tier_ci[1] - tier_ci[0]
+                other_ci_width = other_ci[1] - other_ci[0]
+                min_ci_width = min(tier_ci_width, other_ci_width)
+                
+                # Require substantial overlap (>30% of smaller CI width)
+                if overlap_size > 0.3 * min_ci_width:
+                    tier_keys.append(other_key_row['key'])
+                    used_keys.add(other_key_row['key'])
+                    
+                    # Update tier CI bounds
+                    tier_ci = (
+                        min(tier_ci[0], other_ci[0]),
+                        max(tier_ci[1], other_ci[1])
+                    )
+            
+            # Store tier
+            tiers[tier_num] = sorted(tier_keys)
+            
+            # Log tier with win rate range
+            tier_rows = key_scores[key_scores['key'].isin(tier_keys)]
+            tier_mean = tier_rows['win_rate'].mean()
+            tier_range = f"{tier_rows['win_rate'].min():.1%}-{tier_rows['win_rate'].max():.1%}"
+            tier_keys_str = ', '.join(sorted(tier_keys))
+            
+            logger.info(f"Tier {tier_num}: {tier_keys_str} (win rates: {tier_range}, mean: {tier_mean:.1%})")
+            
+            tier_num += 1
+        
+        return tiers
+
+    def _create_practical_moo_tiers(self, key_scores: pd.DataFrame) -> Dict[int, List[str]]:
+        """
+        Create practical MOO tiers using win rate thresholds instead of statistical overlap.
+        This ensures meaningful differentiation for optimization.
+        """
+        
+        # Sort keys by win rate
+        sorted_keys = key_scores.sort_values('win_rate', ascending=False)
+        
+        # Define practical tier boundaries based on win rates
+        tiers = {}
+        tier_assignments = []
+        
+        for _, row in sorted_keys.iterrows():
+            win_rate = row['win_rate']
+            
+            # Assign tiers based on win rate ranges
+            if win_rate >= 0.85:
+                tier = 1  # Excellent (85%+)
+            elif win_rate >= 0.70:
+                tier = 2  # Very Good (70-84%)
+            elif win_rate >= 0.60:
+                tier = 3  # Good (60-69%)
+            elif win_rate >= 0.50:
+                tier = 4  # Above Average (50-59%)
+            elif win_rate >= 0.40:
+                tier = 5  # Below Average (40-49%)
+            elif win_rate >= 0.25:
+                tier = 6  # Poor (25-39%)
+            else:
+                tier = 7  # Very Poor (<25%)
+            
+            tier_assignments.append((row['key'], tier, win_rate))
+            
+            # Add to tier dictionary
+            if tier not in tiers:
+                tiers[tier] = []
+            tiers[tier].append(row['key'])
+        
+        # Log practical tier assignments
+        logger.info("PRACTICAL MOO TIERS (based on win rate ranges):")
+        for tier_num in sorted(tiers.keys()):
+            tier_keys = tiers[tier_num]
+            tier_rows = key_scores[key_scores['key'].isin(tier_keys)]
+            tier_min = tier_rows['win_rate'].min()
+            tier_max = tier_rows['win_rate'].max()
+            tier_mean = tier_rows['win_rate'].mean()
+            
+            if tier_min == tier_max:
+                rate_str = f"{tier_mean:.1%}"
+            else:
+                rate_str = f"{tier_min:.1%}-{tier_max:.1%} (mean: {tier_mean:.1%})"
+            
+            tier_keys_str = ', '.join(sorted(tier_keys))
+            logger.info(f"  Tier {tier_num}: {tier_keys_str} ({rate_str})")
+        
+        # Validate tier structure
+        total_tiers = len(tiers)
+        total_keys = len(key_scores)
+        avg_keys_per_tier = total_keys / total_tiers
+        
+        logger.info(f"Tier structure: {total_tiers} tiers, {total_keys} keys, {avg_keys_per_tier:.1f} keys/tier average")
+        
+        # Check for reasonable distribution
+        if total_tiers < 3:
+            logger.warning("⚠️  Only {total_tiers} tiers created - may not provide enough differentiation for MOO")
+        elif total_tiers > 8:
+            logger.warning("⚠️  Many tiers ({total_tiers}) created - may be too granular for MOO")
+        else:
+            logger.info("✅ Good tier structure for MOO optimization")
+        
+        return tiers
+
+    def _plot_key_preferences_with_tiers(self, key_scores: pd.DataFrame, 
+                                    tiers: Dict[int, List[str]], 
+                                    output_folder: str) -> None:
+        """Create key preference plot with confidence intervals and tier coloring."""
+            
+        # Create figure
+        fig, ax = plt.subplots(figsize=(12, 10))
+        
+        # Sort keys by win rate (ascending for bottom-to-top plotting)
+        key_scores_sorted = key_scores.sort_values('win_rate', ascending=True)
+        
+        # Define colors for tiers
+        tier_colors = ['#2E8B57', '#4682B4', '#DAA520', '#CD853F', '#DC143C', '#8B008B']
+        
+        # Map keys to colors and tiers
+        key_to_color = {}
+        key_to_tier = {}
+        for tier_num, tier_keys in tiers.items():
+            color = tier_colors[(tier_num - 1) % len(tier_colors)]
+            for key in tier_keys:
+                key_to_color[key] = color
+                key_to_tier[key] = tier_num
+        
+        # Plot
+        y_pos = range(len(key_scores_sorted))
+        
+        for i, (_, row) in enumerate(key_scores_sorted.iterrows()):
+            color = key_to_color.get(row['key'], '#666666')
+            
+            # Confidence interval
+            ax.plot([row['ci_lower'], row['ci_upper']], [i, i], 
+                color='black', linewidth=2, alpha=0.6)
+            
+            # Point
+            ax.scatter(row['win_rate'], i, c=color, s=120, alpha=0.8, 
+                    edgecolors='black', linewidth=1, zorder=3)
+        
+        # Formatting
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels([f"{row['key']}" for _, row in key_scores_sorted.iterrows()])
+        ax.set_xlabel('Win Rate (95% CI)', fontsize=12)
+        ax.set_ylabel('Key', fontsize=12)
+        ax.set_title('Key Preference Strengths with Confidence Intervals and MOO Tiers', fontsize=14)
+        ax.grid(True, alpha=0.3)
+        ax.axvline(x=0.5, color='gray', linestyle='--', alpha=0.5, label='No preference')
+        
+        # Add tier info on right side
+        for i, (_, row) in enumerate(key_scores_sorted.iterrows()):
+            tier_num = key_to_tier.get(row['key'], '?')
+            finger_num = row.get('finger', '?')
+            n_comp = row.get('n_comparisons', 0)
+            
+            ax.text(1.02, i, f"T{tier_num} F{finger_num} (n={n_comp})", 
+                transform=ax.get_yaxis_transform(), va='center', fontsize=9)
+        
+        # Tier legend
+        legend_elements = []
+        for tier_num in sorted(tiers.keys()):
+            color = tier_colors[(tier_num - 1) % len(tier_colors)]
+            tier_keys_str = ', '.join(sorted(tiers[tier_num]))
+            legend_elements.append(
+                plt.Line2D([0], [0], marker='o', color='w', markerfacecolor=color,
+                        markersize=10, label=f"Tier {tier_num}: {tier_keys_str}")
+            )
+        
+        ax.legend(handles=legend_elements, loc='lower right', fontsize=9)
+        ax.set_xlim(0, 1)
+        plt.tight_layout()
+        
+        # Save
+        plot_path = os.path.join(output_folder, 'key_preferences_with_tiers.png')
+        plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        logger.info(f"Key preference plot saved to: {plot_path}")
+
+    def _export_pairwise_moo_constraints(self, pairwise_results: Dict, output_folder: str) -> pd.DataFrame:
+        """Export pairwise constraints for MOO algorithms that can handle multiple constraints."""
+        
+        constraints_data = []
+        
+        for pair, results in pairwise_results.items():
+            if results.get('significant', False):  # Only export significant preferences
+                
+                winner = results['winner']
+                loser = results['key2'] if winner == results['key1'] else results['key1']
+                
+                constraints_data.append({
+                    'constraint_type': 'pairwise_key_preference',
+                    'promote_key': winner.upper(),
+                    'demote_key': loser.upper(),
+                    'preference_strength': results['winner_rate'],
+                    'confidence_lower': results.get('ci_lower', 0),
+                    'confidence_upper': results.get('ci_upper', 1),
+                    'n_comparisons': results['n_comparisons'],
+                    'p_value': results['p_value'],
+                    'evidence_type': results.get('primary_method', 'direct'),
+                    'constraint_weight': results['winner_rate'] - 0.5,  # 0-0.5 range
+                    'moo_formulation': f"promote_{winner.upper()}_over_{loser.upper()}",
+                    'statistical_support': 'FDR_significant' if results['significant'] else 'not_significant',
+                    'frequency_bias': results.get('frequency_bias', 0.0),
+                    'interpretation': f"Promote {winner.upper()} over {loser.upper()} (strength: {results['winner_rate']:.1%})"
+                })
+        
+        constraints_df = pd.DataFrame(constraints_data)
+        
+        if len(constraints_df) > 0:
+            # Sort by preference strength (strongest first)
+            constraints_df = constraints_df.sort_values('preference_strength', ascending=False)
+            
+            # Save constraints
+            constraints_path = os.path.join(output_folder, 'moo_pairwise_constraints.csv')
+            constraints_df.to_csv(constraints_path, index=False)
+            
+            logger.info(f"Pairwise MOO constraints saved to: {constraints_path}")
+            logger.info(f"Exported {len(constraints_df)} significant pairwise constraints")
+            
+            # Log summary
+            strong_constraints = len(constraints_df[constraints_df['preference_strength'] > 0.8])
+            moderate_constraints = len(constraints_df[(constraints_df['preference_strength'] > 0.6) & 
+                                                    (constraints_df['preference_strength'] <= 0.8)])
+            weak_constraints = len(constraints_df[constraints_df['preference_strength'] <= 0.6])
+            
+            logger.info(f"Constraint strength distribution: {strong_constraints} strong (>80%), "
+                    f"{moderate_constraints} moderate (60-80%), {weak_constraints} weak (≤60%)")
+            
+        return constraints_df
+
+    def _export_combined_moo_objectives(self, key_scores: pd.DataFrame, tiers: Dict, 
+                                    constraints_df: pd.DataFrame, output_folder: str) -> None:
+        """Export combined MOO objective specification."""
+        
+        # Create comprehensive MOO specification
+        moo_spec = {
+            'objective_1_tiered_key_preferences': {
+                'type': 'weighted_sum',
+                'description': 'Maximize sum of (tier_weight × key_frequency) across layout',
+                'weights': {row['key']: row['moo_weight'] for _, row in 
+                        pd.read_csv(os.path.join(output_folder, 'moo_key_preference_tiers.csv')).iterrows()},
+                'formulation': 'sum(tier_weight[key] * frequency[key] for key in layout)',
+                'normalization': 'weights sum to different values by design (tier structure)',
+                'interpretation': 'Higher score = more preferred keys in frequent positions'
+            },
+            
+            'objective_2_pairwise_constraints': {
+                'type': 'constraint_set',
+                'description': 'Pairwise promotion/demotion constraints',
+                'constraints': constraints_df.to_dict('records') if len(constraints_df) > 0 else [],
+                'formulation': 'for each constraint: frequency[promote_key] > frequency[demote_key] * (1 + constraint_weight)',
+                'interpretation': 'Each constraint promotes one key over another based on preference strength'
+            },
+            
+            'objective_3_row_separation': {
+                'type': 'preference_rate',
+                'description': 'Row separation movement preferences',
+                'preference_rate': 0.75,  # From your analysis
+                'formulation': 'minimize weighted_row_movement_cost',
+                'interpretation': '75% preference for smaller row separations'
+            },
+            
+            'objective_4_column_separation': {
+                'type': 'preference_rate', 
+                'description': 'Column separation movement preferences',
+                'preference_rate': 0.646,  # From your analysis
+                'formulation': 'minimize weighted_column_movement_cost',
+                'interpretation': '64.6% preference for adjacent columns'
+            },
+            
+            'meta_information': {
+                'total_objectives': 4,
+                'statistical_approach': 'Option C - Independent objectives with FDR correction within key preferences',
+                'frequency_control': 'Applied inverse frequency weighting',
+                'confidence_level': '95% confidence intervals',
+                'evidence_base': 'Direct AA vs BB bigram comparisons only',
+                'sample_size': f"{len(key_scores)} keys analyzed from direct comparisons",
+                'missing_data_approach': 'Direct evidence only - no interpolation for missing pairs'
+            }
+        }
+        
+        # Save comprehensive specification
+        import json
+        spec_path = os.path.join(output_folder, 'complete_moo_specification.json')
+        with open(spec_path, 'w') as f:
+            json.dump(moo_spec, f, indent=2, default=str)
+        
+        logger.info(f"Complete MOO specification saved to: {spec_path}")
+        
+        # Create algorithm implementation guide
+        guide_lines = [
+            "MOO ALGORITHM IMPLEMENTATION GUIDE",
+            "=" * 40,
+            "",
+            "APPROACH 1: Use Tiered Key Preferences (Single Objective)",
+            "Suitable for: Genetic algorithms, simulated annealing, simple MOO",
+            "",
+            "objective_score = sum(tier_weight[key] * frequency[key] for key in layout)",
+            "where tier_weight comes from moo_key_preference_tiers.csv",
+            "",
+            "APPROACH 2: Use Pairwise Constraints (Multiple Constraints)", 
+            "Suitable for: Constraint satisfaction, NSGA-II, complex MOO",
+            "",
+            "For each row in moo_pairwise_constraints.csv:",
+            "  constraint: frequency[promote_key] should > frequency[demote_key]",
+            "  weight by: preference_strength value",
+            "",
+            "APPROACH 3: Hybrid (Recommended)",
+            "- Use tiered preferences as primary objective",  
+            "- Use strongest pairwise constraints (>80%) as hard constraints",
+            "- Use moderate constraints (60-80%) as soft penalties",
+            "",
+            "INTEGRATION WITH OTHER OBJECTIVES:",
+            "- Row separation: Penalize large row movements (weight: 0.75)",
+            "- Column separation: Penalize non-adjacent columns (weight: 0.646)", 
+            "- All objectives are independent (Option C statistical approach)",
+            "",
+            f"MISSING PAIRWISE DATA: {len(key_scores) * (len(key_scores) - 1) // 2 - len(constraints_df)} key pairs have no direct evidence",
+            "Options: (1) Treat as neutral (50%), (2) Infer from mixed bigram data (see discussion)"
+        ]
+        
+        guide_path = os.path.join(output_folder, 'moo_implementation_guide.txt')
+        with open(guide_path, 'w') as f:
+            f.write('\n'.join(guide_lines))
+        
+        logger.info(f"MOO implementation guide saved to: {guide_path}")
+
+    def _extract_inferred_key_preferences_for_missing_pairs(self, covered_pairs: Set[Tuple[str, str]]) -> pd.DataFrame:
+        """
+        Extract inferred key preferences for pairs missing from direct AA vs BB data.
+        Uses broader bigram data where keys appear in mixed bigrams.
+        """
+        
+        inferred_instances = []
+        all_possible_pairs = set()
+        
+        # Generate all possible left-hand key pairs
+        left_hand_keys = list(self.left_hand_keys)
+        from itertools import combinations
+        all_possible_pairs = set(combinations(sorted(left_hand_keys), 2))
+        
+        # Find missing pairs
+        missing_pairs = all_possible_pairs - covered_pairs
+        logger.info(f"Found {len(missing_pairs)} missing key pairs for inference")
+        logger.info(f"Missing pairs: {sorted(missing_pairs)}")
+        
+        # For each missing pair, look for indirect evidence in mixed bigrams
+        for key1, key2 in missing_pairs:
+            pair_instances = []
+            
+            for _, row in self.data.iterrows():
+                chosen = str(row['chosen_bigram']).lower()
+                unchosen = str(row['unchosen_bigram']).lower()
+                
+                if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
+                    continue
+                
+                # Skip repeated bigrams (already handled by direct method)
+                chosen_is_repeated = len(chosen) == 2 and chosen[0] == chosen[1]
+                unchosen_is_repeated = len(unchosen) == 2 and unchosen[0] == unchosen[1]
+                if chosen_is_repeated or unchosen_is_repeated:
+                    continue
+                
+                chosen_keys = set(chosen)
+                unchosen_keys = set(unchosen)
+                
+                # Method 1: Shared-key comparisons (QA vs QB -> A vs B)
+                shared_keys = chosen_keys & unchosen_keys
+                if len(shared_keys) == 1:
+                    chosen_unique = list(chosen_keys - shared_keys)[0]
+                    unchosen_unique = list(unchosen_keys - shared_keys)[0]
+                    
+                    if {chosen_unique, unchosen_unique} == {key1, key2}:
+                        shared_context = list(shared_keys)[0]
+                        
+                        # Determine which key "won" this comparison
+                        chosen_key = chosen_unique
+                        unchosen_key = unchosen_unique
+                        
+                        pair_instances.append({
+                            'user_id': row['user_id'],
+                            'chosen_bigram': chosen,
+                            'unchosen_bigram': unchosen,
+                            'chosen_key': chosen_key,
+                            'unchosen_key': unchosen_key,
+                            'chose_chosen_key': 1,
+                            'comparison_type': 'inferred_shared_key',
+                            'shared_context': shared_context,
+                            'inference_quality': 'high',  # Shared key provides good control
+                            'slider_value': row.get('sliderValue', 0),
+                            'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
+                            'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
+                        })
+                
+                # Method 2: Disjoint comparisons (AB vs CD -> A,B vs C,D)
+                # Only use if no shared-key evidence available and both bigrams contain target keys
+                elif len(shared_keys) == 0 and len(pair_instances) < 5:  # Fallback method
+                    if key1 in chosen_keys and key2 in unchosen_keys:
+                        # key1 was in chosen bigram, key2 in unchosen
+                        pair_instances.append({
+                            'user_id': row['user_id'],
+                            'chosen_bigram': chosen,
+                            'unchosen_bigram': unchosen,
+                            'chosen_key': key1,
+                            'unchosen_key': key2,
+                            'chose_chosen_key': 1,
+                            'comparison_type': 'inferred_disjoint',
+                            'shared_context': 'none',
+                            'inference_quality': 'low',  # Disjoint has more confounding
+                            'slider_value': row.get('sliderValue', 0),
+                            'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
+                            'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
+                        })
+                    elif key2 in chosen_keys and key1 in unchosen_keys:
+                        # key2 was in chosen bigram, key1 in unchosen
+                        pair_instances.append({
+                            'user_id': row['user_id'],
+                            'chosen_bigram': chosen,
+                            'unchosen_bigram': unchosen,
+                            'chosen_key': key2,
+                            'unchosen_key': key1,
+                            'chose_chosen_key': 1,
+                            'comparison_type': 'inferred_disjoint',
+                            'shared_context': 'none',
+                            'inference_quality': 'low',
+                            'slider_value': row.get('sliderValue', 0),
+                            'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
+                            'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
+                        })
+            
+            # Add instances for this pair if we found any
+            if len(pair_instances) >= 3:  # Minimum threshold for inference
+                inferred_instances.extend(pair_instances)
+                
+                high_quality = len([inst for inst in pair_instances if inst['inference_quality'] == 'high'])
+                logger.info(f"Inferred evidence for {key1.upper()}-{key2.upper()}: {len(pair_instances)} instances ({high_quality} high-quality)")
+            
+        logger.info(f"Total inferred instances: {len(inferred_instances)}")
+        return pd.DataFrame(inferred_instances)
+
+    def _analyze_inferred_preferences(self, inferred_df: pd.DataFrame) -> Dict[str, Any]:
+        """Analyze inferred preferences with quality weighting."""
+        
+        if inferred_df.empty:
+            return {'error': 'No inferred instances found'}
+        
+        # Apply quality weighting in addition to frequency weighting
+        inferred_df['quality_weight'] = inferred_df['inference_quality'].map({
+            'high': 1.0,    # Shared-key comparisons
+            'medium': 0.7,  # Other controlled methods
+            'low': 0.3      # Disjoint comparisons  
+        })
+        
+        # Apply frequency weighting
+        weighted_inferred = self.apply_frequency_weights(inferred_df.copy())
+        
+        # Combine quality and frequency weights
+        weighted_inferred['combined_weight'] = (
+            weighted_inferred['frequency_weight'] * weighted_inferred['quality_weight']
+        )
+        
+        # Analyze each inferred key pair
+        inferred_results = {}
+        
+        for key_pair in weighted_inferred['key_pair'].unique() if 'key_pair' in weighted_inferred.columns else []:
+            pair_data = weighted_inferred[
+                weighted_inferred.apply(lambda row: 
+                    tuple(sorted([row['chosen_key'], row['unchosen_key']])) == key_pair, axis=1)
+            ]
+            
+            if len(pair_data) < 3:
+                continue
+                
+            key1, key2 = key_pair
+            
+            # Calculate weighted preference
+            pair_data['chose_key1'] = pair_data.apply(
+                lambda row: 1 if row['chosen_key'] == key1 else 0, axis=1
+            )
+            
+            total_weight = pair_data['combined_weight'].sum()
+            if total_weight > 0:
+                weighted_preference = (pair_data['chose_key1'] * pair_data['combined_weight']).sum() / total_weight
+            else:
+                weighted_preference = 0.5
+            
+            # Quality assessment
+            high_quality_count = len(pair_data[pair_data['inference_quality'] == 'high'])
+            quality_score = high_quality_count / len(pair_data)
+            
+            # Statistical test with effective sample size
+            effective_n = (total_weight ** 2) / (pair_data['combined_weight'] ** 2).sum()
+            
+            if effective_n > 0:
+                z_score = (weighted_preference - 0.5) / np.sqrt(0.25 / effective_n)
+                p_value = 2 * (1 - norm.cdf(abs(z_score)))
+            else:
+                p_value = 1.0
+            
+            # Determine winner
+            winner = key1 if weighted_preference > 0.5 else key2
+            winner_rate = max(weighted_preference, 1 - weighted_preference)
+            
+            inferred_results[key_pair] = {
+                'key1': key1,
+                'key2': key2,
+                'n_comparisons': len(pair_data),
+                'high_quality_instances': high_quality_count,
+                'quality_score': quality_score,
+                'weighted_preference': weighted_preference,
+                'winner': winner,
+                'winner_rate': winner_rate,
+                'p_value': p_value,
+                'significant': p_value < 0.05,
+                'evidence_type': 'inferred',
+                'reliability': 'high' if quality_score > 0.7 else 'medium' if quality_score > 0.3 else 'low',
+                'interpretation': f"{winner.upper()} > {key2.upper() if winner == key1 else key1.upper()}: {winner_rate:.1%} (inferred, {inferred_results[key_pair]['reliability']} reliability)"
+            }
+        
+        return {
+            'inferred_results': inferred_results,
+            'n_inferred_pairs': len(inferred_results),
+            'instances_data': inferred_df,
+            'method': 'inferred_from_mixed_bigrams',
+            'quality_distribution': weighted_inferred['inference_quality'].value_counts().to_dict()
+        }
+
+    def _create_complete_preference_matrix(self, direct_results: Dict, inferred_results: Dict) -> pd.DataFrame:
+        """Create complete pairwise preference matrix combining direct and inferred evidence."""
+        
+        all_keys = list(self.left_hand_keys)
+        matrix_data = []
+        
+        from itertools import combinations
+        for key1, key2 in combinations(all_keys, 2):
+            key_pair = tuple(sorted([key1, key2]))
+            
+            # Check direct evidence first
+            if key_pair in direct_results:
+                result = direct_results[key_pair]
+                matrix_data.append({
+                    'key1': key1.upper(),
+                    'key2': key2.upper(), 
+                    'key1_preference_rate': result.get('weighted_key1_rate', result.get('unweighted_key1_rate', 0.5)),
+                    'winner': result['winner'].upper(),
+                    'winner_rate': result['winner_rate'],
+                    'evidence_type': 'direct',
+                    'reliability': 'high',
+                    'p_value': result['p_value'],
+                    'significant': result['significant'],
+                    'n_comparisons': result['n_comparisons']
+                })
+            
+            # Check inferred evidence
+            elif inferred_results and key_pair in inferred_results.get('inferred_results', {}):
+                result = inferred_results['inferred_results'][key_pair]
+                key1_rate = result['weighted_preference'] if result['key1'] == key1 else 1 - result['weighted_preference']
+                
+                matrix_data.append({
+                    'key1': key1.upper(),
+                    'key2': key2.upper(),
+                    'key1_preference_rate': key1_rate,
+                    'winner': result['winner'].upper(),
+                    'winner_rate': result['winner_rate'],
+                    'evidence_type': 'inferred',
+                    'reliability': result['reliability'],
+                    'p_value': result['p_value'],
+                    'significant': result['significant'],
+                    'n_comparisons': result['n_comparisons']
+                })
+            
+            # No evidence - neutral preference
+            else:
+                matrix_data.append({
+                    'key1': key1.upper(),
+                    'key2': key2.upper(),
+                    'key1_preference_rate': 0.5,
+                    'winner': 'tie',
+                    'winner_rate': 0.5,
+                    'evidence_type': 'none',
+                    'reliability': 'none',
+                    'p_value': 1.0,
+                    'significant': False,
+                    'n_comparisons': 0
+                })
+        
+        complete_matrix = pd.DataFrame(matrix_data)
+        return complete_matrix
 
     # =========================================================================
     # OBJECTIVE 2: ROW SEPARATION WITH STANDARDIZED WEIGHTING
