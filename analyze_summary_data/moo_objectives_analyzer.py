@@ -59,11 +59,15 @@ class KeyPosition:
 class CompleteMOOObjectiveAnalyzer:
     """Complete analyzer for extracting and validating MOO objectives from bigram preference data."""
     
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, target_key_pairs: Set[Tuple[str, str]] = None):
+        """Initialize with optional target key pairs for testing."""
         self.config = self._load_config(config_path)
         self.key_positions = self._define_keyboard_layout()
         self.left_hand_keys = set(self.key_positions.keys())
         
+        # Control which pairs to test
+        self.target_key_pairs = target_key_pairs
+                
         # English letter frequencies
         self.english_letter_frequencies = self._load_english_letter_frequencies()
 
@@ -73,7 +77,7 @@ class CompleteMOOObjectiveAnalyzer:
         # Store data for access in methods
         self.data = None
         self.validation_results = {}
-    
+
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load configuration from YAML file."""
         if config_path and os.path.exists(config_path):
@@ -88,8 +92,9 @@ class CompleteMOOObjectiveAnalyzer:
                 'bootstrap_iterations': 1000,
                 'confidence_level': 0.95,
                 'figure_dpi': 300,
-                'strategic_key_comparisons_only': True, 
-                'frequency_weighting_method': 'inverse_frequency'  # Standardized
+                'use_direct_key_preferences_only': True,  # Disable hybrid approach
+                'min_direct_comparisons_per_pair': 5,    # Minimum data required
+                'frequency_weighting_method': 'inverse_frequency'
             }
     
     def _load_english_letter_frequencies(self) -> Dict[str, float]:
@@ -222,7 +227,8 @@ class CompleteMOOObjectiveAnalyzer:
         
         # Run validation framework
         logger.info("=== RUNNING VALIDATION FRAMEWORK ===")
-        validation_results = self._validate_all_objectives(results)
+        validation_results = {}
+        validation_results['multiple_comparisons_correction'] = self._correct_multiple_comparisons(results)
         
         # Combine results
         enhanced_results = {
@@ -527,14 +533,16 @@ class CompleteMOOObjectiveAnalyzer:
                 total_count = len(pair_data)
                 rate = winner_count / total_count * 100
                 print(f"  {winner.upper()} > {loser.upper()}: {rate:.0f}% ({winner_count}/{total_count})")
-            
-            print(f"\n📊 This should give much more realistic preference rates than 100%!")
-            print(f"Expected: 50-80% preference rates with meaningful frequency bias (2-10%)")
-            
+                        
             return df
 
-    def _extract_direct_key_preferences(self) -> pd.DataFrame:
-        """Extract direct key preferences from repeated letter bigram comparisons (AA vs BB)."""
+    def _test_key_preference(self) -> Dict[str, Any]:
+        """
+        Test key preferences using ONLY direct repeated bigrams to get preference rates.
+        """
+        logger.info("Testing key preferences with direct repeated bigrams only...")
+
+        # Extract ONLY direct preferences (no hybrid/inferred)
         direct_instances = []
         
         for _, row in self.data.iterrows():
@@ -553,284 +561,201 @@ class CompleteMOOObjectiveAnalyzer:
                 if chosen_key in self.left_hand_keys and unchosen_key in self.left_hand_keys:
                     direct_instances.append({
                         'user_id': row['user_id'],
-                        'chosen_bigram': chosen,
-                        'unchosen_bigram': unchosen,
+                        'chosen_bigram': chosen,  # Keep original column names for compatibility
+                        'unchosen_bigram': unchosen,  # Keep original column names for compatibility
                         'chosen_key': chosen_key,
                         'unchosen_key': unchosen_key,
                         'chose_chosen_key': 1,  # By definition, chosen_key was preferred
+                        'key_pair': tuple(sorted([chosen_key, unchosen_key])),
                         'slider_value': row.get('sliderValue', 0),
                         'comparison_type': 'direct_repeated_bigram',
                         'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
                         'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
                     })
         
-        return pd.DataFrame(direct_instances)
-
-    def _extract_inferred_key_preferences(self, covered_pairs: Set[Tuple[str, str]]) -> pd.DataFrame:
-        """Extract key preferences from mixed bigrams for uncovered key pairs."""
-        inferred_instances = []
+        direct_df = pd.DataFrame(direct_instances)
         
-        for _, row in self.data.iterrows():
-            chosen = str(row['chosen_bigram']).lower()
-            unchosen = str(row['unchosen_bigram']).lower()
-            
-            if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
-                continue
-            
-            # Skip if either is a repeated letter (already handled by direct method)
-            chosen_is_repeated = len(chosen) == 2 and chosen[0] == chosen[1]
-            unchosen_is_repeated = len(unchosen) == 2 and unchosen[0] == unchosen[1]
-            if chosen_is_repeated or unchosen_is_repeated:
-                continue
-            
-            # Extract key comparisons, but only for uncovered pairs
-            chosen_keys = set(chosen)
-            unchosen_keys = set(unchosen)
-            shared_keys = chosen_keys & unchosen_keys
-            
-            # Shared key case (QA vs QW -> A vs W comparison)
-            if len(shared_keys) == 1:
-                chosen_unique = list(chosen_keys - shared_keys)[0]
-                unchosen_unique = list(unchosen_keys - shared_keys)[0]
-                key_pair = tuple(sorted([chosen_unique, unchosen_unique]))
-                
-                # Only add if this pair wasn't covered by direct method
-                if key_pair not in covered_pairs:
-                    inferred_instances.append({
-                        'user_id': row['user_id'],
-                        'chosen_bigram': chosen,
-                        'unchosen_bigram': unchosen,
-                        'chosen_key': chosen_unique,
-                        'unchosen_key': unchosen_unique,
-                        'chose_chosen_key': 1,  # chosen_key was in the preferred bigram
-                        'slider_value': row.get('sliderValue', 0),
-                        'comparison_type': 'inferred_shared_key',
-                        'shared_context': list(shared_keys)[0],
-                        'log_chosen_bigram_freq': np.log(self.english_bigram_frequencies.get(chosen, 1e-5) + 1e-6),
-                        'log_unchosen_bigram_freq': np.log(self.english_bigram_frequencies.get(unchosen, 1e-5) + 1e-6),
-                    })
+        if direct_df.empty:
+            return {'error': 'No direct key preference instances found'}
         
-        return pd.DataFrame(inferred_instances)
-
-    def _test_key_preference(self) -> Dict[str, Any]:
-        """Test key preferences using hybrid approach: direct repeated bigrams + inferred for gaps."""
-        logger.info("Testing key preferences with hybrid approach: direct + inferred...")
+        logger.info(f"Found {len(direct_df)} direct instances from {direct_df['user_id'].nunique()} users")
         
-        # Step 1: Extract direct preferences from repeated letter bigrams
-        direct_instances = self._extract_direct_key_preferences()
-        logger.info(f"Found {len(direct_instances)} direct key preference instances")
-        
-        # Debug: Show what repeated bigrams we have
-        if not direct_instances.empty:
-            repeated_bigrams = direct_instances.groupby(['chosen_bigram', 'unchosen_bigram']).size().reset_index(name='count')
-            logger.info(f"Repeated bigram comparisons found: {len(repeated_bigrams)}")
-            logger.info(f"Top repeated comparisons: {repeated_bigrams.nlargest(5, 'count')[['chosen_bigram', 'unchosen_bigram', 'count']].to_dict('records')}")
-        
-        if not direct_instances.empty:
-            # Analyze direct instances
-            direct_instances['key_pair'] = direct_instances.apply(
-                lambda row: tuple(sorted([row['chosen_key'], row['unchosen_key']])), axis=1
-            )
-            covered_pairs = set(direct_instances['key_pair'].unique())
-            logger.info(f"Direct method covers {len(covered_pairs)} key pairs: {sorted(covered_pairs)}")
-        else:
-            covered_pairs = set()
-            logger.warning("No direct repeated bigram comparisons found")
-        
-        # Step 2: Extract inferred preferences for uncovered pairs
-        inferred_instances = self._extract_inferred_key_preferences(covered_pairs)
-        logger.info(f"Found {len(inferred_instances)} inferred key preference instances for uncovered pairs")
-        
-        if not inferred_instances.empty:
-            inferred_instances['key_pair'] = inferred_instances.apply(
-                lambda row: tuple(sorted([row['chosen_key'], row['unchosen_key']])), axis=1
-            )
-        
-        # Step 3: Combine and analyze
-        all_instances = []
-        if not direct_instances.empty:
-            all_instances.append(direct_instances)
-        if not inferred_instances.empty:
-            all_instances.append(inferred_instances)
-        
-        if not all_instances:
-            return {'error': 'No key preference instances found'}
-        
-        combined_instances = pd.concat(all_instances, ignore_index=True)
-        logger.info(f"Combined: {len(combined_instances)} total instances from {combined_instances['user_id'].nunique()} users")
-        
-        # Apply frequency weighting to combined data
-        weighted_metrics = self.calculate_weighted_preference_metrics(combined_instances, 'chose_chosen_key')
+        # Apply frequency weighting (now works because we have the expected column names)
+        weighted_metrics = self.calculate_weighted_preference_metrics(direct_df, 'chose_chosen_key')
         weighted_data = weighted_metrics['weighted_data']
         
-        # Analyze each key pair
+        # Analyze each key pair with Wilson confidence intervals
         pairwise_results = {}
-        coverage_info = {}
         all_p_values = []
         
         for key_pair in weighted_data['key_pair'].unique():
             pair_data = weighted_data[weighted_data['key_pair'] == key_pair].copy()
             
-            if len(pair_data) < 5:  # Minimum threshold
+            if len(pair_data) < 1:  # Minimum threshold
                 continue
             
             key1, key2 = key_pair
             
-            # Determine which key was preferred (accounting for alphabetical sorting)
+            # Calculate win rate for key1
             pair_data['chose_key1'] = pair_data.apply(
                 lambda row: 1 if row['chosen_key'] == key1 else 0, axis=1
             )
             
-            # Weighted proportion test for this pair
-            pair_weighted_test = self._weighted_proportion_test(pair_data, 'chose_key1', 'frequency_weight')
+            n_total = len(pair_data)
+            n_key1_wins = pair_data['chose_key1'].sum()
+            win_rate = n_key1_wins / n_total
             
-            # Track coverage type
-            direct_count = len(pair_data[pair_data['comparison_type'] == 'direct_repeated_bigram'])
-            inferred_count = len(pair_data[pair_data['comparison_type'] == 'inferred_shared_key'])
+            # Weighted win rate using frequency weights
+            total_weight = pair_data['frequency_weight'].sum()
+            weighted_win_rate = (pair_data['chose_key1'] * pair_data['frequency_weight']).sum() / total_weight
             
-            coverage_info[key_pair] = {
-                'direct_instances': direct_count,
-                'inferred_instances': inferred_count,
-                'total_instances': len(pair_data),
-                'primary_method': 'direct' if direct_count > inferred_count else 'inferred'
-            }
+            # Wilson score confidence interval using effective sample size
+            from scipy import stats
+            z = stats.norm.ppf(0.975)  # 95% CI
+            
+            # Use weighted rate and effective sample size for CI
+            effective_n = (total_weight ** 2) / (pair_data['frequency_weight'] ** 2).sum()
+            p_hat = weighted_win_rate
+            n = effective_n
+            
+            if n > 0:
+                denominator = 1 + z**2 / n
+                center = (p_hat + z**2 / (2*n)) / denominator
+                margin = z * np.sqrt(p_hat * (1 - p_hat) / n + z**2 / (4*n**2)) / denominator
+                
+                ci_lower = max(0, center - margin)
+                ci_upper = min(1, center + margin)
+            else:
+                ci_lower = ci_upper = weighted_win_rate
+            
+            # Test against null hypothesis of no preference (50%) using weighted rate
+            if effective_n > 0:
+                z_score = (weighted_win_rate - 0.5) / np.sqrt(0.25 / effective_n)
+                p_value = 2 * (1 - stats.norm.cdf(abs(z_score)))
+            else:
+                p_value = 1.0
+            
+            # Determine winner based on weighted win rate
+            winner = key1 if weighted_win_rate > 0.5 else key2
+            winner_rate = max(weighted_win_rate, 1 - weighted_win_rate)
+            effect_size = abs(weighted_win_rate - 0.5)
+            
+            # Calculate frequency bias
+            frequency_bias = abs(weighted_win_rate - win_rate)
             
             pairwise_results[key_pair] = {
                 'key1': key1,
                 'key2': key2,
-                'n_comparisons': len(pair_data),
-                'direct_comparisons': direct_count,
-                'inferred_comparisons': inferred_count,
-                'primary_method': coverage_info[key_pair]['primary_method'],
-                'weighted_key1_rate': pair_weighted_test['weighted_preference_rate'],
-                'unweighted_key1_rate': pair_data['chose_key1'].mean(),
-                'frequency_bias': abs(pair_weighted_test['weighted_preference_rate'] - pair_data['chose_key1'].mean()),
-                'p_value': pair_weighted_test['p_value'],
-                'significant': pair_weighted_test['p_value'] < 0.05,
-                'effect_size': pair_weighted_test['effect_size'],
-                'winner': key1 if pair_weighted_test['weighted_preference_rate'] > 0.5 else key2,
-                'winner_rate': max(pair_weighted_test['weighted_preference_rate'], 
-                                 1.0 - pair_weighted_test['weighted_preference_rate']),
-                'interpretation': f"{key1.upper()} vs {key2.upper()}: {key1.upper() if pair_weighted_test['weighted_preference_rate'] > 0.5 else key2.upper()} preferred {max(pair_weighted_test['weighted_preference_rate'], 1.0 - pair_weighted_test['weighted_preference_rate']):.1%} ({coverage_info[key_pair]['primary_method']})"
+                'n_comparisons': n_total,
+                'effective_n': effective_n,
+                'key1_wins': n_key1_wins,
+                'unweighted_key1_rate': win_rate,
+                'weighted_key1_rate': weighted_win_rate,
+                'frequency_bias': frequency_bias,
+                'ci_lower': ci_lower,
+                'ci_upper': ci_upper,
+                'winner': winner,
+                'winner_rate': winner_rate,
+                'effect_size': effect_size,
+                'p_value': p_value,
+                'significant': p_value < 0.05,
+                'primary_method': 'direct',  # All are direct for this analysis
+                'interpretation': f"{winner.upper()} > {key2.upper() if winner == key1 else key1.upper()}: {winner_rate:.1%} preference (direct evidence)"
             }
             
-            all_p_values.append(pair_weighted_test['p_value'])
+            all_p_values.append(p_value)
         
-        # Calculate coverage statistics
-        total_possible_pairs = len(self.left_hand_keys) * (len(self.left_hand_keys) - 1) // 2
-        covered_pairs_count = len(pairwise_results)
-        direct_pairs = len([p for p in coverage_info.values() if p['primary_method'] == 'direct'])
-        inferred_pairs = len([p for p in coverage_info.values() if p['primary_method'] == 'inferred'])
-        
-        # Combine p-values for overall test
-        overall_test = None
-        if len(all_p_values) > 1:
-            try:
-                overall_stat, overall_p = combine_pvalues(all_p_values, method='fisher')
-                overall_test = {
-                    'combined_p_value': overall_p,
-                    'significant': overall_p < 0.05,
-                    'method': 'fisher_combined',
-                    'n_tests': len(all_p_values)
-                }
-            except Exception as e:
-                logger.warning(f"Failed to combine p-values: {e}")
-                overall_test = {
-                    'min_p_value': min(all_p_values) if all_p_values else 1.0,
-                    'significant': min(all_p_values) < 0.05 if all_p_values else False,
-                    'method': 'minimum_p',
-                    'n_tests': len(all_p_values)
-                }
-        
-        # Create individual key scores using hybrid data
+        # Calculate individual key scores using weighted win-loss method
         individual_scores, ranked_keys = self._calculate_frequency_weighted_key_scores(pairwise_results)
         
-        # Create significant pairs summary
-        significant_pairs = []
-        for pair, results in pairwise_results.items():
-            if results['significant']:
-                method_label = "direct" if results['primary_method'] == 'direct' else "inferred"
-                significant_pairs.append(f"{results['winner'].upper()} > {results['key2'].upper() if results['winner'] == results['key1'] else results['key1'].upper()} ({results['winner_rate']:.1%}, {method_label})")
-        
-        # Export pairwise results for detailed inspection
-        pairwise_export = []
-        for pair, results in pairwise_results.items():
-            pairwise_export.append({
-                'key_pair': f"{results['key1'].upper()}-{results['key2'].upper()}",
-                'key1': results['key1'].upper(),
-                'key2': results['key2'].upper(),
-                'method': results['primary_method'],
-                'direct_comparisons': results['direct_comparisons'],
-                'inferred_comparisons': results['inferred_comparisons'],
-                'total_comparisons': results['n_comparisons'],
-                'unweighted_key1_rate': results['unweighted_key1_rate'],
-                'weighted_key1_rate': results['weighted_key1_rate'],
-                'frequency_bias': results['frequency_bias'],
-                'winner': results['winner'].upper(),
-                'winner_preference_rate': results['winner_rate'],
-                'p_value': results['p_value'],
-                'significant': results['significant'],
-                'effect_size': results['effect_size']
-            })
-
         return {
-            'description': 'Hybrid key preferences: direct repeated bigrams + inferred for gaps',
-            'method': 'hybrid_direct_and_inferred',
-            'coverage_approach': 'hybrid',  # ADD THIS
-            'direct_pairs_found': direct_pairs,  # ADD THIS 
-            'inferred_pairs_added': inferred_pairs,  # ADD THIS
-            'n_instances': len(combined_instances),
-            'n_users': combined_instances['user_id'].nunique(),
-            'n_key_pairs': covered_pairs_count,
-            'total_possible_pairs': total_possible_pairs,
-            'coverage_rate': covered_pairs_count / total_possible_pairs,
-            'direct_method_pairs': direct_pairs,
-            'inferred_method_pairs': inferred_pairs,
-            'n_significant_pairs': len(significant_pairs),
-            'strategic_subset_used': False,  # Not using strategic subset in hybrid approach
+            'description': 'Key preferences from direct repeated bigrams only',
+            'method': 'direct_repeated_bigrams_only',
+            'n_instances': len(direct_df),
+            'n_users': direct_df['user_id'].nunique(),
+            'n_key_pairs': len(pairwise_results),
+            'n_significant_pairs': sum(1 for r in pairwise_results.values() if r['significant']),
             'pairwise_results': pairwise_results,
-            'pairwise_export': pairwise_export,
-            'coverage_breakdown': coverage_info,
-            'significant_preferences': significant_pairs,
-            'individual_key_scores': individual_scores,
-            'ranked_keys': ranked_keys,
             'frequency_bias_analysis': weighted_metrics,
-            'simple_test': overall_test,
-            'p_value': overall_test['combined_p_value'] if overall_test else 1.0,
-            'preference_rate': len(significant_pairs) / len(pairwise_results) if pairwise_results else 0.0,
-            'instances_data': combined_instances,
-            'normalization_range': (0.0, 1.0),
-            'interpretation': self._interpret_hybrid_results(pairwise_results, coverage_info, weighted_metrics),
-            'data_quality_improved': True
+            'key_preference_rates': True,
+            'p_values_for_correction': all_p_values,  # For FDR correction later
+            'instances_data': direct_df,  # For validation framework
+            'normalization_range': (0.0, 1.0),  # Preference rates are 0-100%
+            'p_value': min(all_p_values) if all_p_values else 1.0,
+            'preference_rate': weighted_metrics.get('weighted_preference_rate', 0.5),
+            'interpretation': self._interpret_key_results(pairwise_results, weighted_metrics)
         }
-    
-    def _interpret_hybrid_results(self, pairwise_results: Dict, coverage_info: Dict, weighted_metrics: Dict) -> str:
-        """Interpret hybrid key preference results."""
-        n_significant = sum(1 for r in pairwise_results.values() if r['significant'])
-        n_total = len(pairwise_results)
-        direct_pairs = len([c for c in coverage_info.values() if c['primary_method'] == 'direct'])
+
+    def _interpret_key_results(self, pairwise_results: Dict, weighted_metrics: Dict) -> str:
+        """Interpret key preference results with frequency bias info."""
+        if not pairwise_results:
+            return "No key preference data available"
         
+        rates = [r['winner_rate'] for r in pairwise_results.values()]
+        mean_rate = np.mean(rates)
+        min_rate = min(rates)
+        max_rate = max(rates)
+        
+        n_significant = sum(1 for r in pairwise_results.values() if r['significant'])
+        
+        # Check frequency bias impact
+        bias_magnitudes = [r.get('frequency_bias', 0) for r in pairwise_results.values()]
+        mean_bias = np.mean(bias_magnitudes)
         overall_bias = weighted_metrics.get('bias_magnitude', 0)
         
-        if n_significant == 0:
-            return f"No significant key preferences from {n_total} pairs ({direct_pairs} direct, {n_total-direct_pairs} inferred, bias: {overall_bias:.1%})"
+        interpretation = f"Key preferences: {n_significant}/{len(pairwise_results)} significant pairs, preference rates {min_rate:.1%}-{max_rate:.1%} (mean: {mean_rate:.1%})"
         
-        # Find strongest preferences
-        sorted_pairs = sorted(pairwise_results.items(), 
-                             key=lambda x: (x[1]['significant'], x[1]['winner_rate']), 
-                             reverse=True)
+        if mean_bias > 0.02 or overall_bias > 0.02:
+            interpretation += f", frequency bias: {mean_bias:.1%} (overall: {overall_bias:.1%})"
         
-        top_preferences = []
-        for pair, results in sorted_pairs[:3]:
-            if results['significant']:
-                method = "direct" if results['primary_method'] == 'direct' else "inferred"
-                winner = results['winner']
-                loser = results['key2'] if results['winner'] == results['key1'] else results['key1']
-                rate = results['winner_rate']
-                bias = results['frequency_bias']
-                top_preferences.append(f"{winner.upper()} > {loser.upper()} ({rate:.1%}, {method}, bias: {bias:.1%})")
+        return interpretation
+
+    def _calculate_frequency_weighted_key_scores(self, pairwise_results: Dict) -> Tuple[Dict[str, float], List[Tuple[str, float]]]:
+        """Calculate individual key scores using frequency-weighted win-loss method."""
+        key_scores = {}
+        all_keys = set()
         
-        return f"Significant preferences ({n_significant}/{n_total}, {direct_pairs} direct, overall bias: {overall_bias:.1%}): {'; '.join(top_preferences)}{'...' if n_significant > 3 else ''}"
+        # Collect all keys
+        for pair, results in pairwise_results.items():
+            if 'error' not in results:
+                all_keys.update([results['key1'], results['key2']])
+        
+        # Initialize scores
+        for key in all_keys:
+            key_scores[key] = {'wins': 0, 'losses': 0, 'total_weight': 0}
+        
+        # Calculate weighted wins/losses
+        for pair, results in pairwise_results.items():
+            if 'error' not in results:
+                key1, key2 = results['key1'], results['key2']
+                
+                # Use inverse of frequency bias as weight (higher weight for less biased comparisons)
+                comparison_weight = 1.0 / (1.0 + results.get('frequency_bias', 0))
+                
+                # Determine winner based on weighted preference rate
+                if results.get('weighted_key1_rate', results.get('unweighted_key1_rate', 0.5)) > 0.5:
+                    key_scores[key1]['wins'] += comparison_weight
+                    key_scores[key2]['losses'] += comparison_weight
+                else:
+                    key_scores[key2]['wins'] += comparison_weight
+                    key_scores[key1]['losses'] += comparison_weight
+                
+                key_scores[key1]['total_weight'] += comparison_weight
+                key_scores[key2]['total_weight'] += comparison_weight
+        
+        # Calculate final scores (win rate)
+        final_scores = {}
+        for key in all_keys:
+            total_games = key_scores[key]['wins'] + key_scores[key]['losses']
+            if total_games > 0:
+                final_scores[key] = key_scores[key]['wins'] / total_games
+            else:
+                final_scores[key] = 0.5  # Neutral if no data
+        
+        # Sort by score
+        ranked_keys = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+        
+        return final_scores, ranked_keys
 
     def _weighted_proportion_test(self, data: pd.DataFrame, outcome_var: str, weight_var: str) -> Dict[str, Any]:
             """Perform proportion test with frequency weights."""
@@ -864,53 +789,6 @@ class CompleteMOOObjectiveAnalyzer:
                 'effect_size': effect_size,
                 'significant': p_value < 0.05
             }
-
-    def _calculate_frequency_weighted_key_scores(self, pairwise_results: Dict) -> Tuple[Dict[str, float], List[Tuple[str, float]]]:
-            """Calculate individual key scores using frequency-weighted win-loss method."""
-            key_scores = {}
-            all_keys = set()
-            
-            # Collect all keys
-            for pair, results in pairwise_results.items():
-                if 'error' not in results:
-                    all_keys.update([results['key1'], results['key2']])
-            
-            # Initialize scores
-            for key in all_keys:
-                key_scores[key] = {'wins': 0, 'losses': 0, 'total_weight': 0}
-            
-            # Calculate weighted wins/losses
-            for pair, results in pairwise_results.items():
-                if 'error' not in results:
-                    key1, key2 = results['key1'], results['key2']
-                    
-                    # Use inverse of frequency bias as weight (higher weight for less biased comparisons)
-                    comparison_weight = 1.0 / (1.0 + results.get('frequency_bias', 0))
-                    
-                    # Determine winner based on weighted preference rate
-                    if results['weighted_key1_rate'] > 0.5:
-                        key_scores[key1]['wins'] += comparison_weight
-                        key_scores[key2]['losses'] += comparison_weight
-                    else:
-                        key_scores[key2]['wins'] += comparison_weight
-                        key_scores[key1]['losses'] += comparison_weight
-                    
-                    key_scores[key1]['total_weight'] += comparison_weight
-                    key_scores[key2]['total_weight'] += comparison_weight
-            
-            # Calculate final scores (win rate)
-            final_scores = {}
-            for key in all_keys:
-                total_games = key_scores[key]['wins'] + key_scores[key]['losses']
-                if total_games > 0:
-                    final_scores[key] = key_scores[key]['wins'] / total_games
-                else:
-                    final_scores[key] = 0.5  # Neutral if no data
-            
-            # Sort by score
-            ranked_keys = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
-            
-            return final_scores, ranked_keys
 
     # =========================================================================
     # OBJECTIVE 2: ROW SEPARATION WITH STANDARDIZED WEIGHTING
@@ -1525,553 +1403,158 @@ class CompleteMOOObjectiveAnalyzer:
     # =========================================================================
     # VALIDATION FRAMEWORK
     # =========================================================================
-    
-    def _validate_all_objectives(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Run comprehensive validation on all extracted objectives."""
-        validation_report = {
-            'multiple_comparisons_correction': self._correct_multiple_comparisons(results),
-            'effect_size_validation': self._validate_effect_sizes(results),
-            'frequency_bias_impact': self._analyze_frequency_bias_impact(results),
-            'cross_validation': self._cross_validate_models(results),
-            'confound_analysis': self._analyze_confounds(results),
-            'statistical_power': self._assess_statistical_power(results),
-            'overall_validity': self._assess_overall_validity(results)
-        }
         
-        return validation_report
-    
     def _correct_multiple_comparisons(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Apply multiple comparisons correction across ALL individual tests with detailed tracking."""
-        p_values = []
-        test_names = []
-        test_categories = {}  # Track which objective each test belongs to
-        
-        for obj_name, obj_results in results.items():
-            if 'error' not in obj_results:
-                
-                # For most objectives: extract the single main p-value
-                if obj_name != 'key_preference':
-                    p_val = None
-                    
-                    # Check simple_test first (most reliable)
-                    if 'simple_test' in obj_results and isinstance(obj_results['simple_test'], dict):
-                        p_val = obj_results['simple_test'].get('p_value')
-                    elif 'p_value' in obj_results:
-                        p_val = obj_results['p_value']
-                    
-                    if p_val is not None and isinstance(p_val, (int, float)) and not pd.isna(p_val):
-                        test_name = f"{obj_name}_main"
-                        p_values.append(p_val)
-                        test_names.append(test_name)
-                        test_categories[test_name] = obj_name
-                
-                # For key_preference: extract ALL pairwise p-values
-                else:
-                    if 'pairwise_results' in obj_results:
-                        pairwise_results = obj_results['pairwise_results']
-                        for key_pair, pair_results in pairwise_results.items():
-                            if isinstance(pair_results, dict) and 'p_value' in pair_results:
-                                p_val = pair_results['p_value']
-                                if isinstance(p_val, (int, float)) and not pd.isna(p_val):
-                                    
-                                    # Get winner and method info
-                                    winner = pair_results.get('winner', 'unknown')
-                                    loser = pair_results['key2'] if winner == pair_results['key1'] else pair_results['key1']
-                                    method = pair_results.get('primary_method', 'unknown')
-                                    winner_rate = pair_results.get('winner_rate', 0.5)
-                                    
-                                    # Create descriptive test name showing winner, method, and strength
-                                    if method == 'direct':
-                                        method_label = "direct_repeated_bigram"
-                                    elif method == 'inferred':
-                                        method_label = "inferred_shared_key" 
-                                    else:
-                                        method_label = "unknown_method"
-                                    
-                                    # Indicate strength of preference
-                                    if winner_rate > 0.8:
-                                        strength = "strong"
-                                    elif winner_rate > 0.65:
-                                        strength = "moderate"
-                                    else:
-                                        strength = "weak"
-                                    
-                                    # Clear test name: winner_beats_loser_method_strength
-                                    test_name = f"key_preference_{winner}_beats_{loser}_{method_label}_{strength}"
-                                    
-                                    p_values.append(p_val)
-                                    test_names.append(test_name)
-                                    test_categories[test_name] = 'key_preference'
-                                    
-        
-        if not p_values:
-            return {'error': 'No valid p-values found for correction'}
-        
-        # Apply corrections
-        corrections = {}
-        
-        try:
-            # Bonferroni correction
-            bonferroni_corrected = multipletests(p_values, method='bonferroni')[1]
-            corrections['bonferroni'] = dict(zip(test_names, bonferroni_corrected))
-            
-            # FDR correction  
-            fdr_corrected = multipletests(p_values, method='fdr_bh')[1]
-            corrections['fdr_bh'] = dict(zip(test_names, fdr_corrected))
-            
-            # Holm correction
-            holm_corrected = multipletests(p_values, method='holm')[1]
-            corrections['holm'] = dict(zip(test_names, holm_corrected))
-            
-        except Exception as e:
-            return {'error': f'Correction failed: {e}', 'p_values_found': len(p_values)}
-        
-        # Count significant results
-        original_significant = sum(1 for p in p_values if p < 0.05)
-        bonferroni_significant = sum(1 for p in bonferroni_corrected if p < 0.05)
-        fdr_significant = sum(1 for p in fdr_corrected if p < 0.05)
-        
-        # Count by objective for detailed reporting
-        objective_breakdown = {}
-        for test_name, orig_p, fdr_p in zip(test_names, p_values, fdr_corrected):
-            obj_name = test_categories[test_name]
-            if obj_name not in objective_breakdown:
-                objective_breakdown[obj_name] = {
-                    'total_tests': 0,
-                    'original_significant': 0,
-                    'fdr_significant': 0,
-                    'significant_tests': []
-                }
-            
-            objective_breakdown[obj_name]['total_tests'] += 1
-            if orig_p < 0.05:
-                objective_breakdown[obj_name]['original_significant'] += 1
-            if fdr_p < 0.05:
-                objective_breakdown[obj_name]['fdr_significant'] += 1
-                objective_breakdown[obj_name]['significant_tests'].append(test_name)
-        
-        # Create detailed significant tests summary
-        detailed_significant_tests = {}
-        for test_name, orig_p, fdr_p in zip(test_names, p_values, fdr_corrected):
-            if fdr_p < 0.05:
-                detailed_significant_tests[test_name] = {
-                    'original_p': orig_p,
-                    'fdr_corrected_p': fdr_p,
-                    'objective': test_categories[test_name]
-                }
-        
-        return {
-            'total_tests': len(p_values),
-            'original_significant': original_significant,
-            'bonferroni_significant': bonferroni_significant,
-            'fdr_significant': fdr_significant,
-            'fdr_bh_significant': fdr_significant,  # Alias for compatibility
-            'corrected_p_values': corrections,
-            'original_p_values': dict(zip(test_names, p_values)),
-            'test_categories': test_categories,
-            'objective_breakdown': objective_breakdown,
-            'detailed_significant_tests': detailed_significant_tests,
-            'recommendation': self._recommend_correction_method(
-                original_significant, bonferroni_significant, fdr_significant, len(p_values)
-            )
+        """
+        Apply Option C multiple testing correction:
+        - FDR correction within key preferences only
+        - Independent testing for other objectives (α = 0.05 each)
+        """
+        correction_summary = {
+            'approach': 'Option C - Independent objectives with within-key-preference correction',
+            'key_preference_correction': {},
+            'independent_objectives': {},
+            'total_significant_tests': 0
         }
-
-    def _recommend_correction_method(self, orig: int, bonf: int, fdr: int, total: int) -> str:
-        """Recommend appropriate multiple comparisons correction method."""
-        if total < 10:
-            return "With few tests, Bonferroni correction is appropriate"
-        elif orig > total * 0.5:  # More than half significant
-            return "High significance rate suggests FDR correction to control false discovery"
-        elif bonf == 0:
-            return "No significant results after Bonferroni - consider exploratory FDR approach"
-        else:
-            return "Use FDR correction for good balance of power and error control"
-
-    def _analyze_frequency_bias_impact(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze how frequency weighting affects conclusions across all objectives."""
-        bias_impact_analysis = {}
         
-        for obj_name, obj_results in results.items():
-            if 'error' not in obj_results and 'frequency_bias_analysis' in obj_results:
-                bias_data = obj_results['frequency_bias_analysis']
+        # Handle key preferences with FDR correction within domain
+        if 'key_preference' in results and 'pairwise_results' in results['key_preference']:
+            key_p_values = []
+            key_test_names = []
+            
+            for key_pair, pair_results in results['key_preference']['pairwise_results'].items():
+                if isinstance(pair_results, dict) and 'p_value' in pair_results:
+                    p_val = pair_results['p_value']
+                    if isinstance(p_val, (int, float)) and not pd.isna(p_val):
+                        key_p_values.append(p_val)
+                        key_test_names.append(f"key_preference_{key_pair}")
+            
+            if key_p_values:
+                try:
+                    # Apply FDR correction ONLY within key preferences
+                    rejected, fdr_corrected, _, _ = multipletests(key_p_values, method='fdr_bh', alpha=0.05)
+                    
+                    key_correction_results = {}
+                    for i, test_name in enumerate(key_test_names):
+                        key_correction_results[test_name] = {
+                            'original_p': key_p_values[i],
+                            'fdr_corrected_p': fdr_corrected[i],
+                            'significant_after_correction': rejected[i]
+                        }
+                    
+                    correction_summary['key_preference_correction'] = {
+                        'method': 'FDR_within_key_preferences_only',
+                        'total_key_tests': len(key_p_values),
+                        'original_significant': sum(1 for p in key_p_values if p < 0.05),
+                        'fdr_significant': sum(rejected),
+                        'corrected_tests': key_correction_results
+                    }
+                    correction_summary['total_significant_tests'] += sum(rejected)
+                    
+                except Exception as e:
+                    correction_summary['key_preference_correction']['error'] = str(e)
+        
+        # Handle other objectives as independent tests (no correction between them)
+        independent_objectives = ['row_separation', 'column_separation', 'column_4_vs_5']
+        
+        for obj_name in independent_objectives:
+            if obj_name in results and 'error' not in results[obj_name]:
                 
-                unweighted = bias_data.get('unweighted_preference_rate', 0.5)
-                weighted = bias_data.get('weighted_preference_rate', 0.5)
-                bias_magnitude = abs(weighted - unweighted)
+                # Extract main p-value for this objective
+                p_val = None
+                if 'simple_test' in results[obj_name] and isinstance(results[obj_name]['simple_test'], dict):
+                    p_val = results[obj_name]['simple_test'].get('p_value')
+                elif 'p_value' in results[obj_name]:
+                    p_val = results[obj_name]['p_value']
                 
-                # Calculate rank order change (simplified)
-                direction_change = (unweighted > 0.5) != (weighted > 0.5)
-                
-                freq_stats = bias_data.get('frequency_stats', {})
-                
-                bias_impact_analysis[obj_name] = {
-                    'unweighted_rate': unweighted,
-                    'weighted_rate': weighted,
-                    'bias_magnitude': bias_magnitude,
-                    'direction_changed': direction_change,
-                    'frequency_ratio': freq_stats.get('frequency_ratio', 1.0),
-                    'bias_severity': freq_stats.get('bias_severity', 'unknown'),
-                    'practical_impact': self._assess_practical_bias_impact(bias_magnitude, direction_change)
-                }
+                if p_val is not None and isinstance(p_val, (int, float)) and not pd.isna(p_val):
+                    significant = p_val < 0.05  # Independent test, full α = 0.05
+                    
+                    correction_summary['independent_objectives'][obj_name] = {
+                        'method': 'Independent test (no correction)',
+                        'p_value': p_val,
+                        'alpha_used': 0.05,
+                        'significant': significant,
+                        'interpretation': f"{obj_name}: p={p_val:.2e}, {'significant' if significant else 'not significant'} at α=0.05"
+                    }
+                    
+                    if significant:
+                        correction_summary['total_significant_tests'] += 1
         
         # Overall summary
-        high_bias_objectives = sum(1 for analysis in bias_impact_analysis.values() 
-                                 if analysis['bias_magnitude'] > 0.05)
-        direction_changed_objectives = sum(1 for analysis in bias_impact_analysis.values() 
-                                         if analysis['direction_changed'])
-        
-        return {
-            'individual_analysis': bias_impact_analysis,
-            'high_bias_objectives': high_bias_objectives,
-            'direction_changed_objectives': direction_changed_objectives,
-            'total_objectives_analyzed': len(bias_impact_analysis),
-            'overall_bias_severity': 'high' if high_bias_objectives > 1 else 'moderate' if high_bias_objectives > 0 else 'low'
-        }
-
-    def _assess_practical_bias_impact(self, bias_magnitude: float, direction_changed: bool) -> str:
-        """Assess practical impact of frequency bias."""
-        if direction_changed:
-            return "critical - changes conclusion direction"
-        elif bias_magnitude > 0.10:
-            return "high - substantially changes effect size"
-        elif bias_magnitude > 0.05:
-            return "moderate - notable effect size change"
-        else:
-            return "low - minimal practical impact"
-    
-    def _validate_effect_sizes(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Validate that effect sizes are meaningful and not just statistically significant."""
-        effect_size_analysis = {}
-        
-        for obj_name, obj_results in results.items():
-            if 'error' not in obj_results:
-                effect_sizes = self._extract_effect_sizes(obj_results)
-                
-                if effect_sizes:
-                    effect_size_analysis[obj_name] = {
-                        'coefficients': effect_sizes,
-                        'mean_effect': np.mean([abs(es) for es in effect_sizes]),
-                        'max_effect': max([abs(es) for es in effect_sizes]),
-                        'interpretation': self._interpret_effect_sizes(effect_sizes),
-                        'practical_significance': self._assess_practical_significance(effect_sizes, obj_name)
-                    }
-        
-        return effect_size_analysis
-    
-    def _extract_effect_sizes(self, obj_results: Dict[str, Any]) -> List[float]:
-        """Extract effect sizes with robust error handling."""
-        effect_sizes = []
-        
-        # For instance-level analysis with frequency weighting, effect size is deviation from neutral (0.5)
-        if 'simple_test' in obj_results and isinstance(obj_results['simple_test'], dict):
-            pref_rate = obj_results['simple_test'].get('weighted_preference_rate')
-            if pref_rate is None:  # Fallback to non-weighted
-                pref_rate = obj_results['simple_test'].get('preference_rate')
-            if isinstance(pref_rate, (int, float)) and not pd.isna(pref_rate):
-                effect_sizes.append(abs(pref_rate - 0.5))
-        
-        # For key preference, extract effect sizes from pairwise comparisons
-        elif 'pairwise_results' in obj_results:
-            for pair_results in obj_results['pairwise_results'].values():
-                if isinstance(pair_results, dict) and 'effect_size' in pair_results:
-                    es = pair_results['effect_size']
-                    if isinstance(es, (int, float)) and not pd.isna(es):
-                        effect_sizes.append(abs(es))
-        
-        # Fallback to model coefficient if available
-        elif 'model_results' in obj_results and isinstance(obj_results['model_results'], dict):
-            coeff = obj_results['model_results'].get('coefficient')
-            if isinstance(coeff, (int, float)) and not pd.isna(coeff):
-                effect_sizes.append(abs(coeff))
-        
-        return effect_sizes
-    
-    def _interpret_effect_sizes(self, effect_sizes: List[float]) -> str:
-        """Interpret effect sizes using Cohen's conventions (adapted for proportions)."""
-        mean_abs_effect = np.mean([abs(es) for es in effect_sizes])
-        
-        if mean_abs_effect < 0.02:
-            return "negligible effect"
-        elif mean_abs_effect < 0.05:
-            return "small effect"
-        elif mean_abs_effect < 0.10:
-            return "medium effect"
-        else:
-            return "large effect"
-    
-    def _assess_practical_significance(self, effect_sizes: List[float], obj_name: str) -> str:
-        """Assess whether effect sizes are practically meaningful for keyboard optimization."""
-        mean_abs_effect = np.mean([abs(es) for es in effect_sizes])
-        
-        # Context-dependent thresholds
-        thresholds = {
-            'key_preference': 0.05,    
-            'row_separation': 0.05,   
-            'column_separation': 0.05,
-            'column_4_vs_5': 0.08  # Slightly higher threshold for column preference
+        correction_summary['overall_summary'] = {
+            'total_significant_across_all_objectives': correction_summary['total_significant_tests'],
+            'key_preference_fdr_significant': correction_summary['key_preference_correction'].get('fdr_significant', 0),
+            'independent_objectives_significant': sum(1 for obj in correction_summary['independent_objectives'].values() if obj['significant']),
+            'recommendation': 'Use FDR-corrected key preferences + uncorrected objective results for MOO'
         }
         
-        threshold = thresholds.get(obj_name, 0.03)
-        
-        if mean_abs_effect >= threshold:
-            return f"Practically significant (≥{threshold:.1%} threshold)"
-        else:
-            return f"Below practical significance threshold ({threshold:.1%})"
-    
-    def _cross_validate_models(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Cross-validate the statistical models to assess generalizability."""
-        cv_results = {}
-        
-        for obj_name, obj_results in results.items():
-            if 'error' not in obj_results and 'instances_data' in obj_results:
-                # Use the original instances data for CV
-                instances_data = obj_results['instances_data']
-                if len(instances_data) >= 50:  # Minimum for meaningful CV
-                    cv_score = self._perform_cross_validation_on_instances(instances_data, obj_name)
-                    cv_results[obj_name] = cv_score
-        
-        return cv_results
-    
-    def _perform_cross_validation_on_instances(self, instances_data: pd.DataFrame, obj_name: str) -> Dict[str, Any]:
-        """Perform k-fold cross-validation on instance-level data."""
-        try:
-            # Determine outcome variable based on objective
-            outcome_mapping = {
-                'key_preference': 'chose_key',
-                'row_separation': 'chose_smaller_separation',
-                'column_separation': 'chose_adjacent',
-                'column_4_vs_5': 'chose_column_4'
-            }
-            
-            outcome_var = outcome_mapping.get(obj_name)
-            if outcome_var not in instances_data.columns:
-                return {'error': f'Outcome variable {outcome_var} not found for {obj_name}'}
-            
-            # Prepare data
-            control_cols = [col for col in instances_data.columns if col.startswith('log_')]
-            if len(control_cols) == 0:
-                return {'error': 'No control variables available for cross-validation'}
-            
-            X = instances_data[control_cols].fillna(0)
-            y = instances_data[outcome_var]
-            
-            # Perform 5-fold cross-validation
-            cv = KFold(n_splits=min(5, len(instances_data) // 10), shuffle=True, random_state=42)
-            
-            # Use simple linear regression for CV (easier to interpret)
-            model = LinearRegression()
-            cv_scores = cross_val_score(model, X, y, cv=cv, scoring='r2')
-            
-            return {
-                'mean_r2': np.mean(cv_scores),
-                'std_r2': np.std(cv_scores),
-                'min_r2': np.min(cv_scores),
-                'max_r2': np.max(cv_scores),
-                'stability': 'high' if np.std(cv_scores) < 0.1 else 'medium' if np.std(cv_scores) < 0.2 else 'low',
-                'n_folds': len(cv_scores),
-                'n_instances': len(instances_data)
-            }
-            
-        except Exception as e:
-            return {'error': f'Cross-validation failed: {str(e)}'}
-        
-    def _analyze_confounds(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze potential confounding variables and their control."""
-        confound_analysis = {}
-        
-        for obj_name, obj_results in results.items():
-            if 'error' not in obj_results and 'instances_data' in obj_results:
-                confounds = self._assess_confound_control(obj_results['instances_data'])
-                confound_analysis[obj_name] = confounds
-        
-        return confound_analysis
-    
-    def _assess_confound_control(self, instances_data: pd.DataFrame) -> Dict[str, Any]:
-        """Assess how well frequency confounds are controlled."""
-        control_cols = [col for col in instances_data.columns if col.startswith('log_')]
-        
-        if not control_cols:
-            return {'error': 'No frequency controls found'}
-        
-        # For instance-level data, we need to create a predictor variable
-        # This is simplified - in practice, you'd want the actual predictor used in each test
-        try:
-            # Create a simple predictor (preference outcome)
-            outcome_vars = ['chose_key', 'chose_smaller_separation', 'chose_adjacent', 'chose_column_4']
-            predictor_col = None
-            for var in outcome_vars:
-                if var in instances_data.columns:
-                    predictor_col = var
-                    break
-            
-            if predictor_col is None:
-                return {'error': 'No suitable predictor variable found'}
-            
-            # Check correlation between predictor and controls
-            predictor_control_corrs = {}
-            
-            for control in control_cols:
-                if control in instances_data.columns:
-                    corr = instances_data[predictor_col].corr(instances_data[control])
-                    if not pd.isna(corr):
-                        predictor_control_corrs[control] = corr
-            
-            if not predictor_control_corrs:
-                return {'error': 'No valid correlations calculated'}
-            
-            max_corr = max([abs(corr) for corr in predictor_control_corrs.values()])
-            
-            return {
-                'predictor_control_correlations': predictor_control_corrs,
-                'max_correlation_with_controls': max_corr,
-                'confound_risk': 'high' if max_corr > 0.7 else 'medium' if max_corr > 0.4 else 'low',
-                'control_adequacy': 'good' if max_corr < 0.4 else 'moderate' if max_corr < 0.7 else 'poor'
-            }
-        
-        except Exception as e:
-            return {'error': f'Confound analysis failed: {str(e)}'}
-    
-    def _assess_statistical_power(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Assess statistical power of the tests performed."""
-        power_analysis = {}
-        
-        for obj_name, obj_results in results.items():
-            if 'error' not in obj_results:
-                power_assessment = self._calculate_power_metrics(obj_results)
-                power_analysis[obj_name] = power_assessment
-        
-        return power_analysis
-    
-    def _calculate_power_metrics(self, obj_results: Dict[str, Any]) -> Dict[str, Any]:
-        """Calculate power-related metrics for an objective."""
-        n_instances = obj_results.get('n_instances', 0)
-        n_users = obj_results.get('n_users', 0)
-        
-        if n_instances == 0:
-            return {'error': 'No sample size information available'}
-        
-        # Simple power assessment based on sample size
-        if n_instances < 50:
-            power_level = 'low'
-            power_comment = 'Sample size may be insufficient for reliable detection of small effects'
-        elif n_instances < 200:
-            power_level = 'medium'
-            power_comment = 'Adequate power for medium to large effects'
-        else:
-            power_level = 'high'
-            power_comment = 'Good power for detecting small to medium effects'
-        
-        # Consider number of users for nested data structure
-        effective_power = power_level
-        if n_users > 0 and n_instances / n_users > 10:
-            # High instances per user might inflate power estimates
-            power_comment += ' (note: multiple instances per user may reduce effective power)'
-        
-        return {
-            'n_instances': n_instances,
-            'n_users': n_users,
-            'instances_per_user': n_instances / max(n_users, 1),
-            'power_level': effective_power,
-            'power_comment': power_comment,
-            'recommended_minimum': 100  # For psychology/HCI research
-        }
-    
-    def _assess_overall_validity(self, results: Dict[str, Any]) -> Dict[str, Any]:
-        """Provide overall validity assessment with significance detection."""
-        successful_objectives = sum(1 for r in results.values() if 'error' not in r)
-        total_objectives = len(results)
-        
-        # Count objectives with significant results
-        significant_objectives = 0
-        objective_significance = {}
-        
-        for obj_name, obj_results in results.items():
-            if 'error' not in obj_results:
-                is_significant = False
-                
-                # Check simple_test p-value (most reliable for frequency-weighted tests)
-                if 'simple_test' in obj_results and isinstance(obj_results['simple_test'], dict):
-                    p_val = obj_results['simple_test'].get('p_value')
-                    if p_val is not None and p_val < 0.05:
-                        is_significant = True
-                # Fallback to direct p-value
-                elif obj_results.get('p_value', 1.0) < 0.05:
-                    is_significant = True
-                
-                objective_significance[obj_name] = is_significant
-                if is_significant:
-                    significant_objectives += 1
-        
-        # Overall assessment
-        success_rate = successful_objectives / total_objectives if total_objectives > 0 else 0
-        significance_rate = significant_objectives / successful_objectives if successful_objectives > 0 else 0
-        
-        if success_rate >= 0.8 and significance_rate >= 0.5:
-            overall_validity = 'high'
-            validity_comment = 'Strong evidence for multiple typing preference objectives'
-        elif success_rate >= 0.6 and significance_rate >= 0.3:
-            overall_validity = 'medium'
-            validity_comment = 'Moderate evidence for typing preference objectives'
-        else:
-            overall_validity = 'low'
-            validity_comment = 'Limited evidence for typing preference objectives'
-        
-        # Generate recommendations
-        recommendations = []
-        if success_rate < 0.8:
-            recommendations.append('Consider data quality improvements or alternative objective definitions')
-        if significance_rate < 0.3:
-            recommendations.append('Low significance rate suggests weak effects or insufficient power')
-        
-        recommendations.append('Apply FDR correction for multiple comparisons')
-        recommendations.append('Focus on objectives with large effect sizes for practical application')
-        
-        return {
-            'successful_objectives': successful_objectives,
-            'total_objectives': total_objectives,
-            'significant_objectives': significant_objectives,
-            'objective_significance': objective_significance,
-            'success_rate': success_rate,
-            'significance_rate': significance_rate,
-            'overall_validity': overall_validity,
-            'validity_comment': validity_comment,
-            'recommendations': recommendations
-        }
-
+        return correction_summary
+                                        
     # =========================================================================
     # REPORT GENERATION
     # =========================================================================
 
-    def _generate_summary(self, results: Dict[str, Any], 
-                                validation: Dict[str, Any]) -> Dict[str, Any]:
-        """Generate summary with validation insights and frequency bias impact."""
+    def _generate_summary(self, results: Dict[str, Any], validation: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate summary with Option C correction info and all expected fields."""
         
-        # Get multiple comparisons data safely
         mc_data = validation.get('multiple_comparisons_correction', {})
-        fdr_significant = mc_data.get('fdr_significant', mc_data.get('fdr_bh_significant', 0))
         
-        # Get frequency bias impact
-        bias_data = validation.get('frequency_bias_impact', {})
-        high_bias_objectives = bias_data.get('high_bias_objectives', 0)
-        direction_changed = bias_data.get('direction_changed_objectives', 0)
+        # Count significant results under Option C
+        key_pref_significant = mc_data.get('key_preference_correction', {}).get('fdr_significant', 0)
+        independent_significant = mc_data.get('overall_summary', {}).get('independent_objectives_significant', 0)
+        total_significant = mc_data.get('total_significant_tests', key_pref_significant + independent_significant)
         
-        # Get overall validity
-        validity_data = validation.get('overall_validity', {})
+        # Calculate total tests performed
+        key_pref_tests = mc_data.get('key_preference_correction', {}).get('total_key_tests', 0)
+        independent_tests = len([obj for obj in ['row_separation', 'column_separation', 'column_4_vs_5'] 
+                            if obj in results and 'error' not in results[obj]])
+        total_tests = key_pref_tests + independent_tests
         
+        # Calculate overall validity assessment
+        objectives_extracted = len([r for r in results.values() if 'error' not in r])
+        extraction_rate = objectives_extracted / 4  # 4 total possible objectives
+        significance_rate = total_significant / total_tests if total_tests > 0 else 0
+        
+        if extraction_rate >= 0.75 and significance_rate >= 0.5:
+            overall_validity = 'high'
+        elif extraction_rate >= 0.5 and significance_rate >= 0.3:
+            overall_validity = 'medium'  
+        else:
+            overall_validity = 'low'
+        
+        # Calculate frequency bias impact summary
+        frequency_bias_impact = {
+            'high_bias_objectives': 0,  # Count objectives with >5% bias
+            'overall_severity': 'low'   # Default to low
+        }
+        
+        # Check each objective for frequency bias
+        for obj_name, obj_results in results.items():
+            if 'error' not in obj_results and 'frequency_bias_analysis' in obj_results:
+                bias_magnitude = obj_results['frequency_bias_analysis'].get('bias_magnitude', 0)
+                if bias_magnitude > 0.05:  # >5% bias threshold
+                    frequency_bias_impact['high_bias_objectives'] += 1
+        
+        if frequency_bias_impact['high_bias_objectives'] > 1:
+            frequency_bias_impact['overall_severity'] = 'high'
+        elif frequency_bias_impact['high_bias_objectives'] > 0:
+            frequency_bias_impact['overall_severity'] = 'moderate'
+
         return {
-            'objectives_extracted': len([r for r in results.values() if 'error' not in r]),
-            'objectives_significant': validity_data.get('significant_objectives', 0),
-            'fdr_corrected_significant': fdr_significant,
-            'total_tests_performed': mc_data.get('total_tests', len(results)),
-            'overall_validity': validity_data.get('overall_validity', 'unknown'),
-            'validity_comment': validity_data.get('validity_comment', ''),
-            'frequency_bias_impact': {
-                'high_bias_objectives': high_bias_objectives,
-                'direction_changed_objectives': direction_changed,
-                'overall_severity': bias_data.get('overall_bias_severity', 'unknown')
-            },
-            'recommendations': validity_data.get('recommendations', []),
-            'strategic_key_subset_used': results.get('key_preference', {}).get('strategic_subset_used', False)
+            'objectives_extracted': objectives_extracted,
+            'objectives_significant': total_significant,
+            'fdr_corrected_significant': total_significant,
+            'total_tests_performed': total_tests,
+            'overall_validity': overall_validity,
+            'strategic_key_subset_used': False,
+            'frequency_bias_impact': frequency_bias_impact,  # ADD THIS - frequency bias assessment
+            'correction_approach': 'Option C - Independent objectives',
+            'key_preference_fdr_significant': key_pref_significant,
+            'independent_objectives_significant': independent_significant,
+            'total_significant_tests': total_significant,
+            'key_preferences': results.get('key_preference', {}).get('key_preference_rates', False),
+            'recommendation': 'Use FDR-corrected key preferences + uncorrected movement objectives for MOO'
         }
 
     def _generate_comprehensive_report(self, enhanced_results: Dict[str, Any], output_folder: str) -> None:
@@ -2549,30 +2032,45 @@ class CompleteMOOObjectiveAnalyzer:
         summary_df = pd.DataFrame(summary_data)
         summary_df = summary_df.sort_values(['Significant', 'Winner_Preference_Rate'], ascending=[False, False])
         
-        summary_path = os.path.join(output_folder, 'key_preference_bigram_extracted.csv')
+        summary_path = os.path.join(output_folder, 'key_preferences.csv')
         summary_df.to_csv(summary_path, index=False)
         logger.info(f"Clear key preference summary saved to {summary_path}")
-        
-    def _save_key_pairwise_results(self, key_pref_results: Dict[str, Any], output_folder: str) -> None:
-        """Save complete pairwise key comparison results with frequency bias info."""
-        if 'pairwise_export' not in key_pref_results:
-            return
-        
-        pairwise_df = pd.DataFrame(key_pref_results['pairwise_export'])
-        
-        # Sort by significance and effect size
-        pairwise_df = pairwise_df.sort_values(['significant', 'effect_size'], ascending=[False, False])
-        
-        csv_path = os.path.join(output_folder, 'frequency_corrected_key_pairwise_comparisons.csv')
-        pairwise_df.to_csv(csv_path, index=False)
-        logger.info(f"Frequency-corrected pairwise key comparisons saved to {csv_path}")
-        
-        # Create summary of significant preferences with bias info
-        significant_df = pairwise_df[pairwise_df['significant'] == True]
-        if len(significant_df) > 0:
-            summary_path = os.path.join(output_folder, 'frequency_corrected_significant_key_preferences.csv')
-            significant_df.to_csv(summary_path, index=False)
-            logger.info(f"Frequency-corrected significant key preferences saved to {summary_path}")
+
+def generate_target_pairs(strategy: str, keys: List[str] = None) -> Set[Tuple[str, str]]:
+    """
+    Generate sets of key pairs for testing based on different strategies.
+    
+    Args:
+        strategy: 'all' or 'selected'
+        keys: List of keys to consider (default: all left-hand keys)
+    
+    Returns:
+        Set of (key1, key2) tuples
+    """
+    from itertools import combinations
+    
+    if keys is None:
+        keys = ['q', 'w', 'e', 'r', 'a', 's', 'd', 'f', 'z', 'x', 'c', 'v']
+    
+    if strategy == 'all':
+        return set(combinations(keys, 2))
+    
+    elif strategy == 'selected':
+        minimal_pairs = {
+            ('f','d'), ('d','s'), ('s','a'), # Home row
+            ('r','e'), ('w','q'), # Top row
+            ('c','x'), ('x','z'), ('c','z'), # Bottom row
+            ('f','r'), ('d','e'), ('s','w'), ('a','q'), # Reach up
+            ('d','r'), ('s','r'), ('s','e'), ('a','e'), ('a','w'), ('f','e'), # Reach up-angle
+            ('f','v'), # Reach down
+            ('d','v'), ('s','v'), ('a','c'), # Reach down-angle
+            ('r','v'), ('w','x'), ('q','z'), ('e','v'), ('w','c'), ('q','c'), ('q','x'), ('z','w'), # Hurdle
+        }
+        return {pair for pair in minimal_pairs if pair[0] in keys and pair[1] in keys}
+    
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+    
 
 def main():
     """Main function for command-line usage."""
@@ -2595,7 +2093,8 @@ def main():
     
     try:
         # Run complete MOO objectives analysis
-        analyzer = CompleteMOOObjectiveAnalyzer(args.config)
+        target_pairs = generate_target_pairs('selected')
+        analyzer = CompleteMOOObjectiveAnalyzer(target_key_pairs=target_pairs)
         results = analyzer.analyze_moo_objectives(args.data, args.output)
         
         logger.info("Complete MOO objectives analysis finished successfully!")
