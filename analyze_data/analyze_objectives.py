@@ -1089,21 +1089,23 @@ class MOOObjectiveAnalyzer:
         """Create visualization plots."""
         
         # Key preferences visualization
-        if 'bradley_terry_preferences' in results:
-            self._create_key_preference_plot(results['bradley_terry_preferences'], output_folder)
-        
+        if 'same_letter_preferences' in results and results['same_letter_preferences'].get('status') != 'insufficient_data':
+            self._create_key_preference_plot(results['same_letter_preferences'], output_folder)
+                    
         # Pairwise comparisons visualization  
         if 'pairwise_preferences' in results:
             self._create_pairwise_plot(results['pairwise_preferences'], output_folder)
         
         logger.info(f"Visualizations saved to {output_folder}")
 
-    def _create_key_preference_plot(self, bt_results: Dict[str, Any], output_folder: str) -> None:
+    def _create_key_preference_plot(self, same_letter_results: Dict[str, Any], output_folder: str) -> None:
         """Create key preference visualization."""
         
-        if 'weighted_rankings' not in bt_results:
+        if 'rankings' not in same_letter_results:
             return
         
+        rankings = same_letter_results['rankings']
+
         rankings = bt_results['weighted_rankings']
         cis = bt_results.get('confidence_intervals', {})
         
