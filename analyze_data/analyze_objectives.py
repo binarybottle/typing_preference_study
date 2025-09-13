@@ -1106,8 +1106,7 @@ class MOOObjectiveAnalyzer:
         
         rankings = same_letter_results['rankings']
 
-        rankings = bt_results['weighted_rankings']
-        cis = bt_results.get('confidence_intervals', {})
+        cis = same_letter_results.get('confidence_intervals', {})
         
         fig, ax = plt.subplots(figsize=(12, 10))
         
