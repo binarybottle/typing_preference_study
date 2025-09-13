@@ -23,7 +23,10 @@ MOO Objectives Analyzed:
 4. Column 4 vs 5: Index finger column preferences
 
 Usage:
-    python3 moo_objectives_analysis.py --data data.csv --output results/
+    poetry run python3 analyze_objectives.py --data output/nonProlific/process_data/tables/processed_consistent_choices.csv \
+        --output output/nonProlific/analyze_objectives
+    poetry run python3 analyze_objectives.py --data output/Prolific/process_data/tables/processed_consistent_choices.csv \
+        --output output/Prolific/analyze_objectives
 """
 
 import os
@@ -861,7 +864,7 @@ class MOOObjectiveAnalyzer:
                 'n_instances': 0,
                 'interpretation': 'No column 4 vs 5 comparisons found in data'
             }
-
+        
         logger.info(f"Found {len(instances_df)} column 4 vs 5 instances")
         
         # Analysis
@@ -911,17 +914,23 @@ class MOOObjectiveAnalyzer:
         return pd.DataFrame(instances)
 
     def _classify_column_4_vs_5(self, bigram: str) -> str:
-        """Classify bigram as column 4, column 5, or neither."""
+        """Classify bigram as column 4, column 5, or neither based on key presence."""
         col4_keys = {'r', 'f', 'v'}
         col5_keys = self._get_column_5_keys()
         
         bigram_keys = set(bigram)
         
-        if bigram_keys.issubset(col4_keys):
+        # Check which column keys are present
+        has_col4 = bool(bigram_keys.intersection(col4_keys))
+        has_col5 = bool(bigram_keys.intersection(col5_keys))
+        
+        # Classify based on presence, excluding mixed cases
+        if has_col4 and not has_col5:
             return 'column_4'
-        elif bigram_keys.issubset(col5_keys):
+        elif has_col5 and not has_col4:
             return 'column_5'
         else:
+            # Neither (no column 4/5 keys) or mixed (contains both)
             return 'neither'
 
     # =========================================================================
@@ -1158,7 +1167,173 @@ class MOOObjectiveAnalyzer:
         summary_df = pd.DataFrame(summary_data)
         summary_df.to_csv(os.path.join(output_folder, 'moo_objectives_summary.csv'), index=False)
         
+        # Save detailed key preference comparison tables
+        self._save_key_preference_tables(enhanced_results['objectives'], output_folder)
+        
         logger.info(f"Results saved to {output_folder}")
+    
+    def _save_key_preference_tables(self, results: Dict[str, Any], output_folder: str) -> None:
+        """Save detailed CSV tables for all key preference methods."""
+        
+        # 1. Bradley-Terry Rankings (both weighted and unweighted)
+        if 'bradley_terry_preferences' in results and results['bradley_terry_preferences'].get('status') != 'insufficient_data':
+            bt_results = results['bradley_terry_preferences']
+            
+            # Combine weighted and unweighted rankings
+            bt_data = []
+            weighted_rankings = {key: (rank, strength) for rank, (key, strength) in enumerate(bt_results.get('weighted_rankings', []))}
+            unweighted_rankings = {key: (rank, strength) for rank, (key, strength) in enumerate(bt_results.get('unweighted_rankings', []))}
+            cis = bt_results.get('confidence_intervals', {})
+            
+            all_keys = set(weighted_rankings.keys()) | set(unweighted_rankings.keys())
+            for key in sorted(all_keys):
+                pos = self.key_positions.get(key, KeyPosition('', 0, 0, 0))
+                
+                w_rank, w_strength = weighted_rankings.get(key, (np.nan, np.nan))
+                uw_rank, uw_strength = unweighted_rankings.get(key, (np.nan, np.nan))
+                ci_lower, ci_upper = cis.get(key, (np.nan, np.nan))
+                
+                bt_data.append({
+                    'Key': key.upper(),
+                    'Finger': pos.finger,
+                    'Row': pos.row,
+                    'Column': pos.column,
+                    'Weighted_Rank': w_rank + 1 if not np.isnan(w_rank) else np.nan,
+                    'Weighted_Strength': w_strength,
+                    'Unweighted_Rank': uw_rank + 1 if not np.isnan(uw_rank) else np.nan,
+                    'Unweighted_Strength': uw_strength,
+                    'Rank_Change': (uw_rank - w_rank) if not (np.isnan(w_rank) or np.isnan(uw_rank)) else np.nan,
+                    'CI_Lower': ci_lower,
+                    'CI_Upper': ci_upper
+                })
+            
+            bt_df = pd.DataFrame(bt_data)
+            bt_df.to_csv(os.path.join(output_folder, 'key_preferences_BT.csv'), index=False)
+        
+        # 2. Same-Letter Preferences
+        if 'same_letter_preferences' in results and results['same_letter_preferences'].get('status') != 'insufficient_data':
+            sl_results = results['same_letter_preferences']
+            
+            sl_data = []
+            rankings = sl_results.get('rankings', [])
+            cis = sl_results.get('confidence_intervals', {})
+            
+            for rank, (key, strength) in enumerate(rankings):
+                pos = self.key_positions.get(key, KeyPosition('', 0, 0, 0))
+                ci_lower, ci_upper = cis.get(key, (np.nan, np.nan))
+                
+                sl_data.append({
+                    'Key': key.upper(),
+                    'Finger': pos.finger,
+                    'Row': pos.row,
+                    'Column': pos.column,
+                    'Rank': rank + 1,
+                    'BT_Strength': strength,
+                    'CI_Lower': ci_lower,
+                    'CI_Upper': ci_upper
+                })
+            
+            sl_df = pd.DataFrame(sl_data)
+            sl_df.to_csv(os.path.join(output_folder, 'key_preferences_same_letter_pairs_BT.csv'), index=False)
+        
+        # 3. Pairwise Key Comparisons
+        if 'pairwise_preferences' in results and 'pairwise_results' in results['pairwise_preferences']:
+            pairwise_data = []
+            pair_results = results['pairwise_preferences']['pairwise_results']
+            
+            for (key1, key2), data in pair_results.items():
+                pos1 = self.key_positions.get(key1, KeyPosition('', 0, 0, 0))
+                pos2 = self.key_positions.get(key2, KeyPosition('', 0, 0, 0))
+                
+                pairwise_data.append({
+                    'Key1': key1.upper(),
+                    'Key2': key2.upper(),
+                    'Key1_Finger': pos1.finger,
+                    'Key1_Row': pos1.row,
+                    'Key1_Column': pos1.column,
+                    'Key2_Finger': pos2.finger,
+                    'Key2_Row': pos2.row,
+                    'Key2_Column': pos2.column,
+                    'Key1_Preference_Rate': data['preference_rate'],
+                    'CI_Lower': data['ci_lower'],
+                    'CI_Upper': data['ci_upper'],
+                    'P_Value': data['p_value'],
+                    'N_Instances': data['n_instances'],
+                    'Effect_Size': abs(data['preference_rate'] - 0.5),
+                    'Favored_Key': key1.upper() if data['preference_rate'] > 0.5 else key2.upper(),
+                    'Strength_of_Preference': max(data['preference_rate'], 1 - data['preference_rate'])
+                })
+            
+            pairwise_df = pd.DataFrame(pairwise_data)
+            pairwise_df = pairwise_df.sort_values('Strength_of_Preference', ascending=False)
+            pairwise_df.to_csv(os.path.join(output_folder, 'key_preferences_bigram_pairs.csv'), index=False)
+        
+        # 4. Combined Key Preference Comparison
+        self._save_combined_key_comparison(results, output_folder)
+    
+    def _save_combined_key_comparison(self, results: Dict[str, Any], output_folder: str) -> None:
+        """Save a combined comparison table of all key preference methods."""
+        
+        combined_data = []
+        
+        # Get all available keys
+        all_keys = set()
+        
+        # From Bradley-Terry
+        if 'bradley_terry_preferences' in results and results['bradley_terry_preferences'].get('status') != 'insufficient_data':
+            bt_weighted = results['bradley_terry_preferences'].get('weighted_rankings', [])
+            all_keys.update([key for key, _ in bt_weighted])
+        
+        # From same-letter
+        if 'same_letter_preferences' in results and results['same_letter_preferences'].get('status') != 'insufficient_data':
+            sl_rankings = results['same_letter_preferences'].get('rankings', [])
+            all_keys.update([key for key, _ in sl_rankings])
+        
+        # Create combined table
+        for key in sorted(all_keys):
+            pos = self.key_positions.get(key, KeyPosition('', 0, 0, 0))
+            row_data = {
+                'Key': key.upper(),
+                'Finger': pos.finger,
+                'Row': pos.row,
+                'Column': pos.column
+            }
+            
+            # Bradley-Terry weighted rank
+            if 'bradley_terry_preferences' in results and results['bradley_terry_preferences'].get('status') != 'insufficient_data':
+                bt_weighted = results['bradley_terry_preferences'].get('weighted_rankings', [])
+                bt_rank_dict = {k: rank+1 for rank, (k, _) in enumerate(bt_weighted)}
+                row_data['BT_Weighted_Rank'] = bt_rank_dict.get(key, np.nan)
+            else:
+                row_data['BT_Weighted_Rank'] = np.nan
+            
+            # Same-letter rank
+            if 'same_letter_preferences' in results and results['same_letter_preferences'].get('status') != 'insufficient_data':
+                sl_rankings = results['same_letter_preferences'].get('rankings', [])
+                sl_rank_dict = {k: rank+1 for rank, (k, _) in enumerate(sl_rankings)}
+                row_data['Same_Letter_Rank'] = sl_rank_dict.get(key, np.nan)
+            else:
+                row_data['Same_Letter_Rank'] = np.nan
+            
+            # Calculate rank differences
+            bt_rank = row_data['BT_Weighted_Rank']
+            sl_rank = row_data['Same_Letter_Rank']
+            
+            if not (np.isnan(bt_rank) or np.isnan(sl_rank)):
+                row_data['Rank_Difference_BT_vs_SL'] = bt_rank - sl_rank
+            else:
+                row_data['Rank_Difference_BT_vs_SL'] = np.nan
+            
+            combined_data.append(row_data)
+        
+        combined_df = pd.DataFrame(combined_data)
+        combined_df.to_csv(os.path.join(output_folder, 'key_preferences_compare_methods.csv'), index=False)
+        
+        logger.info("Detailed key preference tables saved")
+        logger.info("- key_preferences_BT.csv: Weighted vs unweighted BT rankings")
+        logger.info("- key_preferences_same_letter_pairs_BT.csv: Pure key quality rankings")
+        logger.info("- key_preferences_bigram_pairs.csv: Specific key pair preferences") 
+        logger.info("- key_preferences_compare_methods.csv: Side-by-side method comparison")
 
     def _create_visualizations(self, results: Dict[str, Any], output_folder: str) -> None:
         """Create visualization plots."""
