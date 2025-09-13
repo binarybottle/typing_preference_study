@@ -15,9 +15,8 @@ Approach: Exploratory analysis for MOO design
 
 MOO Objectives Analyzed:
 1. Key preferences: Individual key quality using complementary approaches
-   - Bradley-Terry model for overall ranking
-   - Same-letter bigrams for pure key quality
-   - Pairwise comparisons for specific contrasts
+   - Same-letter bigram comparisons (Bradley-Terry model)
+   - Bigram pair comparisons
 2. Row separation: Preferences across keyboard rows (same > reach > hurdle)  
 3. Column separation: Adjacent vs. distant finger movements
 4. Column 4 vs 5: Index finger column preferences
@@ -212,9 +211,6 @@ class MOOObjectiveAnalyzer:
         # Run each objective analysis
         results = {}
 
-        logger.info("=== KEY PREFERENCES: BRADLEY-TERRY MODEL ===")
-        results['bradley_terry_preferences'] = self._analyze_bradley_terry_preferences()
-
         logger.info("=== KEY PREFERENCES: SAME-LETTER BIGRAMS ===")  
         results['same_letter_preferences'] = self._analyze_same_letter_preferences()
 
@@ -238,8 +234,11 @@ class MOOObjectiveAnalyzer:
         
         logger.info("=== GENERATING REPORTS ===")
         self._generate_comprehensive_report(enhanced_results, output_folder)
-        self._save_results(enhanced_results, output_folder)
-        
+
+        # Save detailed key preference comparison tables
+        self._save_key_preference_tables(enhanced_results['objectives'], output_folder)        
+        logger.info(f"Results saved to {output_folder}")
+    
         # Generate visualizations
         self._create_visualizations(results, output_folder)
         
@@ -269,186 +268,7 @@ class MOOObjectiveAnalyzer:
         return instances_df
 
     # =========================================================================
-    # KEY PREFERENCES: BRADLEY-TERRY MODEL
-    # =========================================================================
-    
-    def _analyze_bradley_terry_preferences(self) -> Dict[str, Any]:
-        """Analyze key preferences using Bradley-Terry model."""
-        
-        # Extract key comparisons
-        key_comparisons = self._extract_key_comparisons(self.data)
-        
-        if not key_comparisons:
-            raise ValueError('No key preference instances found')
-        
-        logger.info(f"Found {sum(comp['total'] for comp in key_comparisons.values())} key comparison instances")
-        
-        # Compare unweighted vs weighted results
-        unweighted_results = self._fit_bradley_terry(key_comparisons, weighted=False)
-        weighted_results = self._fit_bradley_terry(key_comparisons, weighted=True)
-        
-        return {
-            'description': 'Key preferences from Bradley-Terry model with frequency weighting comparison',
-            'method': 'bradley_terry_comparison',
-            'unweighted_rankings': unweighted_results['rankings'],
-            'weighted_rankings': weighted_results['rankings'],
-            'confidence_intervals': weighted_results['confidence_intervals'],
-            'frequency_comparison': self._compare_weighting_effects(unweighted_results, weighted_results),
-            'key_comparisons': key_comparisons,
-            'n_comparisons': len(key_comparisons),
-            'total_observations': sum(comp['total'] for comp in key_comparisons.values()),
-            'interpretation': f"Bradley-Terry rankings from {len(key_comparisons)} key pairs"
-        }
-    
-    def _extract_key_comparisons(self, data: pd.DataFrame) -> Dict[Tuple[str, str], Dict[str, int]]:
-        """Extract pairwise key comparisons from bigram data."""
-        
-        key_comparisons = defaultdict(lambda: {'wins_item1': 0, 'total': 0})
-        
-        for idx, row in data.iterrows():
-            chosen = str(row['chosen_bigram']).lower()
-            unchosen = str(row['unchosen_bigram']).lower()
-            
-            # Extract individual keys from bigrams
-            chosen_keys = [c for c in chosen if c in self.left_hand_keys]
-            unchosen_keys = [c for c in unchosen if c in self.left_hand_keys]
-            
-            # Count key-level preferences
-            for c_key in chosen_keys:
-                for u_key in unchosen_keys:
-                    if c_key != u_key:
-                        # Order keys consistently (alphabetically)
-                        key1, key2 = sorted([c_key, u_key])
-                        pair = (key1, key2)
-                        
-                        key_comparisons[pair]['total'] += 1
-                        if c_key == key1:  # key1 was chosen
-                            key_comparisons[pair]['wins_item1'] += 1
-        
-        # Ensure all values are integers
-        for pair in key_comparisons:
-            key_comparisons[pair]['wins_item1'] = int(key_comparisons[pair]['wins_item1'])
-            key_comparisons[pair]['total'] = int(key_comparisons[pair]['total'])
-        
-        return dict(key_comparisons)
-    
-    def _fit_bradley_terry(self, key_comparisons: Dict, weighted: bool = False) -> Dict[str, Any]:
-        """Fit Bradley-Terry model with or without frequency weighting."""
-        
-        comparison_data = key_comparisons.copy()
-        
-        if weighted:
-            # Apply frequency weighting by scaling comparison counts
-            freq_counts = {pair: data['total'] for pair, data in comparison_data.items()}
-            max_freq = max(freq_counts.values())
-            
-            for pair in comparison_data:
-                scale_factor = max_freq / freq_counts[pair]
-                comparison_data[pair]['total'] = int(comparison_data[pair]['total'] * scale_factor)
-                comparison_data[pair]['wins_item1'] = int(comparison_data[pair]['wins_item1'] * scale_factor)
-        
-        # Fit model
-        bt_model = BradleyTerryModel(list(self.left_hand_keys), self.config)
-        bt_model.fit(comparison_data)
-        rankings = bt_model.get_rankings()
-        
-        # Calculate confidence intervals using simple bootstrap
-        confidence_intervals = self._bootstrap_bt_confidence_intervals(bt_model, comparison_data)
-        
-        return {
-            'rankings': rankings,
-            'confidence_intervals': confidence_intervals,
-            'bt_model': bt_model
-        }
-    
-    def _bootstrap_bt_confidence_intervals(self, bt_model: BradleyTerryModel, 
-                                         comparison_data: Dict) -> Dict[str, Tuple[float, float]]:
-        """Calculate bootstrap confidence intervals for Bradley-Terry strengths."""
-        
-        confidence = self.config.get('confidence_level', 0.95)
-        n_bootstrap = self.config.get('bootstrap_iterations', 1000)
-        
-        # Convert to bootstrap format
-        comparison_records = []
-        for (key1, key2), data in comparison_data.items():
-            wins1 = int(data['wins_item1'])
-            total = int(data['total'])
-            
-            for _ in range(wins1):
-                comparison_records.append((key1, key2, key1))
-            for _ in range(total - wins1):
-                comparison_records.append((key1, key2, key2))
-        
-        if not comparison_records:
-            return {item: (np.nan, np.nan) for item in bt_model.items}
-        
-        bootstrap_strengths = []
-        
-        for _ in range(n_bootstrap):
-            # Resample with replacement
-            n_records = len(comparison_records)
-            resampled_indices = np.random.choice(n_records, size=n_records, replace=True)
-            
-            # Reconstruct comparison counts
-            bootstrap_comparisons = defaultdict(lambda: {'wins_item1': 0, 'total': 0})
-            
-            for idx in resampled_indices:
-                key1, key2, winner = comparison_records[idx]
-                pair = (key1, key2)
-                
-                bootstrap_comparisons[pair]['total'] += 1
-                if winner == key1:
-                    bootstrap_comparisons[pair]['wins_item1'] += 1
-            
-            # Fit bootstrap model
-            bootstrap_model = BradleyTerryModel(bt_model.items, self.config)
-            bootstrap_model.fit(dict(bootstrap_comparisons))
-            
-            if bootstrap_model.fitted:
-                bootstrap_strengths.append(bootstrap_model.strengths)
-        
-        # Calculate confidence intervals
-        alpha = 1 - confidence
-        ci_dict = {}
-        
-        if bootstrap_strengths:
-            bootstrap_array = np.array(bootstrap_strengths)
-            for i, item in enumerate(bt_model.items):
-                lower = np.percentile(bootstrap_array[:, i], 100 * alpha/2)
-                upper = np.percentile(bootstrap_array[:, i], 100 * (1 - alpha/2))
-                ci_dict[item] = (float(lower), float(upper))
-        else:
-            ci_dict = {item: (np.nan, np.nan) for item in bt_model.items}
-        
-        return ci_dict
-    
-    def _compare_weighting_effects(self, unweighted: Dict, weighted: Dict) -> Dict[str, Any]:
-        """Compare unweighted vs weighted Bradley-Terry results."""
-        
-        unweighted_ranks = {key: rank for rank, (key, _) in enumerate(unweighted['rankings'])}
-        weighted_ranks = {key: rank for rank, (key, _) in enumerate(weighted['rankings'])}
-        
-        rank_changes = []
-        for key in self.left_hand_keys:
-            if key in unweighted_ranks and key in weighted_ranks:
-                change = unweighted_ranks[key] - weighted_ranks[key]  # Positive = improved
-                rank_changes.append({
-                    'key': key,
-                    'unweighted_rank': unweighted_ranks[key] + 1,
-                    'weighted_rank': weighted_ranks[key] + 1,
-                    'rank_change': change
-                })
-        
-        rank_changes.sort(key=lambda x: abs(x['rank_change']), reverse=True)
-        
-        return {
-            'rank_changes': rank_changes,
-            'max_rank_change': max([abs(x['rank_change']) for x in rank_changes]) if rank_changes else 0,
-            'large_changes': [x['key'] for x in rank_changes if abs(x['rank_change']) >= 3]
-        }
-
-    # =========================================================================
-    # KEY PREFERENCES: SAME-LETTER BIGRAMS
+    # KEY PREFERENCES: SAME-LETTER BIGRAMS (BRADLEY-TERRY MODEL)
     # =========================================================================
     
     def _analyze_same_letter_preferences(self) -> Dict[str, Any]:
@@ -525,6 +345,67 @@ class MOOObjectiveAnalyzer:
                     })
         
         return pd.DataFrame(instances)
+
+    def _bootstrap_bt_confidence_intervals(self, bt_model: BradleyTerryModel, 
+                                         comparison_data: Dict) -> Dict[str, Tuple[float, float]]:
+        """Calculate bootstrap confidence intervals for Bradley-Terry strengths."""
+        
+        confidence = self.config.get('confidence_level', 0.95)
+        n_bootstrap = self.config.get('bootstrap_iterations', 1000)
+        
+        # Convert to bootstrap format
+        comparison_records = []
+        for (key1, key2), data in comparison_data.items():
+            wins1 = int(data['wins_item1'])
+            total = int(data['total'])
+            
+            for _ in range(wins1):
+                comparison_records.append((key1, key2, key1))
+            for _ in range(total - wins1):
+                comparison_records.append((key1, key2, key2))
+        
+        if not comparison_records:
+            return {item: (np.nan, np.nan) for item in bt_model.items}
+        
+        bootstrap_strengths = []
+        
+        for _ in range(n_bootstrap):
+            # Resample with replacement
+            n_records = len(comparison_records)
+            resampled_indices = np.random.choice(n_records, size=n_records, replace=True)
+            
+            # Reconstruct comparison counts
+            bootstrap_comparisons = defaultdict(lambda: {'wins_item1': 0, 'total': 0})
+            
+            for idx in resampled_indices:
+                key1, key2, winner = comparison_records[idx]
+                pair = (key1, key2)
+                
+                bootstrap_comparisons[pair]['total'] += 1
+                if winner == key1:
+                    bootstrap_comparisons[pair]['wins_item1'] += 1
+            
+            # Fit bootstrap model
+            bootstrap_model = BradleyTerryModel(bt_model.items, self.config)
+            bootstrap_model.fit(dict(bootstrap_comparisons))
+            
+            if bootstrap_model.fitted:
+                bootstrap_strengths.append(bootstrap_model.strengths)
+        
+        # Calculate confidence intervals
+        alpha = 1 - confidence
+        ci_dict = {}
+        
+        if bootstrap_strengths:
+            bootstrap_array = np.array(bootstrap_strengths)
+            for i, item in enumerate(bt_model.items):
+                lower = np.percentile(bootstrap_array[:, i], 100 * alpha/2)
+                upper = np.percentile(bootstrap_array[:, i], 100 * (1 - alpha/2))
+                ci_dict[item] = (float(lower), float(upper))
+        else:
+            ci_dict = {item: (np.nan, np.nan) for item in bt_model.items}
+        
+        return ci_dict
 
     # =========================================================================
     # KEY PREFERENCES: PAIRWISE COMPARISONS
@@ -1118,99 +999,10 @@ class MOOObjectiveAnalyzer:
 
         logger.info(f"Report saved to {report_path}")
 
-    def _save_results(self, enhanced_results: Dict[str, Any], output_folder: str) -> None:
-        """Save results to CSV files."""
-        
-        # Save summary CSV
-        summary_data = []
-        for obj_name, obj_results in enhanced_results['objectives'].items():
-            if isinstance(obj_results, str):
-                # String result indicates error
-                summary_data.append({
-                    'Objective': obj_name,
-                    'Description': 'Analysis failed',
-                    'Method': 'N/A',
-                    'Status': 'Failed',
-                    'Instances': 'N/A',
-                    'Preference_Rate': 'N/A',
-                    'CI_Lower': 'N/A',
-                    'CI_Upper': 'N/A',
-                    'Interpretation': obj_results
-                })
-            elif obj_results.get('status') == 'insufficient_data':
-                # Insufficient data case
-                summary_data.append({
-                    'Objective': obj_name,
-                    'Description': obj_results.get('description', ''),
-                    'Method': obj_results.get('method', 'unknown'),
-                    'Status': 'Skipped - Insufficient Data',
-                    'Instances': obj_results.get('n_instances', 0),
-                    'Preference_Rate': 'N/A',
-                    'CI_Lower': 'N/A', 
-                    'CI_Upper': 'N/A',
-                    'Interpretation': obj_results.get('interpretation', 'No data available')
-                })
-            else:
-                # Successful analysis
-                summary_data.append({
-                    'Objective': obj_name,
-                    'Description': obj_results.get('description', ''),
-                    'Method': obj_results.get('method', 'unknown'),
-                    'Status': 'Completed',
-                    'Instances': obj_results.get('n_instances', 'unknown'),
-                    'Preference_Rate': f"{obj_results.get('preference_rate', 0):.1%}" if 'preference_rate' in obj_results else 'N/A',
-                    'CI_Lower': f"{obj_results.get('ci_lower', 0):.1%}" if 'ci_lower' in obj_results else 'N/A',
-                    'CI_Upper': f"{obj_results.get('ci_upper', 0):.1%}" if 'ci_upper' in obj_results else 'N/A',
-                    'Interpretation': obj_results.get('interpretation', 'No interpretation')
-                })
-        
-        summary_df = pd.DataFrame(summary_data)
-        summary_df.to_csv(os.path.join(output_folder, 'moo_objectives_summary.csv'), index=False)
-        
-        # Save detailed key preference comparison tables
-        self._save_key_preference_tables(enhanced_results['objectives'], output_folder)
-        
-        logger.info(f"Results saved to {output_folder}")
-    
     def _save_key_preference_tables(self, results: Dict[str, Any], output_folder: str) -> None:
         """Save detailed CSV tables for all key preference methods."""
         
-        # 1. Bradley-Terry Rankings (both weighted and unweighted)
-        if 'bradley_terry_preferences' in results and results['bradley_terry_preferences'].get('status') != 'insufficient_data':
-            bt_results = results['bradley_terry_preferences']
-            
-            # Combine weighted and unweighted rankings
-            bt_data = []
-            weighted_rankings = {key: (rank, strength) for rank, (key, strength) in enumerate(bt_results.get('weighted_rankings', []))}
-            unweighted_rankings = {key: (rank, strength) for rank, (key, strength) in enumerate(bt_results.get('unweighted_rankings', []))}
-            cis = bt_results.get('confidence_intervals', {})
-            
-            all_keys = set(weighted_rankings.keys()) | set(unweighted_rankings.keys())
-            for key in sorted(all_keys):
-                pos = self.key_positions.get(key, KeyPosition('', 0, 0, 0))
-                
-                w_rank, w_strength = weighted_rankings.get(key, (np.nan, np.nan))
-                uw_rank, uw_strength = unweighted_rankings.get(key, (np.nan, np.nan))
-                ci_lower, ci_upper = cis.get(key, (np.nan, np.nan))
-                
-                bt_data.append({
-                    'Key': key.upper(),
-                    'Finger': pos.finger,
-                    'Row': pos.row,
-                    'Column': pos.column,
-                    'Weighted_Rank': w_rank + 1 if not np.isnan(w_rank) else np.nan,
-                    'Weighted_Strength': w_strength,
-                    'Unweighted_Rank': uw_rank + 1 if not np.isnan(uw_rank) else np.nan,
-                    'Unweighted_Strength': uw_strength,
-                    'Rank_Change': (uw_rank - w_rank) if not (np.isnan(w_rank) or np.isnan(uw_rank)) else np.nan,
-                    'CI_Lower': ci_lower,
-                    'CI_Upper': ci_upper
-                })
-            
-            bt_df = pd.DataFrame(bt_data)
-            bt_df.to_csv(os.path.join(output_folder, 'key_preferences_BT.csv'), index=False)
-        
-        # 2. Same-Letter Preferences
+        # 1. Same-Letter Preferences
         if 'same_letter_preferences' in results and results['same_letter_preferences'].get('status') != 'insufficient_data':
             sl_results = results['same_letter_preferences']
             
@@ -1236,7 +1028,7 @@ class MOOObjectiveAnalyzer:
             sl_df = pd.DataFrame(sl_data)
             sl_df.to_csv(os.path.join(output_folder, 'key_preferences_same_letter_pairs_BT.csv'), index=False)
         
-        # 3. Pairwise Key Comparisons
+        # 2. Pairwise Key Comparisons
         if 'pairwise_preferences' in results and 'pairwise_results' in results['pairwise_preferences']:
             pairwise_data = []
             pair_results = results['pairwise_preferences']['pairwise_results']
@@ -1288,52 +1080,10 @@ class MOOObjectiveAnalyzer:
         if 'same_letter_preferences' in results and results['same_letter_preferences'].get('status') != 'insufficient_data':
             sl_rankings = results['same_letter_preferences'].get('rankings', [])
             all_keys.update([key for key, _ in sl_rankings])
-        
-        # Create combined table
-        for key in sorted(all_keys):
-            pos = self.key_positions.get(key, KeyPosition('', 0, 0, 0))
-            row_data = {
-                'Key': key.upper(),
-                'Finger': pos.finger,
-                'Row': pos.row,
-                'Column': pos.column
-            }
-            
-            # Bradley-Terry weighted rank
-            if 'bradley_terry_preferences' in results and results['bradley_terry_preferences'].get('status') != 'insufficient_data':
-                bt_weighted = results['bradley_terry_preferences'].get('weighted_rankings', [])
-                bt_rank_dict = {k: rank+1 for rank, (k, _) in enumerate(bt_weighted)}
-                row_data['BT_Weighted_Rank'] = bt_rank_dict.get(key, np.nan)
-            else:
-                row_data['BT_Weighted_Rank'] = np.nan
-            
-            # Same-letter rank
-            if 'same_letter_preferences' in results and results['same_letter_preferences'].get('status') != 'insufficient_data':
-                sl_rankings = results['same_letter_preferences'].get('rankings', [])
-                sl_rank_dict = {k: rank+1 for rank, (k, _) in enumerate(sl_rankings)}
-                row_data['Same_Letter_Rank'] = sl_rank_dict.get(key, np.nan)
-            else:
-                row_data['Same_Letter_Rank'] = np.nan
-            
-            # Calculate rank differences
-            bt_rank = row_data['BT_Weighted_Rank']
-            sl_rank = row_data['Same_Letter_Rank']
-            
-            if not (np.isnan(bt_rank) or np.isnan(sl_rank)):
-                row_data['Rank_Difference_BT_vs_SL'] = bt_rank - sl_rank
-            else:
-                row_data['Rank_Difference_BT_vs_SL'] = np.nan
-            
-            combined_data.append(row_data)
-        
-        combined_df = pd.DataFrame(combined_data)
-        combined_df.to_csv(os.path.join(output_folder, 'key_preferences_compare_methods.csv'), index=False)
-        
+                
         logger.info("Detailed key preference tables saved")
-        logger.info("- key_preferences_BT.csv: Weighted vs unweighted BT rankings")
         logger.info("- key_preferences_same_letter_pairs_BT.csv: Pure key quality rankings")
-        logger.info("- key_preferences_bigram_pairs.csv: Specific key pair preferences") 
-        logger.info("- key_preferences_compare_methods.csv: Side-by-side method comparison")
+        logger.info("- key_preferences_bigram_pair_comparisons.csv: Specific key pair preferences") 
 
     def _create_visualizations(self, results: Dict[str, Any], output_folder: str) -> None:
         """Create visualization plots."""
@@ -1433,7 +1183,7 @@ class MOOObjectiveAnalyzer:
         ax.set_xlim(0, 1)
         
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'pairwise_key_comparisons.png'), 
+        plt.savefig(os.path.join(output_folder, 'key_preferences_bigram_pair_comparisons.png'), 
                    dpi=300, bbox_inches='tight')
         plt.close()
 

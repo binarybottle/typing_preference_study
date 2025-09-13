@@ -2151,8 +2151,8 @@ def main():
 
     # Get all CSV files in the directory
     csv_path = 'input/raws_nonProlific/*.csv' # 'input/raws_Prolific/*.csv'  
-    letter_freq_path = 'input/english-letter-counts-google-ngrams.csv'
-    bigram_freq_path = 'input/english-letter-pair-counts-google-ngrams.csv'
+    letter_freq_path = 'input/frequency/english-letter-counts-google-ngrams.csv'
+    bigram_freq_path = 'input/frequency/english-letter-pair-counts-google-ngrams.csv'
 
     # Load frequency data
     letter_frequencies, bigram_frequencies = load_frequency_data(letter_freq_path, bigram_freq_path)

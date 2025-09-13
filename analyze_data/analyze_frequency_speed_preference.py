@@ -35,14 +35,37 @@ from scipy.stats import median_abs_deviation
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from bigram_frequencies import bigrams, bigram_frequencies_array
-
 # Logger will be configured after loading config
 logger = logging.getLogger(__name__)
 
 # =============================================================================
 # STATISTICAL HELPERS
 # =============================================================================
+
+def load_frequency_data(letter_freq_path=None, bigram_freq_path=None):
+    """
+    Load frequency data from CSV files
+    Parameters:
+    letter_freq_path (str): Path to letter frequency CSV
+    bigram_freq_path (str): Path to bigram frequency CSV
+    Returns:
+    tuple: (letter_frequencies, bigram_frequencies) as dataframes
+    """
+    letter_frequencies = None
+    bigram_frequencies = None
+    try:
+        if letter_freq_path and os.path.exists(letter_freq_path):
+            letter_frequencies = pd.read_csv(letter_freq_path)
+            print(f"Loaded letter frequency data: {len(letter_frequencies)} entries")
+    except Exception as e:
+        print(f"Error loading letter frequency data: {str(e)}")
+    try:
+        if bigram_freq_path and os.path.exists(bigram_freq_path):
+            bigram_frequencies = pd.read_csv(bigram_freq_path)
+            print(f"Loaded bigram frequency data: {len(bigram_frequencies)} entries")
+    except Exception as e:
+        print(f"Error loading bigram frequency data: {str(e)}")
+    return letter_frequencies, bigram_frequencies
 
 class StatisticalHelpers:
     """Statistical methods for comprehensive analysis."""
@@ -322,9 +345,21 @@ class BigramAnalysis:
         self.stats = StatisticalHelpers()
         self.plotter = PlottingUtils(config)
         
-        # Create frequency lookup
-        self.bigram_frequencies = dict(zip(bigrams, bigram_frequencies_array))
+        # Load frequency data from CSV (using normalized files)
+        bigram_freq_path = self.config['data'].get('bigram_freq_file', 'input/frequency/english-letter-pair-counts-google-ngrams-normalized.csv')
+        _, bigram_freq_df = load_frequency_data(bigram_freq_path=bigram_freq_path)
 
+        # Create frequency lookup
+        self.bigram_frequencies = {}
+        if bigram_freq_df is not None:
+            for _, row in bigram_freq_df.iterrows():
+                bigram_value = str(row['item_pair']).lower()
+                if len(bigram_value) == 2:  # Only use bigrams
+                    # Use the normalized score directly
+                    self.bigram_frequencies[bigram_value] = row['score']
+        else:
+            logger.warning("Could not load bigram frequency data from CSV")
+            
     def run_comprehensive_analysis(self, data_path: str, output_folder: str) -> Dict[str, Any]:
         """Run comprehensive analysis for all four research questions."""
         logger.info("Starting comprehensive bigram preference analysis...")

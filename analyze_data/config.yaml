@@ -4,10 +4,10 @@
 # Input/output settings
 #-------------------------------------------------------------------------------
 data:
-  # input / output directory:
   input_dir: "input/summary_data/nonProlific_studies"
-  # process_data.py output / analyze_...py input:
-  filtered_data_file: "output/tables/processed_consistent_choices.csv" 
+  filtered_data_file: "output/tables/processed_consistent_choices.csv"
+  bigram_freq_file: "input/frequency/english-letter-pair-counts-google-ngrams-normalized.csv"
+  letter_freq_file: "input/frequency/english-letter-counts-google-ngrams-normalized.csv"
 
 #-------------------------------------------------------------------------------
 # process_summary_data.py settings
