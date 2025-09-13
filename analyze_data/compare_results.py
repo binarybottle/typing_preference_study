@@ -7,7 +7,7 @@ focusing on differences in hypothesis testing, key preferences, transition prefe
 and MOO objectives analysis.
 
 Usage:
-    poetry run python3 compare_results.py --dataset1 output/nonProlific/analyze_objectives --dataset2 output/Prolific/analyze_objectives --output compare_results
+    poetry run python3 compare_results.py --dataset1 output/nonProlific/analyze_objectives --dataset2 output/Prolific/analyze_objectives_TGB --output compare_results
 
     # Compare specific analysis types only
     python compare_results.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --focus hypotheses

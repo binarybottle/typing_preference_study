@@ -1,6 +1,6 @@
-# Typing Preference Study
+# Bigram Typing Preference Study - Analysis Pipeline
  
--- jspsych website to collect study data via Prolific plus python analysis code --
+Comprehensive data collection and analysis pipeline for keyboard ergonomics research.
 
 Author: Arno Klein (arnoklein.info)
 
@@ -8,43 +8,100 @@ GitHub repository: binarybottle/typing_preferences_study
 
 License: Apache v2.0 
 
-## Description
-The purpose of the scripts in this repository is to determine which bigram in each of many bigram pairs is easier (more comfortable) to type on a qwerty computer keyboard, ultimately to inform the design of future keyboard layouts. These data are later converted to individual bigram comfort scores (https://github.com/binarybottle/typing_preferences_to_comfort_scores).
 
-  - src/experiment.js: script to present and collect bigram typing data via a website
-  
-    - Step 1. Present consent and instructions.
-    - Step 2. Present pair of bigrams to be typed repeatedly between random text.
-    - Step 3. Present slider bar to indicate which bigram is easier to type.
-    - Step 4. Collect timing and bigram preference data.
-    - Step 5. Store data in OSF.io data repository.
-    - Step 6. Send participant back to the Prolific crowdsourcing platform.
+## Overview
 
-  - analyze/process_summary_data.py: script to process/filter experiment's bigram typing data (python process_summary_data.py --config config.yaml)
+This repository provides a complete analysis pipeline for studying keyboard typing preferences and deriving evidence-based keyboard layout optimizations. The pipeline transforms raw keystroke data and preference ratings into statistically grounded information to guide keyboard layout design.
 
-    - Input: csv tables of summary data, easy choice (improbable) bigram pairs
-    - Output: csv tables and plots
-    - Step 1. Load and combine the data collected from the study above.
-    - Step 2. Filter users by improbable or inconsistent choices, or outlier slider behavior.
-    - Step 3. Score choices by slider values.
-    - Step 4. Choose winning bigrams for bigram pairs.
+**Research Focus**: Understanding the relationship between typing speed, user preferences, and biomechanical comfort to inform optimal keyboard layouts.
 
-  - analyze/analyze_frequency_speed_preference.py: script to analyze experiment's bigram typing data
 
-    - Input config.yaml file with various settings, including the csv table of filtered user data.
-    - See analyze/README_analyze_data.txt 
+## Pipeline Architecture
 
-  ### process_summary_data.py notes:
-   - Filter users by inconsistent or improbable choice thresholds, or outlier slider behavior
-  The "improbable" choice is choosing the bigram "vr" as easier to type than "fr", and can be used as an option to filter users that may have chosen slider values randomly.
-  Inconsistent choices are when a user doesn't choose the same bigram in a pair both times.
-  Outlier slider behavior is when a user selects streaks of left or right sides, 
-  or chooses values close to zero many times.
-  
-   - Score choices by slider values
-  For this study, each user makes a choice between two bigrams, two times, by using a slider each time -- but the score_user_choices_by_slider_values function generalizes to many pairwise choices. If a user chooses the same bigram every time, we take their median absolute slider value. If a user chooses different bigrams, we subtract the sums of the absolute values for each choice. In both cases, the score is the absolute value of the result.
+```
+Raw Keystroke Data → Performance Analysis → Preference Analysis → MOO Optimization
+       ↓                    ↓                    ↓                    ↓
+ Timing & Errors     Speed/Preference      Key Rankings        Layout Design
+                      Relationships                           Constraints
+```
 
-   - Choose winning bigrams
-  Here we apply a simple method for determining a winning bigram for each bigram pair across all users and all trials. This is for exploratory purposes only. If the winning bigram for every user is the same, the winning score is the median absolute score. If the winning bigram differs across users, the winning score is calculated as follows: we subtract the sum of the absolute values of the scores for one bigram from the other, and divide by the number of choices made for that bigram pair across the dataset.
+### Core Analysis Modules
 
+| Module | Script | Purpose |
+|--------|--------|---------|
+| **Raw Data Analysis** | `analyze_raw_data.py` | Extract performance metrics from keystroke timing data |
+| **Data Processing** | `process_summary_data.py` | Filter participants and score preferences |
+| **Preference Analysis** | `analyze_frequency_speed_preference.py` | Analyze speed/preference/frequency relationships |
+| **MOO Analysis** | `analyze_objectives.py` | Multi-objective optimization for layout design |
+| **Dataset Comparison** | `compare_datasets.py` | Cross-study validation and replication |
+| **Results Comparison** | `compare_results.py` | Compare MOO analysis across datasets |
+
+
+## Quick Start
+
+### Basic Analysis Workflow
+```bash
+# 1. Analyze raw keystroke performance
+python analyze_raw_data.py
+
+# 2. Process and filter experimental data
+python process_summary_data.py --config config.yaml
+
+# 3. Analyze preference relationships
+python analyze_frequency_speed_preference.py --config config.yaml
+
+# 4. MOO analysis for layout optimization
+python analyze_objectives.py --data processed_consistent_choices.csv --output moo_results/
+
+# 5. Compare datasets and results (optional)
+python compare_datasets.py --dataset1 study1.csv --dataset2 study2.csv --output compare_datasets/
+python compare_results.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --output compare_results/
+```
+
+### Key Configuration
+Essential settings in `config.yaml`:
+```yaml
+data:
+  input_dir: "data/raw"
+  filtered_data_file: "processed_consistent_choices.csv"
+
+analysis:
+  min_trials_per_participant: 10
+  max_time_ms: 3000
+  confidence_level: 0.95
+
+moo_objectives_analysis:
+  bootstrap_iterations: 1000
+  regularization: 1e-4
+```
+
+
+## Documentation
+
+| Topic | File | Description |
+|-------|------|-------------|
+| **Raw Data Analysis** | [docs/analyze_raw_data.md](docs/raw_data_analysis.md) | Keystroke performance metrics |
+| **Data Processing** | [docs/process_data.md](docs/data_processing.md) | Filtering and scoring pipeline |
+| **Preference Analysis** | [docs/analyze_frequency_speed_preference.md](docs/preference_analysis.md) | Speed/preference relationships |
+| **MOO Analysis** | [docs/analyze_objectives.md](docs/moo_analysis.md) | Multi-objective optimization |
+
+
+## Features
+
+### Statistics
+- **Bradley-Terry Models**: Robust pairwise preference ranking
+- **Bootstrap Confidence Intervals**: Non-parametric uncertainty quantification
+- **Multiple Comparison Correction**: False Discovery Rate control
+- **Effect Size Focus**: Practical significance over statistical significance
+
+### Multi-Objective Optimization
+- **Key Preferences**: Individual key quality rankings
+- **Row Separation**: Same-row vs. cross-row movement preferences
+- **Column Separation**: Adjacent vs. distant finger movements
+- **Finger Coordination**: Biomechanical movement patterns
+
+### Cross-Study Validation
+- **Dataset Comparison**: Statistical tests for study replication
+- **Results Comparison**: MOO objective consistency across studies
+- **Preference Stability**: Rankings correlation analysis
 
