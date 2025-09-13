@@ -24,8 +24,8 @@ MOO Objectives Analyzed:
 Usage:
     poetry run python3 analyze_objectives.py --data output/nonProlific/process_data/tables/processed_consistent_choices.csv \
         --output output/nonProlific/analyze_objectives
-    poetry run python3 analyze_objectives.py --data output/Prolific/process_data/tables/processed_consistent_choices.csv \
-        --output output/Prolific/analyze_objectives
+    poetry run python3 analyze_objectives.py --data output/Prolific/process_data_TGB/tables/processed_consistent_choices.csv \
+        --output output/Prolific/analyze_objectives_TGB
 """
 
 import os
@@ -43,6 +43,7 @@ from scipy.optimize import minimize
 import matplotlib.pyplot as plt
 import seaborn as sns
 from collections import defaultdict, Counter
+import networkx as nx
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -87,30 +88,137 @@ class BradleyTerryModel:
         self.fitted = True
     
     def _fit_ml(self, wins: np.ndarray, totals: np.ndarray) -> np.ndarray:
-        """Fit Bradley-Terry model using maximum likelihood estimation."""
+        """Bradley-Terry model fitting with numerical stability."""
         
-        def negative_log_likelihood(strengths):
-            reg = float(self.config.get('regularization', 1e-10))
+        def negative_log_likelihood_regularized(strengths):
+            # More substantial regularization
+            reg = float(self.config.get('regularization', 1e-4))
+            
+            # Clip strengths to prevent numerical overflow
             strengths = np.clip(strengths, -10, 10)
+            
             ll = 0
             for i in range(self.n_items):
                 for j in range(i + 1, self.n_items):
                     if totals[i, j] > 0:
-                        p_ij = np.exp(strengths[i]) / (np.exp(strengths[i]) + np.exp(strengths[j]))
+                        # More numerically stable computation
+                        strength_diff = strengths[i] - strengths[j]
+                        
+                        # Use log-sum-exp trick for stability
+                        if strength_diff > 0:
+                            p_ij = 1.0 / (1.0 + np.exp(-strength_diff))
+                        else:
+                            exp_diff = np.exp(strength_diff)
+                            p_ij = exp_diff / (1.0 + exp_diff)
+                        
+                        # Apply regularization to probabilities
                         p_ij = np.clip(p_ij, reg, 1.0 - reg)
+                        
                         ll += wins[i, j] * np.log(p_ij) + wins[j, i] * np.log(1 - p_ij)
-            return -ll
+            
+            # Add L2 regularization on parameters
+            l2_penalty = reg * np.sum(strengths**2)
+            return -(ll - l2_penalty)
         
-        initial_strengths = np.zeros(self.n_items)
-        constraint = {'type': 'eq', 'fun': lambda x: x[0]}
+        # Check for disconnected components
+        self._validate_connectivity(wins, totals)
         
-        result = minimize(negative_log_likelihood, initial_strengths, method='SLSQP', constraints=constraint)
+        # Try multiple initialization strategies
+        best_result = None
+        best_likelihood = np.inf
         
-        if not result.success:
-            logger.warning("Bradley-Terry optimization did not converge")
+        init_strategies = [
+            np.zeros(self.n_items),  # All zeros
+            np.random.normal(0, 0.1, self.n_items),  # Small random
+            self._initialize_from_win_rates(wins, totals)  # Data-driven
+        ]
         
-        return result.x
-    
+        for init_strengths in init_strategies:
+            # Use sum-to-zero constraint for better stability
+            constraint = {'type': 'eq', 'fun': lambda x: np.sum(x)}
+            
+            try:
+                # Try L-BFGS-B first (often better for this problem)
+                result = minimize(
+                    negative_log_likelihood_regularized, 
+                    init_strengths,
+                    method='L-BFGS-B',
+                    bounds=[(-10, 10)] * self.n_items
+                )
+                
+                # Apply sum-to-zero constraint post-hoc
+                if result.success:
+                    constrained_strengths = result.x - np.mean(result.x)
+                    likelihood = negative_log_likelihood_regularized(constrained_strengths)
+                    
+                    if likelihood < best_likelihood:
+                        best_likelihood = likelihood
+                        best_result = constrained_strengths
+                
+                # Fallback to SLSQP with constraint if L-BFGS-B fails
+                if not result.success:
+                    result = minimize(
+                        negative_log_likelihood_regularized,
+                        init_strengths,
+                        method='SLSQP',
+                        constraints=constraint
+                    )
+                    
+                    if result.success and negative_log_likelihood_regularized(result.x) < best_likelihood:
+                        best_result = result.x
+                        
+            except Exception as e:
+                logger.warning(f"Optimization failed with initialization {type(init_strengths)}: {e}")
+                continue
+        
+        if best_result is None:
+            logger.warning("All Bradley-Terry optimizations failed, using simple approximation")
+            return self._fallback_estimation(wins, totals)
+        
+        return best_result
+
+    def _validate_connectivity(self, wins: np.ndarray, totals: np.ndarray) -> None:
+        """Check if comparison graph is connected."""        
+        G = nx.Graph()
+        G.add_nodes_from(range(self.n_items))
+        
+        for i in range(self.n_items):
+            for j in range(i + 1, self.n_items):
+                if totals[i, j] > 0:
+                    G.add_edge(i, j)
+        
+        if not nx.is_connected(G):
+            components = list(nx.connected_components(G))
+            logger.warning(f"Comparison graph has {len(components)} disconnected components")
+            # Could handle by fitting separate models for each component
+
+    def _initialize_from_win_rates(self, wins: np.ndarray, totals: np.ndarray) -> np.ndarray:
+        """Initialize strengths based on empirical win rates."""
+        win_rates = np.zeros(self.n_items)
+        
+        for i in range(self.n_items):
+            total_games = 0
+            total_wins = 0
+            
+            for j in range(self.n_items):
+                if i != j and totals[i, j] > 0:
+                    total_games += totals[i, j]
+                    total_wins += wins[i, j]
+            
+            if total_games > 0:
+                rate = total_wins / total_games
+                # Convert win rate to log-odds (strength estimate)
+                rate = np.clip(rate, 0.01, 0.99)  # Avoid extremes
+                win_rates[i] = np.log(rate / (1 - rate))
+        
+        # Center around zero
+        return win_rates - np.mean(win_rates)
+
+    def _fallback_estimation(self, wins: np.ndarray, totals: np.ndarray) -> np.ndarray:
+        """Fallback method when optimization fails."""
+        logger.warning("Using fallback Bradley-Terry estimation")
+        return self._initialize_from_win_rates(wins, totals)
+
     def get_rankings(self) -> List[Tuple[str, float]]:
         """Get items ranked by strength (highest to lowest)."""
         if not self.fitted:
@@ -139,7 +247,7 @@ class MOOObjectiveAnalyzer:
                 'bootstrap_iterations': 1000,
                 'confidence_level': 0.95,
                 'figure_dpi': 300,
-                'regularization': 1e-10,
+                'regularization': 1e-4,
                 'frequency_weighting_method': 'inverse_frequency'
             }
     
@@ -876,6 +984,11 @@ class MOOObjectiveAnalyzer:
             "- No corrections across objectives (each addresses distinct mechanics)",
             "- Results inform engineering decisions for keyboard optimization",
             "",
+            "REPORTING FORMAT:",
+            "- Effect size: Magnitude of practical difference (primary interest)",
+            "- Confidence interval: Uncertainty quantification around effect",
+            "- P-value: Evidence that preference is detectable above noise",
+            "",
             "OBJECTIVES DETAILED RESULTS:",
             "=" * 35,
             ""
@@ -899,106 +1012,216 @@ class MOOObjectiveAnalyzer:
                 f"Description: {obj_results.get('description', 'No description')}",
                 f"Method: {obj_results.get('method', 'unknown')}",
                 f"Instances analyzed: {obj_results.get('n_instances', 'unknown')}",
-                f"Result: {obj_results.get('interpretation', 'No interpretation')}",
                 ""
             ])
             
             # Add specific results based on objective type
             if 'bradley_terry' in obj_name and 'rankings' in obj_results:
-                if 'weighted_rankings' in obj_results:
-                    rankings = obj_results['weighted_rankings']
-                    cis = obj_results.get('confidence_intervals', {})
+                rankings = obj_results['rankings']
+                cis = obj_results.get('confidence_intervals', {})
+                
+                report_lines.extend([
+                    "  BRADLEY-TERRY RANKINGS:",
+                    "  Top 5 preferred keys (pure key quality):",
+                    ""
+                ])
+                for j, (key, strength) in enumerate(rankings[:5], 1):
+                    ci_lower, ci_upper = cis.get(key, (np.nan, np.nan))
+                    ci_str = f"[{ci_lower:.3f}, {ci_upper:.3f}]" if not np.isnan(ci_lower) else "[CI unavailable]"
                     
-                    report_lines.extend([
-                        "  Top 5 preferred keys (weighted Bradley-Terry):",
-                        ""
-                    ])
-                    for j, (key, strength) in enumerate(rankings[:5], 1):
-                        ci_lower, ci_upper = cis.get(key, (np.nan, np.nan))
-                        ci_str = f"[{ci_lower:.2f}, {ci_upper:.2f}]" if not np.isnan(ci_lower) else "[CI unavailable]"
-                        
-                        pos = self.key_positions.get(key, KeyPosition('', 0, 0, 0))
-                        report_lines.append(f"    {j}. {key.upper()} (F{pos.finger}, R{pos.row}): {strength:.3f} {ci_str}")
-                    
-                    # Show frequency weighting effects
-                    if 'frequency_comparison' in obj_results:
-                        freq_comp = obj_results['frequency_comparison']
-                        max_change = freq_comp.get('max_rank_change', 0)
-                        large_changes = freq_comp.get('large_changes', [])
-                        
-                        report_lines.extend([
-                            "",
-                            f"  Frequency weighting effects:",
-                            f"    Maximum rank change: {max_change} positions",
-                            f"    Keys with large changes: {', '.join([k.upper() for k in large_changes]) if large_changes else 'None'}"
-                        ])
+                    pos = self.key_positions.get(key, KeyPosition('', 0, 0, 0))
+                    report_lines.append(f"    {j}. {key.upper()} (F{pos.finger}, R{pos.row}): "
+                                    f"strength = {strength:.3f}, 95% CI = {ci_str}")
+                
+                report_lines.extend([
+                    "",
+                    f"  INTERPRETATION: Strength > 0 indicates above-average preference",
+                    f"  Statistical validity: Bradley-Terry model with regularization",
+                    ""
+                ])
                 
             elif 'pairwise' in obj_name and 'pairwise_results' in obj_results:
                 pair_results = obj_results['pairwise_results']
                 report_lines.extend([
-                    f"  Analyzed {len(pair_results)} key pairs:",
+                    f"  PAIRWISE KEY COMPARISONS:",
+                    f"  Analyzed {len(pair_results)} key pairs with sufficient data:",
                     ""
                 ])
                 
-                # Show top preferences
+                # Show top preferences with full statistical reporting
                 sorted_pairs = sorted(pair_results.items(), 
                                     key=lambda x: abs(x[1]['preference_rate'] - 0.5), reverse=True)
                 
                 for (key1, key2), data in sorted_pairs[:5]:
                     pref_rate = data['preference_rate']
                     ci_lower, ci_upper = data['ci_lower'], data['ci_upper']
+                    p_value = data.get('p_value', np.nan)
                     n_inst = data['n_instances']
                     
+                    # Determine winner and effect size
                     if pref_rate > 0.5:
                         winner, loser = key1.upper(), key2.upper()
+                        effect_size = pref_rate - 0.5
                     else:
                         winner, loser = key2.upper(), key1.upper()
                         pref_rate = 1 - pref_rate
+                        effect_size = pref_rate - 0.5
                         ci_lower, ci_upper = 1 - ci_upper, 1 - ci_lower
                     
-                    report_lines.append(f"    {winner} > {loser}: {pref_rate:.1%} "
-                                      f"[{ci_lower:.1%}, {ci_upper:.1%}] (n={n_inst})")
+                    # Statistical significance indicator
+                    sig_indicator = ""
+                    if not np.isnan(p_value):
+                        if p_value < 0.001:
+                            sig_indicator = " ***"
+                        elif p_value < 0.01:
+                            sig_indicator = " **"
+                        elif p_value < 0.05:
+                            sig_indicator = " *"
+                    
+                    report_lines.extend([
+                        f"    {winner} > {loser}:",
+                        f"      Preference rate: {pref_rate:.1%} (effect size: {effect_size:.1%})",
+                        f"      95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]",
+                        f"      Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_inst})" if not np.isnan(p_value) else f"      Statistical test: Not available (n={n_inst})",
+                        ""
+                    ])
                 
             elif obj_name in ['row_separation', 'column_separation'] and 'preference_rate' in obj_results:
                 pref_rate = obj_results['preference_rate']
-                ci_lower = obj_results['ci_lower']
-                ci_upper = obj_results['ci_upper']
+                ci_lower = obj_results.get('ci_lower', np.nan)
+                ci_upper = obj_results.get('ci_upper', np.nan)
+                p_value = obj_results.get('p_value', np.nan)
+                n_instances = obj_results.get('n_instances', 0)
+                
+                # Calculate effect size (departure from no preference)
+                effect_size = abs(pref_rate - 0.5)
+                
+                # Statistical significance indicator
+                sig_indicator = ""
+                if not np.isnan(p_value):
+                    if p_value < 0.001:
+                        sig_indicator = " ***"
+                    elif p_value < 0.01:
+                        sig_indicator = " **"
+                    elif p_value < 0.05:
+                        sig_indicator = " *"
                 
                 report_lines.extend([
-                    f"  Overall preference rate: {pref_rate:.1%} favor smaller distances",
-                    f"  95% Confidence interval: [{ci_lower:.1%}, {ci_upper:.1%}]",
+                    f"  OVERALL {obj_name.upper().replace('_', ' ')} PREFERENCE:",
+                    f"  Preference rate: {pref_rate:.1%} favor smaller distances (effect size: {effect_size:.1%})",
+                    f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
+                    f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     ""
                 ])
                 
-                # Show breakdowns
-                if 'comparison_results' in obj_results:
-                    breakdown = obj_results['comparison_results']
-                elif 'pattern_results' in obj_results:
-                    breakdown = obj_results['pattern_results']
-                else:
-                    breakdown = {}
+                # Show breakdowns with statistical tests
+                breakdown_key = 'comparison_results' if 'comparison_results' in obj_results else 'pattern_results'
+                breakdown = obj_results.get(breakdown_key, {})
                 
                 if breakdown:
-                    report_lines.append("  Breakdown by type:")
+                    report_lines.extend([
+                        f"  BREAKDOWN BY TYPE:",
+                        ""
+                    ])
                     for comp_type, comp_data in breakdown.items():
                         comp_pref = comp_data['preference_rate']
-                        comp_ci_lower = comp_data['ci_lower']
-                        comp_ci_upper = comp_data['ci_upper']
+                        comp_ci_lower = comp_data.get('ci_lower', np.nan)
+                        comp_ci_upper = comp_data.get('ci_upper', np.nan)
+                        comp_p_value = comp_data.get('p_value', np.nan)
                         comp_n = comp_data['n_instances']
+                        comp_effect = abs(comp_pref - 0.5)
+                        
+                        # Statistical significance indicator
+                        comp_sig_indicator = ""
+                        if not np.isnan(comp_p_value):
+                            if comp_p_value < 0.001:
+                                comp_sig_indicator = " ***"
+                            elif comp_p_value < 0.01:
+                                comp_sig_indicator = " **"
+                            elif comp_p_value < 0.05:
+                                comp_sig_indicator = " *"
                         
                         type_name = comp_type.replace('_', ' ').title()
-                        report_lines.append(f"    {type_name}: {comp_pref:.1%} "
-                                          f"[{comp_ci_lower:.1%}, {comp_ci_upper:.1%}] (n={comp_n})")
-                    
-                report_lines.append("")
+                        report_lines.extend([
+                            f"    {type_name}:",
+                            f"      Preference rate: {comp_pref:.1%} (effect size: {comp_effect:.1%})",
+                            f"      95% CI: [{comp_ci_lower:.1%}, {comp_ci_upper:.1%}]" if not np.isnan(comp_ci_lower) else "      95% CI: Not available",
+                            f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
+                            ""
+                        ])
+                        
+            elif obj_name == 'column_4_vs_5' and 'preference_rate' in obj_results:
+                pref_rate = obj_results['preference_rate']
+                ci_lower = obj_results.get('ci_lower', np.nan)
+                ci_upper = obj_results.get('ci_upper', np.nan)
+                p_value = obj_results.get('p_value', np.nan)
+                n_instances = obj_results.get('n_instances', 0)
+                
+                # Calculate effect size
+                effect_size = abs(pref_rate - 0.5)
+                
+                # Statistical significance indicator
+                sig_indicator = ""
+                if not np.isnan(p_value):
+                    if p_value < 0.001:
+                        sig_indicator = " ***"
+                    elif p_value < 0.01:
+                        sig_indicator = " **"
+                    elif p_value < 0.05:
+                        sig_indicator = " *"
+                
+                report_lines.extend([
+                    f"  COLUMN 4 vs 5 PREFERENCE:",
+                    f"  Column 4 preference rate: {pref_rate:.1%} (effect size: {effect_size:.1%})",
+                    f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
+                    f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
+                    "",
+                    f"  INTERPRETATION:",
+                    f"  - Column 4 keys (R, F, V) vs Column 5 keys (T, G, B)",
+                    f"  - Rate > 50% indicates preference for index finger column (Column 4)",
+                    ""
+                ])
+            
+            # Add interpretation for each objective
+            interpretation = obj_results.get('interpretation', '')
+            if interpretation:
+                report_lines.extend([
+                    f"  SUMMARY: {interpretation}",
+                    ""
+                ])
+        
+        # Add statistical interpretation guide
+        report_lines.extend([
+            "",
+            "STATISTICAL INTERPRETATION GUIDE:",
+            "=" * 35,
+            "Effect Size Interpretation:",
+            "- Small effect: 5-15% departure from 50%",
+            "- Medium effect: 15-25% departure from 50%", 
+            "- Large effect: >25% departure from 50%",
+            "",
+            "P-value Significance Levels:",
+            "- *** p < 0.001 (very strong evidence)",
+            "- ** p < 0.01 (strong evidence)",
+            "- * p < 0.05 (moderate evidence)",
+            "- No asterisk: p ≥ 0.05 (weak/no evidence)",
+            "",
+            "Confidence Intervals:",
+            "- Narrow CI: More precise estimate",
+            "- CI excluding 50%: Statistically detectable preference",
+            "- CI including 50%: Preference not clearly detectable",
+            "",
+            "Note: Focus on effect sizes for practical significance in MOO design.",
+            "P-values confirm detectability but don't indicate importance."
+        ])
         
         # Save report
         report_path = os.path.join(output_folder, 'moo_objectives_report.txt')
         with open(report_path, 'w') as f:
             f.write('\n'.join(report_lines))
 
-        logger.info(f"Report saved to {report_path}")
-
+        logger.info(f"Comprehensive report with statistical tests saved to {report_path}")
+        
     def _save_key_preference_tables(self, results: Dict[str, Any], output_folder: str) -> None:
         """Save detailed CSV tables for all key preference methods."""
         
@@ -1070,11 +1293,6 @@ class MOOObjectiveAnalyzer:
         
         # Get all available keys
         all_keys = set()
-        
-        # From Bradley-Terry
-        if 'bradley_terry_preferences' in results and results['bradley_terry_preferences'].get('status') != 'insufficient_data':
-            bt_weighted = results['bradley_terry_preferences'].get('weighted_rankings', [])
-            all_keys.update([key for key, _ in bt_weighted])
         
         # From same-letter
         if 'same_letter_preferences' in results and results['same_letter_preferences'].get('status') != 'insufficient_data':

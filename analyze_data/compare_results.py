@@ -3,17 +3,18 @@
 Dataset Results Comparison Script
 
 This script compares keyboard preference analysis results between different datasets,
-focusing on differences in hypothesis testing, key preferences, and transition preferences.
+focusing on differences in hypothesis testing, key preferences, transition preferences,
+and MOO objectives analysis.
 
 Usage:
-    python compare_datasets.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --output comparison_report/
-    
-    # Compare specific analysis types only
-    python compare_datasets.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --focus hypotheses
-    python compare_datasets.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --focus keys
-    python compare_datasets.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --focus transitions
-"""
+    poetry run python3 compare_results.py --dataset1 output/nonProlific/analyze_objectives --dataset2 output/Prolific/analyze_objectives --output compare_results
 
+    # Compare specific analysis types only
+    python compare_results.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --focus hypotheses
+    python compare_results.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --focus keys
+    python compare_results.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --focus transitions
+    python compare_results.py --dataset1 results/dataset1/ --dataset2 results/dataset2/ --focus moo
+"""
 import os
 import argparse
 import pandas as pd
@@ -74,6 +75,13 @@ class DatasetComparator:
             comparison_results['transition_comparison'] = transition_comparison
             self._save_transition_comparison(transition_comparison)
         
+        # Compare MOO objectives
+        if focus is None or focus == 'moo':
+            print("Comparing MOO objectives analysis results...")
+            moo_comparison = self.compare_moo_objectives()
+            comparison_results['moo_comparison'] = moo_comparison
+            self._save_moo_comparison(moo_comparison)
+        
         # Generate overall summary
         if focus is None:
             print("Generating overall comparison summary...")
@@ -83,166 +91,177 @@ class DatasetComparator:
         print(f"Comparison complete! Results saved to {self.output_path}")
         return comparison_results
     
-    def compare_hypothesis_results(self) -> Dict[str, Any]:
-        """Compare focused hypothesis testing results between datasets."""
+    def compare_moo_objectives(self) -> Dict[str, Any]:
+        """Compare MOO objectives analysis results between datasets."""
         
-        # Load hypothesis data
-        hyp1_data = self._load_hypothesis_data(self.dataset1_path)
-        hyp2_data = self._load_hypothesis_data(self.dataset2_path)
+        # Load MOO data
+        moo1_data = self._load_moo_data(self.dataset1_path)
+        moo2_data = self._load_moo_data(self.dataset2_path)
         
-        if not hyp1_data or not hyp2_data:
-            return {'error': 'Could not load hypothesis data from one or both datasets'}
+        if not moo1_data or not moo2_data:
+            return {'error': 'Could not load MOO objectives data from one or both datasets'}
         
         comparison = {
-            'dataset1_significant': len(hyp1_data.get('significant_results', [])),
-            'dataset2_significant': len(hyp2_data.get('significant_results', [])),
-            'dataset1_large_effects': len(hyp1_data.get('large_effects', [])),
-            'dataset2_large_effects': len(hyp2_data.get('large_effects', [])),
-            'significance_changes': [],
-            'effect_size_changes': [],
-            'direction_changes': [],
-            'detailed_comparison': []
+            'same_letter_comparison': {},
+            'pairwise_comparison': {},
+            'row_separation_comparison': {},
+            'column_separation_comparison': {},
+            'column_4_vs_5_comparison': {},
+            'overall_consistency': {}
         }
         
-        # Load detailed hypothesis results for direction analysis
-        hyp1_detailed = self._load_detailed_hypothesis_data(self.dataset1_path)
-        hyp2_detailed = self._load_detailed_hypothesis_data(self.dataset2_path)
+        # Compare same-letter preferences (Bradley-Terry rankings)
+        comparison['same_letter_comparison'] = self._compare_same_letter_preferences(moo1_data, moo2_data)
         
-        # Compare individual hypotheses
-        all_hypotheses = set()
-        if 'hypothesis_overview' in hyp1_data:
-            all_hypotheses.update(hyp1_data['hypothesis_overview'].keys())
-        if 'hypothesis_overview' in hyp2_data:
-            all_hypotheses.update(hyp2_data['hypothesis_overview'].keys())
+        # Compare pairwise key preferences
+        comparison['pairwise_comparison'] = self._compare_pairwise_preferences(moo1_data, moo2_data)
         
-        for hyp_name in all_hypotheses:
-            hyp1_info = hyp1_data.get('hypothesis_overview', {}).get(hyp_name, {})
-            hyp2_info = hyp2_data.get('hypothesis_overview', {}).get(hyp_name, {})
-            
-            # Skip if missing from either dataset
-            if not hyp1_info or not hyp2_info:
-                continue
-            
-            # Compare significance
-            sig1 = hyp1_info.get('significant', False)
-            sig2 = hyp2_info.get('significant', False)
-            
-            if sig1 != sig2:
-                comparison['significance_changes'].append({
-                    'hypothesis': hyp_name,
-                    'description': hyp1_info.get('description', ''),
-                    'dataset1_significant': sig1,
-                    'dataset2_significant': sig2,
-                    'change_type': 'gained_significance' if sig2 and not sig1 else 'lost_significance'
-                })
-            
-            # Compare effect sizes
-            effect1 = hyp1_info.get('effect_size', 0)
-            effect2 = hyp2_info.get('effect_size', 0)
-            effect_diff = effect2 - effect1
-            
-            if abs(effect_diff) > 0.05:  # Meaningful effect size change
-                comparison['effect_size_changes'].append({
-                    'hypothesis': hyp_name,
-                    'description': hyp1_info.get('description', ''),
-                    'dataset1_effect': effect1,
-                    'dataset2_effect': effect2,
-                    'effect_difference': effect_diff,
-                    'change_magnitude': 'large' if abs(effect_diff) > 0.15 else 'medium' if abs(effect_diff) > 0.10 else 'small'
-                })
-            
-            # CHECK FOR DIRECTION CHANGES
-            hyp1_detailed_info = hyp1_detailed.get('hypothesis_results', {}).get(hyp_name, {})
-            hyp2_detailed_info = hyp2_detailed.get('hypothesis_results', {}).get(hyp_name, {})
-            
-            if ('statistics' in hyp1_detailed_info and 'statistics' in hyp2_detailed_info):
-                stats1 = hyp1_detailed_info['statistics']
-                stats2 = hyp2_detailed_info['statistics']
-                
-                prop1 = stats1.get('proportion_val1_wins', 0.5)
-                prop2 = stats2.get('proportion_val1_wins', 0.5)
-                values_compared = stats1.get('values_compared', ('val1', 'val2'))
-                
-                # Check if direction changed (preference flipped)
-                direction1 = 'val1' if prop1 > 0.5 else 'val2' if prop1 < 0.5 else 'neutral'
-                direction2 = 'val1' if prop2 > 0.5 else 'val2' if prop2 < 0.5 else 'neutral'
-                
-                if direction1 != direction2 and direction1 != 'neutral' and direction2 != 'neutral':
-                    # Map val1/val2 to actual descriptive names
-                    val1_name, val2_name = values_compared
-                    
-                    preferred1 = val1_name if direction1 == 'val1' else val2_name
-                    preferred2 = val1_name if direction2 == 'val1' else val2_name
-                    
-                    # Calculate the correct proportions for the preferred options
-                    preferred1_proportion = prop1 if direction1 == 'val1' else (1 - prop1)
-                    preferred2_proportion = prop2 if direction2 == 'val1' else (1 - prop2)
-                    
-                    # Get effect sizes for both datasets
-                    effect1 = stats1.get('effect_size', 0)
-                    effect2 = stats2.get('effect_size', 0)
-                    
-                    comparison['direction_changes'].append({
-                        'hypothesis': hyp_name,
-                        'description': hyp1_info.get('description', ''),
-                        'values_compared': values_compared,
-                        'dataset1_preferred': preferred1,
-                        'dataset2_preferred': preferred2,
-                        'dataset1_preferred_proportion': preferred1_proportion,
-                        'dataset2_preferred_proportion': preferred2_proportion,
-                        'dataset1_val1_proportion': prop1,  # Keep original for reference
-                        'dataset2_val1_proportion': prop2,  # Keep original for reference
-                        'dataset1_effect_size': effect1,
-                        'dataset2_effect_size': effect2,
-                        'flip_magnitude': abs(prop1 - prop2),
-                        'effect_size_change': effect2 - effect1
-                    })
-            
-            # Detailed comparison for all hypotheses
-            comparison['detailed_comparison'].append({
-                'hypothesis': hyp_name,
-                'description': hyp1_info.get('description', ''),
-                'dataset1': {
-                    'significant': sig1,
-                    'effect_size': effect1,
-                    'practical_significance': hyp1_info.get('practical_significance', 'unknown'),
-                    'n_comparisons': hyp1_info.get('n_comparisons', 0)
-                },
-                'dataset2': {
-                    'significant': sig2,
-                    'effect_size': effect2,
-                    'practical_significance': hyp2_info.get('practical_significance', 'unknown'),
-                    'n_comparisons': hyp2_info.get('n_comparisons', 0)
-                },
-                'effect_difference': effect_diff
-            })
+        # Compare row separation preferences
+        comparison['row_separation_comparison'] = self._compare_row_separation(moo1_data, moo2_data)
         
-        # Sort by magnitude/importance
-        comparison['effect_size_changes'].sort(key=lambda x: abs(x['effect_difference']), reverse=True)
-        comparison['direction_changes'].sort(key=lambda x: x['flip_magnitude'], reverse=True)
-        comparison['detailed_comparison'].sort(key=lambda x: abs(x['effect_difference']), reverse=True)
+        # Compare column separation preferences
+        comparison['column_separation_comparison'] = self._compare_column_separation(moo1_data, moo2_data)
+        
+        # Compare column 4 vs 5 preferences
+        comparison['column_4_vs_5_comparison'] = self._compare_column_4_vs_5(moo1_data, moo2_data)
+        
+        # Calculate overall consistency metrics
+        comparison['overall_consistency'] = self._calculate_moo_consistency(comparison)
         
         return comparison
     
-    def compare_key_preferences(self) -> Dict[str, Any]:
-        """Compare key preference results between datasets."""
+    def _load_moo_data(self, dataset_path: Path) -> Dict[str, Any]:
+        """Load MOO objectives analysis results from a dataset."""
         
-        # Load key preference data
-        key1_data = self._load_key_data(self.dataset1_path)
-        key2_data = self._load_key_data(self.dataset2_path)
+        moo_data = {
+            'same_letter_bt': None,
+            'pairwise_preferences': None,
+            'row_separation': None,
+            'column_separation': None,
+            'column_4_vs_5': None,
+            'report_data': None
+        }
         
-        if key1_data.empty or key2_data.empty:
-            return {'error': 'Could not load key preference data from one or both datasets'}
+        # Load Bradley-Terry same-letter preferences
+        same_letter_path = dataset_path / 'key_preferences_same_letter_pairs_BT.csv'
+        if same_letter_path.exists():
+            try:
+                moo_data['same_letter_bt'] = pd.read_csv(same_letter_path)
+                print(f"Loaded same-letter BT data: {len(moo_data['same_letter_bt'])} keys")
+            except Exception as e:
+                print(f"Warning: Could not load same-letter BT data from {same_letter_path}: {e}")
+        else:
+            print(f"Warning: Same-letter BT file not found: {same_letter_path}")
         
-        # Merge datasets on key
-        merged = pd.merge(key1_data, key2_data, on='Key', suffixes=('_dataset1', '_dataset2'), how='outer')
+        # Load pairwise preferences
+        pairwise_path = dataset_path / 'key_preferences_bigram_pairs.csv'
+        if pairwise_path.exists():
+            try:
+                moo_data['pairwise_preferences'] = pd.read_csv(pairwise_path)
+                print(f"Loaded pairwise preferences: {len(moo_data['pairwise_preferences'])} pairs")
+            except Exception as e:
+                print(f"Warning: Could not load pairwise data from {pairwise_path}: {e}")
+        else:
+            print(f"Warning: Pairwise preferences file not found: {pairwise_path}")
+        
+        # Parse report for other objectives
+        report_path = dataset_path / 'moo_objectives_report.txt'
+        if report_path.exists():
+            try:
+                moo_data['report_data'] = self._parse_moo_report(report_path)
+                print(f"Parsed MOO report data from {report_path}")
+            except Exception as e:
+                print(f"Warning: Could not parse MOO report from {report_path}: {e}")
+        else:
+            print(f"Warning: MOO report file not found: {report_path}")
+        
+        return moo_data
+    
+    def _parse_moo_report(self, report_path: Path) -> Dict[str, Any]:
+        """Parse MOO objectives report for numerical results."""
+        
+        with open(report_path, 'r') as f:
+            content = f.read()
+        
+        report_data = {}
+        
+        # Extract row separation data
+        row_match = re.search(r'ROW SEPARATION:.*?Result: Row separation preference: ([\d.]+)% favor smaller distances.*?Overall preference rate: ([\d.]+)% favor smaller distances.*?95% Confidence interval: \[([\d.]+)%, ([\d.]+)%\]', content, re.DOTALL)
+        if row_match:
+            report_data['row_separation'] = {
+                'preference_rate': float(row_match.group(1)) / 100,
+                'ci_lower': float(row_match.group(3)) / 100,
+                'ci_upper': float(row_match.group(4)) / 100
+            }
+            
+            # Extract breakdown by type
+            breakdown_matches = re.findall(r'([\w\s]+): ([\d.]+)% \[([\d.]+)%, ([\d.]+)%\] \(n=(\d+)\)', content)
+            if breakdown_matches:
+                report_data['row_separation']['breakdown'] = {}
+                for match in breakdown_matches:
+                    comp_type = match[0].strip()
+                    if 'apart' in comp_type.lower() or 'row' in comp_type.lower():
+                        report_data['row_separation']['breakdown'][comp_type] = {
+                            'preference_rate': float(match[1]) / 100,
+                            'ci_lower': float(match[2]) / 100,
+                            'ci_upper': float(match[3]) / 100,
+                            'n_instances': int(match[4])
+                        }
+        
+        # Extract column separation data
+        col_match = re.search(r'COLUMN SEPARATION:.*?Result: Column separation preference: ([\d.]+)% favor smaller distances.*?Overall preference rate: ([\d.]+)% favor smaller distances.*?95% Confidence interval: \[([\d.]+)%, ([\d.]+)%\]', content, re.DOTALL)
+        if col_match:
+            report_data['column_separation'] = {
+                'preference_rate': float(col_match.group(1)) / 100,
+                'ci_lower': float(col_match.group(3)) / 100,
+                'ci_upper': float(col_match.group(4)) / 100
+            }
+        
+        # Extract column 4 vs 5 data
+        col45_match = re.search(r'COLUMN 4 VS 5:.*?Result: (.*)', content, re.DOTALL)
+        if col45_match:
+            result_text = col45_match.group(1).strip()
+            if 'Column 4 preference rate:' in result_text:
+                rate_match = re.search(r'Column 4 preference rate: ([\d.]+)%', result_text)
+                if rate_match:
+                    report_data['column_4_vs_5'] = {
+                        'preference_rate': float(rate_match.group(1)) / 100,
+                        'available': True
+                    }
+            else:
+                report_data['column_4_vs_5'] = {
+                    'available': False,
+                    'reason': result_text
+                }
+        
+        # Extract instance counts
+        instance_matches = re.findall(r'Instances analyzed: (\d+)', content)
+        if len(instance_matches) >= 3:
+            report_data['instance_counts'] = {
+                'same_letter': int(instance_matches[0]) if len(instance_matches) > 0 else 0,
+                'row_separation': int(instance_matches[1]) if len(instance_matches) > 1 else 0,
+                'column_separation': int(instance_matches[2]) if len(instance_matches) > 2 else 0
+            }
+        
+        return report_data
+    
+    def _compare_same_letter_preferences(self, moo1_data: Dict, moo2_data: Dict) -> Dict[str, Any]:
+        """Compare same-letter Bradley-Terry preferences between datasets."""
+        
+        bt1_df = moo1_data.get('same_letter_bt')
+        bt2_df = moo2_data.get('same_letter_bt')
+        
+        if bt1_df is None or bt2_df is None or bt1_df.empty or bt2_df.empty:
+            return {'error': 'Same-letter BT data not available for both datasets'}
+        
+        # Merge on Key
+        merged = pd.merge(bt1_df, bt2_df, on='Key', suffixes=('_dataset1', '_dataset2'), how='outer')
         
         comparison = {
             'ranking_changes': [],
             'strength_changes': [],
-            'significance_changes': [],
-            'top_movers': [],
-            'correlation_stats': {}
+            'correlation_stats': {},
+            'top_movers': []
         }
         
         # Calculate ranking changes
@@ -284,8 +303,6 @@ class DatasetComparator:
         # Sort changes by magnitude
         comparison['ranking_changes'].sort(key=lambda x: abs(x['rank_change']), reverse=True)
         comparison['strength_changes'].sort(key=lambda x: abs(x['strength_difference']), reverse=True)
-        
-        # Get top movers (combine ranking and strength changes)
         comparison['top_movers'] = comparison['ranking_changes'][:5]
         
         # Calculate correlation statistics
@@ -303,170 +320,385 @@ class DatasetComparator:
         
         return comparison
     
-    def compare_transition_preferences(self) -> Dict[str, Any]:
-        """Compare transition preference results between datasets."""
+    def _compare_pairwise_preferences(self, moo1_data: Dict, moo2_data: Dict) -> Dict[str, Any]:
+        """Compare pairwise key preferences between datasets."""
         
-        # Load transition preference data
-        trans1_data = self._load_transition_data(self.dataset1_path)
-        trans2_data = self._load_transition_data(self.dataset2_path)
+        pair1_df = moo1_data.get('pairwise_preferences')
+        pair2_df = moo2_data.get('pairwise_preferences')
         
-        if trans1_data.empty or trans2_data.empty:
-            return {'error': 'Could not load transition preference data from one or both datasets'}
+        if pair1_df is None or pair2_df is None or pair1_df.empty or pair2_df.empty:
+            return {'error': 'Pairwise preference data not available for both datasets'}
         
-        # Add rankings to the data
-        trans1_data['Rank_dataset1'] = range(1, len(trans1_data) + 1)
-        trans2_data['Rank_dataset2'] = range(1, len(trans2_data) + 1)
+        # Create comparison identifier
+        pair1_df['comparison'] = pair1_df['Key1'] + '_vs_' + pair1_df['Key2']
+        pair2_df['comparison'] = pair2_df['Key1'] + '_vs_' + pair2_df['Key2']
         
-        # Merge datasets on transition type
-        merged = pd.merge(trans1_data, trans2_data, on='Transition_Type', suffixes=('_dataset1', '_dataset2'), how='outer')
+        # Merge on comparison
+        merged = pd.merge(pair1_df, pair2_df, on='comparison', suffixes=('_dataset1', '_dataset2'), how='inner')
         
         comparison = {
-            'ranking_changes': [],
-            'strength_changes': [],
-            'top_movers': [],
-            'correlation_stats': {}
+            'preference_changes': [],
+            'direction_flips': [],
+            'strength_changes': []
         }
         
-        # Calculate ranking changes
         for _, row in merged.iterrows():
-            transition = row['Transition_Type']
-            rank1 = row.get('Rank_dataset1', np.nan)
-            rank2 = row.get('Rank_dataset2', np.nan)
+            comp = row['comparison']
+            pref1 = row['Key1_Preference_Rate_dataset1']
+            pref2 = row['Key1_Preference_Rate_dataset2']
             
-            if pd.notna(rank1) and pd.notna(rank2):
-                rank_change = rank1 - rank2  # Positive = moved up in dataset2
-                
-                if abs(rank_change) >= 3:  # Meaningful ranking change for transitions
-                    comparison['ranking_changes'].append({
-                        'transition': transition,
-                        'dataset1_rank': int(rank1),
-                        'dataset2_rank': int(rank2),
-                        'rank_change': int(rank_change),
-                        'direction': 'improved' if rank_change > 0 else 'declined'
-                    })
-        
-        # Calculate strength changes
-        for _, row in merged.iterrows():
-            transition = row['Transition_Type']
-            strength1 = row.get('BT_Strength_dataset1', np.nan)
-            strength2 = row.get('BT_Strength_dataset2', np.nan)
+            # Check for direction flip (preference reversal)
+            if (pref1 > 0.5) != (pref2 > 0.5):
+                comparison['direction_flips'].append({
+                    'comparison': comp,
+                    'dataset1_preference_rate': float(pref1),
+                    'dataset2_preference_rate': float(pref2),
+                    'flip_magnitude': abs(pref1 - pref2),
+                    'dataset1_favored': row['Favored_Key_dataset1'],
+                    'dataset2_favored': row['Favored_Key_dataset2']
+                })
             
-            if pd.notna(strength1) and pd.notna(strength2):
-                strength_diff = strength2 - strength1
-                
-                if abs(strength_diff) > 0.05:  # Meaningful strength change for transitions
-                    comparison['strength_changes'].append({
-                        'transition': transition,
-                        'dataset1_strength': float(strength1),
-                        'dataset2_strength': float(strength2),
-                        'strength_difference': float(strength_diff),
-                        'direction': 'stronger' if strength_diff > 0 else 'weaker'
-                    })
+            # Check for significant preference changes
+            pref_diff = abs(pref2 - pref1)
+            if pref_diff > 0.1:  # 10+ percentage point change
+                comparison['preference_changes'].append({
+                    'comparison': comp,
+                    'dataset1_preference_rate': float(pref1),
+                    'dataset2_preference_rate': float(pref2),
+                    'preference_difference': float(pref2 - pref1),
+                    'magnitude': 'large' if pref_diff > 0.2 else 'medium'
+                })
         
-        # Sort changes by magnitude
-        comparison['ranking_changes'].sort(key=lambda x: abs(x['rank_change']), reverse=True)
-        comparison['strength_changes'].sort(key=lambda x: abs(x['strength_difference']), reverse=True)
-        
-        # Get top movers
-        comparison['top_movers'] = comparison['ranking_changes'][:10]
-        
-        # Calculate correlation statistics
-        valid_rows = merged.dropna(subset=['BT_Strength_dataset1', 'BT_Strength_dataset2'])
-        if len(valid_rows) > 3:
-            correlation_coef, correlation_p = stats.pearsonr(
-                valid_rows['BT_Strength_dataset1'], 
-                valid_rows['BT_Strength_dataset2']
-            )
-            comparison['correlation_stats'] = {
-                'correlation_coefficient': float(correlation_coef),
-                'correlation_p_value': float(correlation_p),
-                'n_transitions_compared': len(valid_rows)
-            }
+        # Sort by magnitude
+        comparison['direction_flips'].sort(key=lambda x: x['flip_magnitude'], reverse=True)
+        comparison['preference_changes'].sort(key=lambda x: abs(x['preference_difference']), reverse=True)
         
         return comparison
     
+    def _compare_row_separation(self, moo1_data: Dict, moo2_data: Dict) -> Dict[str, Any]:
+        """Compare row separation preferences between datasets."""
+        
+        row1_data = moo1_data.get('report_data', {}).get('row_separation')
+        row2_data = moo2_data.get('report_data', {}).get('row_separation')
+        
+        if not row1_data or not row2_data:
+            return {'error': 'Row separation data not available for both datasets'}
+        
+        comparison = {
+            'overall_change': {
+                'dataset1_preference_rate': row1_data['preference_rate'],
+                'dataset2_preference_rate': row2_data['preference_rate'],
+                'preference_difference': row2_data['preference_rate'] - row1_data['preference_rate'],
+                'ci_overlap': self._check_ci_overlap(
+                    row1_data['ci_lower'], row1_data['ci_upper'],
+                    row2_data['ci_lower'], row2_data['ci_upper']
+                )
+            },
+            'breakdown_changes': []
+        }
+        
+        # Compare breakdown by type if available
+        breakdown1 = row1_data.get('breakdown', {})
+        breakdown2 = row2_data.get('breakdown', {})
+        
+        common_types = set(breakdown1.keys()) & set(breakdown2.keys())
+        for comp_type in common_types:
+            data1 = breakdown1[comp_type]
+            data2 = breakdown2[comp_type]
+            
+            comparison['breakdown_changes'].append({
+                'comparison_type': comp_type,
+                'dataset1_preference_rate': data1['preference_rate'],
+                'dataset2_preference_rate': data2['preference_rate'],
+                'preference_difference': data2['preference_rate'] - data1['preference_rate'],
+                'dataset1_n': data1['n_instances'],
+                'dataset2_n': data2['n_instances']
+            })
+        
+        return comparison
+    
+    def _compare_column_separation(self, moo1_data: Dict, moo2_data: Dict) -> Dict[str, Any]:
+        """Compare column separation preferences between datasets."""
+        
+        col1_data = moo1_data.get('report_data', {}).get('column_separation')
+        col2_data = moo2_data.get('report_data', {}).get('column_separation')
+        
+        if not col1_data or not col2_data:
+            return {'error': 'Column separation data not available for both datasets'}
+        
+        return {
+            'overall_change': {
+                'dataset1_preference_rate': col1_data['preference_rate'],
+                'dataset2_preference_rate': col2_data['preference_rate'],
+                'preference_difference': col2_data['preference_rate'] - col1_data['preference_rate'],
+                'ci_overlap': self._check_ci_overlap(
+                    col1_data['ci_lower'], col1_data['ci_upper'],
+                    col2_data['ci_lower'], col2_data['ci_upper']
+                )
+            }
+        }
+    
+    def _compare_column_4_vs_5(self, moo1_data: Dict, moo2_data: Dict) -> Dict[str, Any]:
+        """Compare column 4 vs 5 preferences between datasets."""
+        
+        col45_1 = moo1_data.get('report_data', {}).get('column_4_vs_5')
+        col45_2 = moo2_data.get('report_data', {}).get('column_4_vs_5')
+        
+        if not col45_1 or not col45_2:
+            return {'error': 'Column 4 vs 5 data not available for both datasets'}
+        
+        # Check if both datasets have the data available
+        available1 = col45_1.get('available', False)
+        available2 = col45_2.get('available', False)
+        
+        if not available1 or not available2:
+            return {
+                'status': 'insufficient_data',
+                'dataset1_available': available1,
+                'dataset2_available': available2,
+                'dataset1_reason': col45_1.get('reason', 'Unknown'),
+                'dataset2_reason': col45_2.get('reason', 'Unknown')
+            }
+        
+        return {
+            'preference_change': {
+                'dataset1_preference_rate': col45_1['preference_rate'],
+                'dataset2_preference_rate': col45_2['preference_rate'],
+                'preference_difference': col45_2['preference_rate'] - col45_1['preference_rate']
+            }
+        }
+    
+    def _check_ci_overlap(self, ci1_lower: float, ci1_upper: float, 
+                         ci2_lower: float, ci2_upper: float) -> bool:
+        """Check if two confidence intervals overlap."""
+        return not (ci1_upper < ci2_lower or ci2_upper < ci1_lower)
+    
+    def _calculate_moo_consistency(self, comparison: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate overall consistency metrics for MOO objectives."""
+        
+        consistency = {
+            'overall_rating': 'unknown',
+            'issues_found': [],
+            'consistent_objectives': [],
+            'problematic_objectives': []
+        }
+        
+        # Check same-letter preferences
+        same_letter = comparison.get('same_letter_comparison', {})
+        if 'correlation_stats' in same_letter:
+            corr = same_letter['correlation_stats'].get('correlation_coefficient', 0)
+            if corr > 0.8:
+                consistency['consistent_objectives'].append('same_letter_preferences')
+            elif corr < 0.6:
+                consistency['problematic_objectives'].append('same_letter_preferences')
+                consistency['issues_found'].append(f"Same-letter BT correlation: {corr:.3f}")
+        
+        # Check pairwise preferences for direction flips
+        pairwise = comparison.get('pairwise_comparison', {})
+        if 'direction_flips' in pairwise:
+            direction_flips = len(pairwise['direction_flips'])
+            if direction_flips > 0:
+                consistency['problematic_objectives'].append('pairwise_preferences')
+                consistency['issues_found'].append(f"{direction_flips} pairwise preference reversals")
+            else:
+                consistency['consistent_objectives'].append('pairwise_preferences')
+        
+        # Check row separation
+        row_sep = comparison.get('row_separation_comparison', {})
+        if 'overall_change' in row_sep:
+            change = row_sep['overall_change']
+            if abs(change.get('preference_difference', 0)) > 0.1:
+                consistency['issues_found'].append(f"Row separation changed by {change['preference_difference']:.1%}")
+            if change.get('ci_overlap', True):
+                consistency['consistent_objectives'].append('row_separation')
+            else:
+                consistency['problematic_objectives'].append('row_separation')
+        
+        # Overall rating
+        if len(consistency['problematic_objectives']) == 0:
+            consistency['overall_rating'] = 'high'
+        elif len(consistency['problematic_objectives']) <= 2:
+            consistency['overall_rating'] = 'moderate'
+        else:
+            consistency['overall_rating'] = 'low'
+        
+        return consistency
+    
+    def _save_moo_comparison(self, comparison: Dict[str, Any]) -> None:
+        """Save MOO objectives comparison results."""
+        
+        # Save same-letter BT comparison
+        same_letter = comparison.get('same_letter_comparison', {})
+        if 'ranking_changes' in same_letter and same_letter['ranking_changes']:
+            df = pd.DataFrame(same_letter['ranking_changes'])
+            df.to_csv(self.output_path / 'moo_same_letter_ranking_changes.csv', index=False)
+        
+        if 'strength_changes' in same_letter and same_letter['strength_changes']:
+            df = pd.DataFrame(same_letter['strength_changes'])
+            df.to_csv(self.output_path / 'moo_same_letter_strength_changes.csv', index=False)
+        
+        # Save pairwise comparison
+        pairwise = comparison.get('pairwise_comparison', {})
+        if 'direction_flips' in pairwise and pairwise['direction_flips']:
+            df = pd.DataFrame(pairwise['direction_flips'])
+            df.to_csv(self.output_path / 'moo_pairwise_direction_flips.csv', index=False)
+        
+        if 'preference_changes' in pairwise and pairwise['preference_changes']:
+            df = pd.DataFrame(pairwise['preference_changes'])
+            df.to_csv(self.output_path / 'moo_pairwise_preference_changes.csv', index=False)
+        
+        # Save comprehensive MOO comparison report
+        self._save_moo_comprehensive_report(comparison)
+    
+    def _save_moo_comprehensive_report(self, comparison: Dict[str, Any]) -> None:
+        """Save comprehensive MOO comparison text report."""
+        
+        with open(self.output_path / 'moo_objectives_comparison_report.txt', 'w') as f:
+            f.write(f"MOO OBJECTIVES COMPARISON: {self.dataset1_name} vs {self.dataset2_name}\n")
+            f.write("=" * 80 + "\n\n")
+            
+            # Overall consistency assessment
+            consistency = comparison.get('overall_consistency', {})
+            f.write(f"OVERALL CONSISTENCY: {consistency.get('overall_rating', 'unknown').upper()}\n\n")
+            
+            if consistency.get('issues_found'):
+                f.write("ISSUES IDENTIFIED:\n")
+                f.write("-" * 20 + "\n")
+                for issue in consistency['issues_found']:
+                    f.write(f"• {issue}\n")
+                f.write("\n")
+            
+            # Same-letter preferences (Bradley-Terry)
+            f.write("1. SAME-LETTER KEY PREFERENCES (BRADLEY-TERRY)\n")
+            f.write("-" * 50 + "\n")
+            same_letter = comparison.get('same_letter_comparison', {})
+            
+            if 'correlation_stats' in same_letter:
+                corr_stats = same_letter['correlation_stats']
+                corr = corr_stats['correlation_coefficient']
+                f.write(f"Correlation: {corr:.3f} (n={corr_stats['n_keys_compared']} keys)\n")
+                f.write(f"Stability: {'High' if corr > 0.8 else 'Moderate' if corr > 0.6 else 'Low'}\n\n")
+            
+            if same_letter.get('ranking_changes'):
+                f.write(f"Ranking changes ({len(same_letter['ranking_changes'])} total):\n")
+                for change in same_letter['ranking_changes'][:10]:
+                    direction = "↑" if change['direction'] == 'improved' else "↓"
+                    f.write(f"  {direction} {change['key']}: #{change['dataset1_rank']} → #{change['dataset2_rank']} "
+                           f"({change['rank_change']:+d} positions)\n")
+                f.write("\n")
+            
+            # Pairwise preferences
+            f.write("2. PAIRWISE KEY PREFERENCES\n")
+            f.write("-" * 30 + "\n")
+            pairwise = comparison.get('pairwise_comparison', {})
+            
+            if pairwise.get('direction_flips'):
+                f.write(f"DIRECTION REVERSALS ({len(pairwise['direction_flips'])} total):\n")
+                for flip in pairwise['direction_flips']:
+                    f.write(f"  • {flip['comparison']}\n")
+                    f.write(f"    Dataset 1: {flip['dataset1_favored']} preferred ({flip['dataset1_preference_rate']:.1%})\n")
+                    f.write(f"    Dataset 2: {flip['dataset2_favored']} preferred ({flip['dataset2_preference_rate']:.1%})\n")
+                    f.write(f"    Flip magnitude: {flip['flip_magnitude']:.3f}\n")
+                f.write("\n")
+            else:
+                f.write("No direction reversals found.\n\n")
+            
+            if pairwise.get('preference_changes'):
+                f.write(f"Large preference changes ({len(pairwise['preference_changes'])} total):\n")
+                for change in pairwise['preference_changes'][:5]:
+                    f.write(f"  • {change['comparison']}: {change['dataset1_preference_rate']:.1%} → "
+                           f"{change['dataset2_preference_rate']:.1%} ({change['preference_difference']:+.1%})\n")
+                f.write("\n")
+            
+            # Row separation
+            f.write("3. ROW SEPARATION PREFERENCES\n")
+            f.write("-" * 35 + "\n")
+            row_sep = comparison.get('row_separation_comparison', {})
+            
+            if 'overall_change' in row_sep:
+                change = row_sep['overall_change']
+                f.write(f"Overall preference for smaller row distances:\n")
+                f.write(f"  Dataset 1: {change['dataset1_preference_rate']:.1%}\n")
+                f.write(f"  Dataset 2: {change['dataset2_preference_rate']:.1%}\n")
+                f.write(f"  Change: {change['preference_difference']:+.1%}\n")
+                f.write(f"  CI overlap: {'Yes' if change['ci_overlap'] else 'No'}\n\n")
+            
+            if row_sep.get('breakdown_changes'):
+                f.write("Breakdown by comparison type:\n")
+                for breakdown in row_sep['breakdown_changes']:
+                    f.write(f"  • {breakdown['comparison_type']}: "
+                           f"{breakdown['dataset1_preference_rate']:.1%} → "
+                           f"{breakdown['dataset2_preference_rate']:.1%} "
+                           f"({breakdown['preference_difference']:+.1%})\n")
+                f.write("\n")
+            
+            # Column separation
+            f.write("4. COLUMN SEPARATION PREFERENCES\n")
+            f.write("-" * 38 + "\n")
+            col_sep = comparison.get('column_separation_comparison', {})
+            
+            if 'overall_change' in col_sep:
+                change = col_sep['overall_change']
+                f.write(f"Overall preference for smaller column distances:\n")
+                f.write(f"  Dataset 1: {change['dataset1_preference_rate']:.1%}\n")
+                f.write(f"  Dataset 2: {change['dataset2_preference_rate']:.1%}\n")
+                f.write(f"  Change: {change['preference_difference']:+.1%}\n")
+                f.write(f"  CI overlap: {'Yes' if change['ci_overlap'] else 'No'}\n\n")
+            
+            # Column 4 vs 5
+            f.write("5. COLUMN 4 VS 5 PREFERENCES\n")
+            f.write("-" * 32 + "\n")
+            col45 = comparison.get('column_4_vs_5_comparison', {})
+            
+            if col45.get('status') == 'insufficient_data':
+                f.write("Insufficient data in one or both datasets.\n")
+                f.write(f"  Dataset 1 available: {col45.get('dataset1_available', False)}\n")
+                f.write(f"  Dataset 2 available: {col45.get('dataset2_available', False)}\n")
+            elif 'preference_change' in col45:
+                change = col45['preference_change']
+                f.write(f"Column 4 preference rate:\n")
+                f.write(f"  Dataset 1: {change['dataset1_preference_rate']:.1%}\n")
+                f.write(f"  Dataset 2: {change['dataset2_preference_rate']:.1%}\n")
+                f.write(f"  Change: {change['preference_difference']:+.1%}\n")
+            
+            f.write("\n")
+            f.write("DETAILED CSV FILES:\n")
+            f.write("=" * 20 + "\n")
+            f.write("• moo_same_letter_ranking_changes.csv - BT ranking changes\n")
+            f.write("• moo_same_letter_strength_changes.csv - BT strength changes\n")
+            f.write("• moo_pairwise_direction_flips.csv - Preference reversals\n")
+            f.write("• moo_pairwise_preference_changes.csv - Large preference changes\n")
+    
+    def compare_hypothesis_results(self) -> Dict[str, Any]:
+        """Compare focused hypothesis testing results between datasets."""
+        return {'error': 'Hypothesis comparison not implemented for MOO analysis'}
+    
+    def compare_key_preferences(self) -> Dict[str, Any]:
+        """Compare key preference results between datasets."""
+        return {'error': 'Key preference comparison not implemented for MOO analysis'}
+    
+    def compare_transition_preferences(self) -> Dict[str, Any]:
+        """Compare transition preference results between datasets."""
+        return {'error': 'Transition preference comparison not implemented for MOO analysis'}
+    
     def _load_detailed_hypothesis_data(self, dataset_path: Path) -> Dict[str, Any]:
         """Load detailed focused hypothesis results from a dataset."""
-        
-        # Load from JSON which has the detailed statistics
-        json_path = dataset_path / 'focused_hypotheses' / 'focused_hypothesis_results.json'
-        if json_path.exists():
-            try:
-                with open(json_path, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Warning: Could not load detailed JSON from {json_path}: {e}")
-        
-        print(f"Warning: No detailed hypothesis results found for {dataset_path}")
         return {}
     
     def _load_hypothesis_data(self, dataset_path: Path) -> Dict[str, Any]:
         """Load focused hypothesis results from a dataset."""
-        
-        # Try to load from JSON first
-        json_path = dataset_path / 'focused_hypotheses' / 'focused_hypothesis_results.json'
-        if json_path.exists():
-            try:
-                with open(json_path, 'r') as f:
-                    data = json.load(f)
-                    return data.get('summary', {})
-            except Exception as e:
-                print(f"Warning: Could not load JSON from {json_path}: {e}")
-        
-        # Fallback to parsing text report
-        text_path = dataset_path / 'focused_hypotheses' / 'focused_hypothesis_report.txt'
-        if text_path.exists():
-            return self._parse_hypothesis_text_report(text_path)
-        
-        print(f"Warning: No hypothesis results found for {dataset_path}")
         return {}
     
     def _parse_hypothesis_text_report(self, text_path: Path) -> Dict[str, Any]:
         """Parse hypothesis results from text report."""
-        
-        with open(text_path, 'r') as f:
-            content = f.read()
-        
-        # Extract basic statistics
-        significant_match = re.search(r'Significant results.*?(\d+)/(\d+)', content)
-        large_effects_match = re.search(r'Large practical effects.*?(\d+)', content)
-        
-        result = {
-            'significant_results': [],
-            'large_effects': [],
-            'hypothesis_overview': {}
-        }
-        
-        if significant_match:
-            # This is a simplified parsing - full JSON is preferred
-            print(f"Parsed {significant_match.group(1)} significant results from text report")
-        
-        return result
+        return {}
     
     def _load_key_data(self, dataset_path: Path) -> pd.DataFrame:
         """Load key preference statistics from a dataset."""
-        
-        csv_path = dataset_path / 'exploratory' / 'key_preference_statistics.csv'
-        if csv_path.exists():
-            try:
-                return pd.read_csv(csv_path)
-            except Exception as e:
-                print(f"Warning: Could not load key data from {csv_path}: {e}")
-        
-        print(f"Warning: No key preference data found for {dataset_path}")
         return pd.DataFrame()
     
     def _load_transition_data(self, dataset_path: Path) -> pd.DataFrame:
         """Load transition preference statistics from a dataset."""
-        
-        csv_path = dataset_path / 'exploratory' / 'transition_preference_statistics.csv'
-        if csv_path.exists():
-            try:
-                return pd.read_csv(csv_path)
-            except Exception as e:
-                print(f"Warning: Could not load transition data from {csv_path}: {e}")
-        
-        print(f"Warning: No transition preference data found for {dataset_path}")
         return pd.DataFrame()
     
     def _generate_overall_summary(self, comparison_results: Dict[str, Any]) -> Dict[str, Any]:
@@ -478,384 +710,54 @@ class DatasetComparator:
             'key_findings': []
         }
         
-        # Analyze hypothesis changes
-        if 'hypothesis_comparison' in comparison_results:
-            hyp_comp = comparison_results['hypothesis_comparison']
+        # Analyze MOO objectives changes
+        if 'moo_comparison' in comparison_results:
+            moo_comp = comparison_results['moo_comparison']
             
-            direction_changes = len(hyp_comp.get('direction_changes', []))
-            sig_changes = len(hyp_comp.get('significance_changes', []))
-            large_effect_changes = len([x for x in hyp_comp.get('effect_size_changes', []) 
-                                       if x.get('change_magnitude') == 'large'])
+            # Check for direction flips in pairwise preferences
+            pairwise_flips = len(moo_comp.get('pairwise_comparison', {}).get('direction_flips', []))
+            if pairwise_flips > 0:
+                summary['major_differences'].append(f"{pairwise_flips} pairwise key preferences REVERSED direction")
             
-            if direction_changes > 0:
-                summary['major_differences'].append(f"{direction_changes} hypotheses REVERSED direction (most critical)")
-            if sig_changes > 0:
-                summary['major_differences'].append(f"{sig_changes} hypotheses changed significance")
-            if large_effect_changes > 0:
-                summary['major_differences'].append(f"{large_effect_changes} hypotheses had large effect size changes")
-        
-        # Analyze key preference changes
-        if 'key_comparison' in comparison_results:
-            key_comp = comparison_results['key_comparison']
+            # Check MOO consistency
+            moo_consistency = moo_comp.get('overall_consistency', {})
+            consistency_rating = moo_consistency.get('overall_rating', 'unknown')
+            if consistency_rating == 'low':
+                summary['major_differences'].append("MOO objectives show low consistency")
             
-            major_rank_changes = len([x for x in key_comp.get('ranking_changes', []) 
-                                    if abs(x.get('rank_change', 0)) >= 5])
-            
-            if major_rank_changes > 0:
-                summary['major_differences'].append(f"{major_rank_changes} keys had major ranking changes (≥5 positions)")
-            
-            # Check correlation
-            corr_stats = key_comp.get('correlation_stats', {})
-            correlation = corr_stats.get('correlation_coefficient', 0)
-            
-            if correlation > 0.8:
+            # Set stability based on same-letter correlation
+            same_letter_corr = moo_comp.get('same_letter_comparison', {}).get('correlation_stats', {}).get('correlation_coefficient', 0)
+            if same_letter_corr > 0.8:
                 summary['stability_assessment'] = 'high'
-            elif correlation > 0.6:
+            elif same_letter_corr > 0.6:
                 summary['stability_assessment'] = 'moderate'
-            elif correlation > 0.4:
-                summary['stability_assessment'] = 'low'
             else:
-                summary['stability_assessment'] = 'very_low'
+                summary['stability_assessment'] = 'low'
         
         # Generate key findings
         if not summary['major_differences']:
-            summary['key_findings'].append("Results are highly consistent between datasets")
+            summary['key_findings'].append("MOO objectives are highly consistent between datasets")
         else:
-            summary['key_findings'].append("Significant differences found between datasets")
+            summary['key_findings'].append("Significant differences found in MOO objectives between datasets")
             summary['key_findings'].extend(summary['major_differences'])
         
         return summary
     
     def _save_hypothesis_comparison(self, comparison: Dict[str, Any]) -> None:
         """Save hypothesis comparison results."""
-        
-        # Save detailed comparison as CSV
-        if comparison.get('detailed_comparison'):
-            rows = []
-            for hyp in comparison['detailed_comparison']:
-                rows.append({
-                    'Hypothesis': hyp['hypothesis'],
-                    'Description': hyp['description'],
-                    'Dataset1_Significant': hyp['dataset1']['significant'],
-                    'Dataset1_Effect_Size': round(hyp['dataset1']['effect_size'], 3),
-                    'Dataset1_N_Comparisons': hyp['dataset1']['n_comparisons'],
-                    'Dataset2_Significant': hyp['dataset2']['significant'],
-                    'Dataset2_Effect_Size': round(hyp['dataset2']['effect_size'], 3),
-                    'Dataset2_N_Comparisons': hyp['dataset2']['n_comparisons'],
-                    'Effect_Size_Difference': round(hyp['effect_difference'], 3)
-                })
-            
-            df = pd.DataFrame(rows)
-            df.to_csv(self.output_path / 'hypothesis_comparison_detailed.csv', index=False)
-        
-        # Save comprehensive comparison with all available statistics
-        self._save_comprehensive_hypothesis_comparison()
-        
-        # Save direction changes as separate CSV
-        if comparison.get('direction_changes'):
-            direction_rows = []
-            for change in comparison['direction_changes']:
-                direction_rows.append({
-                    'Hypothesis': change['hypothesis'],
-                    'Description': change['description'],
-                    'Values_Compared': f"{change['values_compared'][0]} vs {change['values_compared'][1]}",
-                    'Dataset1_Preferred': change['dataset1_preferred'],
-                    'Dataset1_Preferred_Proportion': round(change['dataset1_preferred_proportion'], 3),
-                    'Dataset1_Effect_Size': round(change['dataset1_effect_size'], 3),
-                    'Dataset2_Preferred': change['dataset2_preferred'],
-                    'Dataset2_Preferred_Proportion': round(change['dataset2_preferred_proportion'], 3),
-                    'Dataset2_Effect_Size': round(change['dataset2_effect_size'], 3),
-                    'Flip_Magnitude': round(change['flip_magnitude'], 3),
-                    'Effect_Size_Change': round(change['effect_size_change'], 3),
-                    'Dataset1_Val1_Proportion': round(change['dataset1_val1_proportion'], 3),  # For reference
-                    'Dataset2_Val1_Proportion': round(change['dataset2_val1_proportion'], 3)   # For reference
-                })
-            df = pd.DataFrame(direction_rows)
-            df.to_csv(self.output_path / 'hypothesis_direction_changes.csv', index=False)
-        
-        # Save summary text report
-        with open(self.output_path / 'hypothesis_comparison_summary.txt', 'w') as f:
-            f.write(f"FOCUSED HYPOTHESIS COMPARISON: {self.dataset1_name} vs {self.dataset2_name}\n")
-            f.write("=" * 70 + "\n\n")
-            
-            f.write(f"Dataset 1 ({self.dataset1_name}):\n")
-            f.write(f"  Significant results: {comparison.get('dataset1_significant', 0)}\n")
-            f.write(f"  Large effects: {comparison.get('dataset1_large_effects', 0)}\n\n")
-            
-            f.write(f"Dataset 2 ({self.dataset2_name}):\n")
-            f.write(f"  Significant results: {comparison.get('dataset2_significant', 0)}\n")
-            f.write(f"  Large effects: {comparison.get('dataset2_large_effects', 0)}\n\n")
-            
-            # Direction changes (MOST IMPORTANT)
-            direction_changes = comparison.get('direction_changes', [])
-            if direction_changes:
-                f.write(f"DIRECTION CHANGES ({len(direction_changes)} total):\n")
-                f.write("=" * 45 + "\n")
-                f.write("These hypotheses show preference REVERSALS between datasets:\n\n")
-                for change in direction_changes:
-                    f.write(f"• {change['hypothesis']}\n")
-                    f.write(f"   → {change['description']}\n")
-                    f.write(f"   → Dataset 1: {change['dataset1_preferred']} preferred ({change['dataset1_preferred_proportion']:.1%}) - Effect: {change['dataset1_effect_size']:.3f}\n")
-                    f.write(f"   → Dataset 2: {change['dataset2_preferred']} preferred ({change['dataset2_preferred_proportion']:.1%}) - Effect: {change['dataset2_effect_size']:.3f}\n")
-                    f.write(f"   → Flip magnitude: {change['flip_magnitude']:.3f}\n")
-                    f.write(f"   → Effect size change: {change['effect_size_change']:+.3f}\n\n")
-            else:
-                f.write("NO DIRECTION CHANGES: All hypothesis preferences consistent\n\n")
-            
-            # Significance changes
-            sig_changes = comparison.get('significance_changes', [])
-            if sig_changes:
-                f.write(f"SIGNIFICANCE CHANGES ({len(sig_changes)} total):\n")
-                f.write("-" * 40 + "\n")
-                for change in sig_changes:
-                    status = "GAINED" if change['change_type'] == 'gained_significance' else "LOST"
-                    f.write(f"  {status}: {change['hypothesis']}\n")
-                    f.write(f"    → {change['description']}\n")
-                f.write("\n")
-            
-            # Effect size changes
-            effect_changes = comparison.get('effect_size_changes', [])
-            if effect_changes:
-                f.write(f"LARGEST EFFECT SIZE CHANGES ({len(effect_changes)} total):\n")
-                f.write("-" * 45 + "\n")
-                for change in effect_changes[:5]:
-                    direction = "↗" if change['effect_difference'] > 0 else "↘"
-                    f.write(f"  {direction} {change['hypothesis']}\n")
-                    f.write(f"    → {change['description']}\n")
-                    f.write(f"    → Effect change: {change['effect_difference']:+.3f} ({change['change_magnitude']})\n")
-                f.write("\n")
+        pass
     
     def _save_comprehensive_hypothesis_comparison(self) -> None:
         """Save comprehensive hypothesis comparison with all available statistics."""
-        
-        # Load detailed hypothesis data from both datasets
-        hyp1_detailed = self._load_detailed_hypothesis_data(self.dataset1_path)
-        hyp2_detailed = self._load_detailed_hypothesis_data(self.dataset2_path)
-        
-        if not hyp1_detailed or not hyp2_detailed:
-            print("Warning: Cannot create comprehensive comparison - missing detailed data")
-            return
-        
-        hyp1_results = hyp1_detailed.get('hypothesis_results', {})
-        hyp2_results = hyp2_detailed.get('hypothesis_results', {})
-        
-        # Get all hypotheses from both datasets
-        all_hypotheses = set(hyp1_results.keys()) | set(hyp2_results.keys())
-        
-        comprehensive_rows = []
-        
-        for hyp_name in sorted(all_hypotheses):
-            hyp1_data = hyp1_results.get(hyp_name, {})
-            hyp2_data = hyp2_results.get(hyp_name, {})
-            
-            # Get statistics from both datasets
-            stats1 = hyp1_data.get('statistics', {})
-            stats2 = hyp2_data.get('statistics', {})
-            
-            # Helper function to safely round values
-            def safe_round(value, decimals=3):
-                if pd.isna(value) or value is None:
-                    return None
-                try:
-                    return round(float(value), decimals)
-                except (ValueError, TypeError):
-                    return None
-            
-            # Helper function to safely convert boolean
-            def safe_bool(value):
-                if pd.isna(value) or value is None:
-                    return None
-                return bool(value)
-            
-            # Helper function to safely convert int
-            def safe_int(value):
-                if pd.isna(value) or value is None:
-                    return None
-                try:
-                    return int(value)
-                except (ValueError, TypeError):
-                    return None
-            
-            row = {
-                'Hypothesis': hyp_name,
-                'Description': hyp1_data.get('description', hyp2_data.get('description', '')),
-                'Comparison_Values': f"{stats1.get('values_compared', stats2.get('values_compared', ['', '']))[0]} vs {stats1.get('values_compared', stats2.get('values_compared', ['', '']))[1]}",
-                
-                # Dataset 1 Statistics
-                'Dataset1_Val1_Win_Proportion': safe_round(stats1.get('proportion_val1_wins')),
-                'Dataset1_Effect_Size': safe_round(stats1.get('effect_size')),
-                'Dataset1_P_Value': safe_round(stats1.get('p_value')),
-                'Dataset1_P_Value_Corrected': safe_round(stats1.get('p_value_corrected')),
-                'Dataset1_Significant_Corrected': safe_bool(stats1.get('significant_corrected')),
-                'Dataset1_Practical_Significance': stats1.get('practical_significance'),
-                'Dataset1_N_Comparisons': safe_int(stats1.get('n_comparisons')),
-                
-                # Dataset 2 Statistics  
-                'Dataset2_Val1_Win_Proportion': safe_round(stats2.get('proportion_val1_wins')),
-                'Dataset2_Effect_Size': safe_round(stats2.get('effect_size')),
-                'Dataset2_P_Value': safe_round(stats2.get('p_value')),
-                'Dataset2_P_Value_Corrected': safe_round(stats2.get('p_value_corrected')),
-                'Dataset2_Significant_Corrected': safe_bool(stats2.get('significant_corrected')),
-                'Dataset2_Practical_Significance': stats2.get('practical_significance'),
-                'Dataset2_N_Comparisons': safe_int(stats2.get('n_comparisons')),
-                
-                # Differences
-                'Effect_Size_Difference': safe_round(
-                    (stats2.get('effect_size', 0) or 0) - (stats1.get('effect_size', 0) or 0)
-                ) if stats1.get('effect_size') is not None and stats2.get('effect_size') is not None else None,
-                
-                'Proportion_Difference': safe_round(
-                    (stats2.get('proportion_val1_wins', 0.5) or 0.5) - (stats1.get('proportion_val1_wins', 0.5) or 0.5)
-                ) if stats1.get('proportion_val1_wins') is not None and stats2.get('proportion_val1_wins') is not None else None,
-                
-                'Significance_Change': (
-                    'Gained' if not stats1.get('significant_corrected', False) and stats2.get('significant_corrected', False)
-                    else 'Lost' if stats1.get('significant_corrected', False) and not stats2.get('significant_corrected', False)
-                    else 'No Change'
-                ),
-                
-                'Direction_Flipped': (
-                    bool((stats1.get('proportion_val1_wins', 0.5) > 0.5) != (stats2.get('proportion_val1_wins', 0.5) > 0.5))
-                    if stats1.get('proportion_val1_wins') is not None and stats2.get('proportion_val1_wins') is not None 
-                    and stats1.get('proportion_val1_wins') != 0.5 and stats2.get('proportion_val1_wins') != 0.5
-                    else False
-                ),
-                
-                # Sample size comparison
-                'N_Comparisons_Change': (
-                    safe_int(stats2.get('n_comparisons', 0)) - safe_int(stats1.get('n_comparisons', 0))
-                    if stats1.get('n_comparisons') is not None and stats2.get('n_comparisons') is not None
-                    else None
-                )
-            }
-            
-            comprehensive_rows.append(row)
-        
-        # Create DataFrame and save
-        df = pd.DataFrame(comprehensive_rows)
-        
-        # Define the original hypothesis order from the analysis script
-        hypothesis_order = [
-            # 1. Finger load preferences (2 tests)
-            'same_vs_different_column_reach',
-            'same_vs_different_column_hurdle',
-            
-            # 2. Row preferences (5 tests)
-            'home_vs_other_keys',
-            'column1_upper_vs_lower_row',
-            'column2_upper_vs_lower_row', 
-            'column3_upper_vs_lower_row',
-            'column4_upper_vs_lower_row',
-            
-            # 3. Row pair preferences (2 tests)
-            'same_row_vs_reach',
-            'reach_vs_hurdle',
-            
-            # 4. Column preferences (4 tests)
-            'column_4_vs_3',
-            'column_3_vs_2',
-            'column_1_vs_other',
-            'column_4_vs_5',  # Only when --include-column5
-            
-            # 5. Column pair preferences (4 tests)
-            'separation_of_1_vs_2_columns_same_row',
-            'separation_of_2_vs_3_columns_same_row',
-            'separation_of_1_vs_2_columns_different_rows',
-            'separation_of_2_vs_3_columns_different_rows',
-            
-            # 6. Column pair direction preferences (2 tests)
-            'direction_same_row',
-            'direction_different_rows'
-        ]
-        
-        # Sort by original hypothesis order, then by any remaining hypotheses alphabetically
-        df['sort_order'] = df['Hypothesis'].apply(
-            lambda x: hypothesis_order.index(x) if x in hypothesis_order else len(hypothesis_order)
-        )
-        df = df.sort_values(['sort_order', 'Hypothesis']).drop('sort_order', axis=1)
-        
-        df.to_csv(self.output_path / 'hypothesis_comparison_comprehensive.csv', index=False)
-        
-        print(f"Saved comprehensive hypothesis comparison with {len(comprehensive_rows)} hypotheses")
+        pass
     
     def _save_key_comparison(self, comparison: Dict[str, Any]) -> None:
         """Save key preference comparison results."""
-        
-        # Save ranking changes
-        if comparison.get('ranking_changes'):
-            df = pd.DataFrame(comparison['ranking_changes'])
-            df.to_csv(self.output_path / 'key_ranking_changes.csv', index=False)
-        
-        # Save strength changes
-        if comparison.get('strength_changes'):
-            df = pd.DataFrame(comparison['strength_changes'])
-            df.to_csv(self.output_path / 'key_strength_changes.csv', index=False)
-        
-        # Save summary text report
-        with open(self.output_path / 'key_comparison_summary.txt', 'w') as f:
-            f.write(f"KEY PREFERENCE COMPARISON: {self.dataset1_name} vs {self.dataset2_name}\n")
-            f.write("=" * 70 + "\n\n")
-            
-            # Correlation stats
-            corr_stats = comparison.get('correlation_stats', {})
-            if corr_stats:
-                corr = corr_stats['correlation_coefficient']
-                f.write(f"OVERALL CORRELATION: {corr:.3f}\n")
-                f.write(f"Keys compared: {corr_stats['n_keys_compared']}\n")
-                f.write(f"Stability: {'High' if corr > 0.8 else 'Moderate' if corr > 0.6 else 'Low'}\n\n")
-            
-            # Top ranking changes
-            ranking_changes = comparison.get('ranking_changes', [])
-            if ranking_changes:
-                f.write(f"BIGGEST RANKING CHANGES ({len(ranking_changes)} total):\n")
-                f.write("-" * 35 + "\n")
-                for change in ranking_changes[:10]:
-                    direction = "↑" if change['direction'] == 'improved' else "↓"
-                    f.write(f"  {direction} {change['key']}: #{change['dataset1_rank']} → #{change['dataset2_rank']} "
-                           f"({change['rank_change']:+d} positions)\n")
-                f.write("\n")
-            
-            # Top strength changes
-            strength_changes = comparison.get('strength_changes', [])
-            if strength_changes:
-                f.write(f"BIGGEST STRENGTH CHANGES ({len(strength_changes)} total):\n")
-                f.write("-" * 35 + "\n")
-                for change in strength_changes[:10]:
-                    direction = "↑" if change['direction'] == 'stronger' else "↓"
-                    f.write(f"  {direction} {change['key']}: {change['dataset1_strength']:.3f} → "
-                           f"{change['dataset2_strength']:.3f} ({change['strength_difference']:+.3f})\n")
-                f.write("\n")
+        pass
     
     def _save_transition_comparison(self, comparison: Dict[str, Any]) -> None:
         """Save transition preference comparison results."""
-        
-        # Save ranking changes
-        if comparison.get('ranking_changes'):
-            df = pd.DataFrame(comparison['ranking_changes'])
-            df.to_csv(self.output_path / 'transition_ranking_changes.csv', index=False)
-        
-        # Save summary text report
-        with open(self.output_path / 'transition_comparison_summary.txt', 'w') as f:
-            f.write(f"TRANSITION PREFERENCE COMPARISON: {self.dataset1_name} vs {self.dataset2_name}\n")
-            f.write("=" * 70 + "\n\n")
-            
-            # Correlation stats
-            corr_stats = comparison.get('correlation_stats', {})
-            if corr_stats:
-                corr = corr_stats['correlation_coefficient']
-                f.write(f"OVERALL CORRELATION: {corr:.3f}\n")
-                f.write(f"Transitions compared: {corr_stats['n_transitions_compared']}\n\n")
-            
-            # Top ranking changes
-            ranking_changes = comparison.get('ranking_changes', [])
-            if ranking_changes:
-                f.write(f"BIGGEST RANKING CHANGES ({len(ranking_changes)} total):\n")
-                f.write("-" * 35 + "\n")
-                for change in ranking_changes[:15]:
-                    direction = "↑" if change['direction'] == 'improved' else "↓"
-                    f.write(f"  {direction} {change['transition']}: #{change['dataset1_rank']} → "
-                           f"#{change['dataset2_rank']} ({change['rank_change']:+d} positions)\n")
-                f.write("\n")
+        pass
     
     def _save_overall_summary(self, comparison_results: Dict[str, Any]) -> None:
         """Save overall comparison summary."""
@@ -886,13 +788,11 @@ class DatasetComparator:
             
             f.write("DETAILED RESULTS:\n")
             f.write("-" * 20 + "\n")
-            f.write("• hypothesis_comparison_comprehensive.csv - ALL hypothesis comparisons with full statistics\n")
-            f.write("• hypothesis_direction_changes.csv - PREFERENCE REVERSALS (most important!)\n")
-            f.write("• hypothesis_comparison_detailed.csv - Summary hypothesis comparisons\n")
-            f.write("• key_ranking_changes.csv - Key preference ranking changes\n")
-            f.write("• key_strength_changes.csv - Key preference strength changes\n")
-            f.write("• transition_ranking_changes.csv - Transition ranking changes\n")
-            f.write("• Individual summary files for each analysis type\n")
+            f.write("• moo_objectives_comparison_report.txt - MOO objectives detailed comparison\n")
+            f.write("• moo_same_letter_ranking_changes.csv - MOO same-letter BT ranking changes\n")
+            f.write("• moo_pairwise_direction_flips.csv - MOO pairwise preference reversals\n")
+            f.write("• moo_same_letter_strength_changes.csv - MOO same-letter BT strength changes\n")
+            f.write("• moo_pairwise_preference_changes.csv - MOO large preference changes\n")
 
 def main():
     """Main function for command line usage."""
@@ -900,7 +800,7 @@ def main():
     parser.add_argument('--dataset1', required=True, help='Path to first dataset results directory')
     parser.add_argument('--dataset2', required=True, help='Path to second dataset results directory')
     parser.add_argument('--output', required=True, help='Output directory for comparison results')
-    parser.add_argument('--focus', choices=['hypotheses', 'keys', 'transitions'], 
+    parser.add_argument('--focus', choices=['hypotheses', 'keys', 'transitions', 'moo'], 
                        help='Focus comparison on specific analysis type only')
     
     args = parser.parse_args()
@@ -936,20 +836,22 @@ def main():
             if summary.get('key_findings'):
                 print(f"Key finding: {summary['key_findings'][0]}")
             
-            # Show direction changes if any
-            if 'hypothesis_comparison' in results and results['hypothesis_comparison'].get('direction_changes'):
-                direction_changes = results['hypothesis_comparison']['direction_changes']
-                print(f"\nCRITICAL: {len(direction_changes)} hypotheses reversed direction!")
-                for change in direction_changes[:3]:  # Show top 3
-                    print(f"   • {change['hypothesis']}: {change['dataset1_preferred']} → {change['dataset2_preferred']} "
-                          f"(effects: {change['dataset1_effect_size']:.3f} → {change['dataset2_effect_size']:.3f})")
-                if len(direction_changes) > 3:
-                    print(f"   • ... and {len(direction_changes) - 3} more (see hypothesis_direction_changes.csv)")
+            # Show MOO pairwise direction flips if any
+            if 'moo_comparison' in results:
+                moo_comp = results['moo_comparison']
+                pairwise_flips = moo_comp.get('pairwise_comparison', {}).get('direction_flips', [])
+                if pairwise_flips:
+                    print(f"\nMOO CRITICAL: {len(pairwise_flips)} pairwise key preferences reversed!")
+                    for flip in pairwise_flips[:2]:  # Show top 2
+                        print(f"   • {flip['comparison']}: {flip['dataset1_favored']} → {flip['dataset2_favored']} "
+                              f"(magnitude: {flip['flip_magnitude']:.3f})")
         
         return 0
         
     except Exception as e:
         print(f"Error during comparison: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
 
 if __name__ == "__main__":

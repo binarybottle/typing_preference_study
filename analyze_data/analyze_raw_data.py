@@ -5,7 +5,7 @@ Analyzes raw Typing Preference Study data to determine relationships
 between bigram typing times, errors, and frequencies.
 
 Usage:
-    python analyze_raw_data.py [--config config.yaml]
+    python analyze_raw_data.py
 """
 import numpy as np
 import pandas as pd
@@ -2150,7 +2150,7 @@ def main():
     frequency_cutoff = 1000000000
 
     # Get all CSV files in the directory
-    csv_path = 'input/raws_nonProlific/*.csv' # 'input/raws_Prolific/*.csv'  
+    csv_path = 'input/raw_data/nonProlific_studies/*.csv' # 'input/raw_data/Prolific_studies/*.csv'  
     letter_freq_path = 'input/frequency/english-letter-counts-google-ngrams.csv'
     bigram_freq_path = 'input/frequency/english-letter-pair-counts-google-ngrams.csv'
 
