@@ -522,12 +522,15 @@ class MOOObjectiveAnalyzer:
     def _analyze_pairwise_preferences(self) -> Dict[str, Any]:
         """Analyze specific pairwise key comparisons."""
         
-        # Define key pairs for analysis
+        # Define key pairs for analysis (selected from earlier analysis of Prolific data)
         target_pairs = [
             ('f','d'), ('d','s'), ('s','a'),  # Home row
             ('r','e'), ('w','q'),  # Top row  
             ('c','x'), ('x','z'),  # Bottom row
-            ('f','r'), ('d','e'), ('s','w'), ('a','q'),  # Vertical
+            ('f','r'), ('f','v'), ('d','e'), ('s','w'), ('a','q'), ('a','z'),  # Vertical reach
+            ('r','v'), ('w','x'), ('q','z'),  # Vertical hurdle
+            ('f','e'), ('d','r'), ('s','r'), ('s','e'), ('a','w'), ('d','v'), ('s','v'),  # Angle reach
+            ('e','v'), ('w','c'), ('q','x'), ('q','c'), ('z','w')  # Angle hurdle
         ]
         
         # Filter to existing keys
@@ -709,71 +712,9 @@ class MOOObjectiveAnalyzer:
     # =========================================================================
     # COLUMN SEPARATION PREFERENCES
     # =========================================================================
-
-    def _analyze_column_separation(self) -> Dict[str, Any]:
-        """Analyze column separation preferences."""
-        
-        instances_df = self._extract_column_separation_instances()
-        
-        if instances_df.empty:
-            logger.warning('No column separation instances found - skipping column separation analysis')
-            return {
-                'description': 'Preferences for smaller column separation distances',
-                'method': 'column_separation_analysis',
-                'status': 'insufficient_data',
-                'n_instances': 0,
-                'interpretation': 'No column separation instances found in data'
-            }
-        
-        logger.info(f"Found {len(instances_df)} column separation instances")
-        
-        # Overall analysis
-        n_instances = len(instances_df)
-        n_chose_smaller = instances_df['chose_smaller_separation'].sum()
-        preference_rate = n_chose_smaller / n_instances
-        
-        confidence = self.config.get('confidence_level', 0.95)
-        ci_lower, ci_upper = self._wilson_ci(n_chose_smaller, n_instances, confidence)
-        
-        # Statistical test
-        z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
-        p_value = 2 * (1 - norm.cdf(abs(z_score)))
-        
-        # Analysis by row pattern
-        pattern_results = {}
-        for pattern in instances_df['row_pattern'].unique():
-            pattern_data = instances_df[instances_df['row_pattern'] == pattern]
-            if len(pattern_data) >= 10:
-                n_pat = len(pattern_data)
-                n_chose_pat = pattern_data['chose_smaller_separation'].sum()
-                pref_rate_pat = n_chose_pat / n_pat
-                ci_lower_pat, ci_upper_pat = self._wilson_ci(n_chose_pat, n_pat, confidence)
-                
-                z_pat = (pref_rate_pat - 0.5) / np.sqrt(0.25 / n_pat)
-                p_pat = 2 * (1 - norm.cdf(abs(z_pat)))
-                
-                pattern_results[pattern] = {
-                    'n_instances': n_pat,
-                    'preference_rate': pref_rate_pat,
-                    'ci_lower': ci_lower_pat,
-                    'ci_upper': ci_upper_pat,
-                    'p_value': p_pat
-                }
-        
-        return {
-            'description': 'Preferences for smaller column separation distances',
-            'method': 'column_separation_analysis',
-            'n_instances': n_instances,
-            'preference_rate': preference_rate,
-            'ci_lower': ci_lower,
-            'ci_upper': ci_upper,
-            'p_value': p_value,
-            'pattern_results': pattern_results,
-            'interpretation': f"Column separation preference: {preference_rate:.1%} favor smaller distances"
-        }
     
     def _extract_column_separation_instances(self) -> pd.DataFrame:
-        """Extract column separation instances with row control."""
+        """Extract column separation instances with proper row controls AND reach vs hurdle analysis."""
         instances = []
         
         for _, row in self.data.iterrows():
@@ -788,39 +729,214 @@ class MOOObjectiveAnalyzer:
             chosen_col_sep = self._calculate_column_separation(chosen)
             unchosen_col_sep = self._calculate_column_separation(unchosen)
             
+            # EXISTING ANALYSIS: Column comparisons with row control
             # Only compare bigrams with identical row separation
-            if chosen_row_sep != unchosen_row_sep:
-                continue
+            if chosen_row_sep == unchosen_row_sep:
+                # Define row pattern
+                if chosen_row_sep == 0:
+                    row_pattern = "same_row"
+                elif chosen_row_sep == 1:
+                    row_pattern = "reach_1_apart"
+                elif chosen_row_sep == 2:
+                    row_pattern = "hurdle_2_apart"
+                else:
+                    row_pattern = None
+                
+                if row_pattern:
+                    # Column separation comparisons
+                    chose_smaller = None
+                    comparison_type = None
+                    
+                    # Test 1: Same column (0) vs other columns (1-3)
+                    # EXCLUDE same-row comparisons from this test per user requirements
+                    if (row_pattern != "same_row" and 
+                        ({chosen_col_sep, unchosen_col_sep} == {0, 1} or
+                         {chosen_col_sep, unchosen_col_sep} == {0, 2} or
+                         {chosen_col_sep, unchosen_col_sep} == {0, 3})):
+                        chose_smaller = 1 if chosen_col_sep == 0 else 0
+                        comparison_type = f"same_vs_other_{row_pattern}"
+                    
+                    # Test 2: Adjacent (1) vs distant (2) - separate by row pattern
+                    elif {chosen_col_sep, unchosen_col_sep} == {1, 2}:
+                        chose_smaller = 1 if chosen_col_sep == 1 else 0
+                        comparison_type = f"adjacent_vs_distant_{row_pattern}"
+                    
+                    # Add valid comparisons
+                    if chose_smaller is not None and comparison_type is not None:
+                        instances.append({
+                            'user_id': row['user_id'],
+                            'chosen_bigram': chosen,
+                            'unchosen_bigram': unchosen,
+                            'row_pattern': row_pattern,
+                            'comparison_type': comparison_type,
+                            'chose_smaller_separation': chose_smaller,
+                            'chosen_col_separation': chosen_col_sep,
+                            'unchosen_col_separation': unchosen_col_sep,
+                            'chosen_row_separation': chosen_row_sep,
+                            'unchosen_row_separation': unchosen_row_sep,
+                            'analysis_type': 'column_comparison'
+                        })
             
-            # Exclude same-column comparisons
-            if chosen_col_sep == 0 or unchosen_col_sep == 0:
-                continue
-            
-            # Define row pattern
-            if chosen_row_sep == 0:
-                row_pattern = "same_row"
-            elif chosen_row_sep == 1:
-                row_pattern = "reach_1_apart"
-            elif chosen_row_sep == 2:
-                row_pattern = "hurdle_2_apart"
-            else:
-                continue
-            
-            # Column separation comparison
-            if {chosen_col_sep, unchosen_col_sep} == {1, 2}:
-                chose_smaller = 1 if chosen_col_sep == 1 else 0
-                instances.append({
-                    'user_id': row['user_id'],
-                    'chosen_bigram': chosen,
-                    'unchosen_bigram': unchosen,
-                    'row_pattern': row_pattern,
-                    'chose_smaller_separation': chose_smaller,
-                    'chosen_col_separation': chosen_col_sep,
-                    'unchosen_col_separation': unchosen_col_sep
-                })
-            
+            # NEW ANALYSIS: Row comparisons (reach vs hurdle) with column control
+            # Only compare bigrams with identical column separation
+            if chosen_col_sep == unchosen_col_sep:
+                # Test: Reach (1 row) vs Hurdle (2 rows) for each column separation level
+                if {chosen_row_sep, unchosen_row_sep} == {1, 2}:
+                    chose_smaller_row = 1 if chosen_row_sep == 1 else 0  # 1 = chose reach, 0 = chose hurdle
+                    
+                    # Define column separation category for clearer reporting
+                    if chosen_col_sep == 0:
+                        col_category = "same_column"
+                    elif chosen_col_sep == 1:
+                        col_category = "adjacent_columns"
+                    elif chosen_col_sep == 2:
+                        col_category = "distant_columns"
+                    elif chosen_col_sep == 3:
+                        col_category = "very_distant_columns"
+                    else:
+                        col_category = f"col_sep_{chosen_col_sep}"
+                    
+                    comparison_type = f"reach_vs_hurdle_{col_category}"
+                    
+                    instances.append({
+                        'user_id': row['user_id'],
+                        'chosen_bigram': chosen,
+                        'unchosen_bigram': unchosen,
+                        'row_pattern': None,  # Not applicable for this analysis
+                        'comparison_type': comparison_type,
+                        'chose_smaller_separation': chose_smaller_row,  # For row analysis, smaller = reach
+                        'chosen_col_separation': chosen_col_sep,
+                        'unchosen_col_separation': unchosen_col_sep,
+                        'chosen_row_separation': chosen_row_sep,
+                        'unchosen_row_separation': unchosen_row_sep,
+                        'analysis_type': 'row_comparison'
+                    })
+        
         return pd.DataFrame(instances)
-    
+
+    def _analyze_column_separation(self) -> Dict[str, Any]:
+        """Analyze column separation preferences with proper row controls AND reach vs hurdle analysis."""
+        
+        instances_df = self._extract_column_separation_instances()
+        
+        if instances_df.empty:
+            logger.warning('No column separation instances found - skipping column separation analysis')
+            return {
+                'description': 'Preferences for smaller column separation distances',
+                'method': 'column_separation_analysis',
+                'status': 'insufficient_data',
+                'n_instances': 0,
+                'interpretation': 'No column separation instances found in data'
+            }
+        
+        logger.info(f"Found {len(instances_df)} total separation instances")
+        
+        # Split analyses by type
+        column_instances = instances_df[instances_df['analysis_type'] == 'column_comparison']
+        row_instances = instances_df[instances_df['analysis_type'] == 'row_comparison']
+        
+        logger.info(f"Column comparison instances: {len(column_instances)}")
+        logger.info(f"Row comparison instances: {len(row_instances)}")
+        
+        # Overall analysis (column comparisons only for overall stats)
+        if not column_instances.empty:
+            n_instances = len(column_instances)
+            n_chose_smaller = column_instances['chose_smaller_separation'].sum()
+            preference_rate = n_chose_smaller / n_instances
+            
+            confidence = self.config.get('confidence_level', 0.95)
+            ci_lower, ci_upper = self._wilson_ci(n_chose_smaller, n_instances, confidence)
+            
+            # Statistical test
+            z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
+            p_value = 2 * (1 - norm.cdf(abs(z_score)))
+        else:
+            n_instances = preference_rate = ci_lower = ci_upper = p_value = 0
+        
+        # Analysis by comparison type - COLUMN COMPARISONS
+        column_pattern_results = {}
+        for comp_type in column_instances['comparison_type'].unique():
+            comp_data = column_instances[column_instances['comparison_type'] == comp_type]
+            if len(comp_data) >= 10:  # Minimum threshold
+                n_comp = len(comp_data)
+                n_chose_comp = comp_data['chose_smaller_separation'].sum()
+                pref_rate_comp = n_chose_comp / n_comp
+                ci_lower_comp, ci_upper_comp = self._wilson_ci(n_chose_comp, n_comp, confidence)
+                
+                z_comp = (pref_rate_comp - 0.5) / np.sqrt(0.25 / n_comp)
+                p_comp = 2 * (1 - norm.cdf(abs(z_comp)))
+                
+                column_pattern_results[comp_type] = {
+                    'n_instances': n_comp,
+                    'preference_rate': pref_rate_comp,
+                    'ci_lower': ci_lower_comp,
+                    'ci_upper': ci_upper_comp,
+                    'p_value': p_comp
+                }
+                logger.info(f"Column analysis - {comp_type}: {n_comp} instances, {pref_rate_comp:.1%} preference")
+            else:
+                logger.info(f"Skipped column analysis - {comp_type}: only {len(comp_data)} instances (need >= 10)")
+        
+        # Analysis by comparison type - ROW COMPARISONS (NEW!)
+        row_pattern_results = {}
+        for comp_type in row_instances['comparison_type'].unique():
+            comp_data = row_instances[row_instances['comparison_type'] == comp_type]
+            if len(comp_data) >= 10:  # Minimum threshold
+                n_comp = len(comp_data)
+                n_chose_comp = comp_data['chose_smaller_separation'].sum()  # chose_smaller_separation = chose reach
+                pref_rate_comp = n_chose_comp / n_comp  # preference rate for reach
+                ci_lower_comp, ci_upper_comp = self._wilson_ci(n_chose_comp, n_comp, confidence)
+                
+                z_comp = (pref_rate_comp - 0.5) / np.sqrt(0.25 / n_comp)
+                p_comp = 2 * (1 - norm.cdf(abs(z_comp)))
+                
+                row_pattern_results[comp_type] = {
+                    'n_instances': n_comp,
+                    'preference_rate': pref_rate_comp,
+                    'ci_lower': ci_lower_comp,
+                    'ci_upper': ci_upper_comp,
+                    'p_value': p_comp
+                }
+                logger.info(f"Row analysis - {comp_type}: {n_comp} instances, {pref_rate_comp:.1%} prefer reach")
+            else:
+                logger.info(f"Skipped row analysis - {comp_type}: only {len(comp_data)} instances (need >= 10)")
+        
+        # Group column results for cleaner reporting
+        same_vs_other_results = {}
+        adjacent_vs_distant_results = {}
+        
+        for comp_type, results in column_pattern_results.items():
+            if comp_type.startswith('same_vs_other_'):
+                row_type = comp_type.replace('same_vs_other_', '')
+                same_vs_other_results[row_type] = results
+            elif comp_type.startswith('adjacent_vs_distant_'):
+                row_type = comp_type.replace('adjacent_vs_distant_', '')
+                adjacent_vs_distant_results[row_type] = results
+        
+        # Group row results for reporting
+        reach_vs_hurdle_results = {}
+        for comp_type, results in row_pattern_results.items():
+            if comp_type.startswith('reach_vs_hurdle_'):
+                col_type = comp_type.replace('reach_vs_hurdle_', '')
+                reach_vs_hurdle_results[col_type] = results
+        
+        return {
+            'description': 'Enhanced column separation analysis with row controls + reach vs hurdle by column pattern',
+            'method': 'column_separation_analysis_enhanced',
+            'n_instances': n_instances,
+            'n_row_instances': len(row_instances),
+            'n_total_instances': len(instances_df),
+            'preference_rate': preference_rate,
+            'ci_lower': ci_lower,
+            'ci_upper': ci_upper,
+            'p_value': p_value,
+            'same_vs_other_results': same_vs_other_results,
+            'adjacent_vs_distant_results': adjacent_vs_distant_results,
+            'reach_vs_hurdle_results': reach_vs_hurdle_results,  # NEW!
+            'pattern_results': column_pattern_results,  # Keep for backward compatibility
+            'interpretation': f"Column separation preference: {preference_rate:.1%} favor smaller distances (with row controls) + reach vs hurdle analysis"
+        }
+
     def _calculate_column_separation(self, bigram: str) -> int:
         """Calculate column separation for a bigram."""
         if len(bigram) != 2:
@@ -1086,7 +1202,231 @@ class MOOObjectiveAnalyzer:
                         ""
                     ])
                 
-            elif obj_name in ['row_separation', 'column_separation'] and 'preference_rate' in obj_results:
+            elif obj_name == 'column_separation' and 'preference_rate' in obj_results:
+                pref_rate = obj_results['preference_rate']
+                ci_lower = obj_results.get('ci_lower', np.nan)
+                ci_upper = obj_results.get('ci_upper', np.nan)
+                p_value = obj_results.get('p_value', np.nan)
+                n_instances = obj_results.get('n_instances', 0)
+                n_row_instances = obj_results.get('n_row_instances', 0)
+                n_total_instances = obj_results.get('n_total_instances', n_instances + n_row_instances)
+                
+                # Calculate effect size (departure from no preference)
+                effect_size = abs(pref_rate - 0.5)
+                
+                # Statistical significance indicator
+                sig_indicator = ""
+                if not np.isnan(p_value):
+                    if p_value < 0.001:
+                        sig_indicator = " ***"
+                    elif p_value < 0.01:
+                        sig_indicator = " **"
+                    elif p_value < 0.05:
+                        sig_indicator = " *"
+                
+                report_lines.extend([
+                    f"  COLUMN SEPARATION ANALYSIS:",
+                    f"  Column comparison instances: {n_instances}",
+                    f"  Row comparison instances: {n_row_instances}",
+                    f"  Total instances: {n_total_instances}",
+                    "",
+                    f"  OVERALL COLUMN SEPARATION PREFERENCE (WITH ROW CONTROLS):",
+                    f"  Preference rate: {pref_rate:.1%} favor smaller distances (effect size: {effect_size:.1%})",
+                    f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
+                    f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
+                    "",
+                    f"  METHODOLOGY NOTES:",
+                    f"  - Same-vs-other column tests exclude same-row bigrams (row separation = 0)",
+                    f"  - All comparisons control for row separation (1-row vs 1-row, 2-row vs 2-row)",
+                    f"  - Adjacent-vs-distant tests separated by row pattern for precision",
+                    f"  - NEW: Reach vs hurdle analysis controls for column separation",
+                    ""
+                ])
+                
+                # Same vs Other Column Analysis (excluding same-row)
+                same_vs_other = obj_results.get('same_vs_other_results', {})
+                if same_vs_other:
+                    report_lines.extend([
+                        f"  SAME COLUMN (0) VS OTHER COLUMNS (1-3) - ROW CONTROLLED:",
+                        f"  (Excludes same-row bigrams per methodology)",
+                        ""
+                    ])
+                    
+                    for row_type, comp_data in same_vs_other.items():
+                        comp_pref = comp_data['preference_rate']
+                        comp_ci_lower = comp_data.get('ci_lower', np.nan)
+                        comp_ci_upper = comp_data.get('ci_upper', np.nan)
+                        comp_p_value = comp_data.get('p_value', np.nan)
+                        comp_n = comp_data['n_instances']
+                        
+                        # FIXED: Correct percentage and effect size calculation
+                        if comp_pref > 0.5:
+                            display_pref = comp_pref
+                            display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
+                            interpretation = "same column"
+                        else:
+                            display_pref = 1 - comp_pref
+                            display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
+                            interpretation = "other columns"
+                        
+                        comp_effect = abs(comp_pref - 0.5)
+                        
+                        # Statistical significance indicator
+                        comp_sig_indicator = ""
+                        if not np.isnan(comp_p_value):
+                            if comp_p_value < 0.001:
+                                comp_sig_indicator = " ***"
+                            elif comp_p_value < 0.01:
+                                comp_sig_indicator = " **"
+                            elif comp_p_value < 0.05:
+                                comp_sig_indicator = " *"
+                        
+                        # Enhanced descriptions
+                        if row_type == "reach_1_apart":
+                            type_name = "Reach Movements (1 row apart)"
+                        elif row_type == "hurdle_2_apart":
+                            type_name = "Hurdle Movements (2 rows apart)"
+                        else:
+                            type_name = row_type.replace('_', ' ').title()
+                        
+                        report_lines.extend([
+                            f"    {type_name}:",
+                            f"      Preference: {display_pref:.1%} favor {interpretation} (effect size: {comp_effect:.1%})",
+                            f"      95% CI: [{display_ci_lower:.1%}, {display_ci_upper:.1%}]" if not np.isnan(display_ci_lower) else "      95% CI: Not available",
+                            f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
+                            ""
+                        ])
+                
+                # Adjacent vs Distant Column Analysis (separated by row)
+                adjacent_vs_distant = obj_results.get('adjacent_vs_distant_results', {})
+                if adjacent_vs_distant:
+                    report_lines.extend([
+                        f"  ADJACENT (1) VS DISTANT (2) COLUMNS - BY ROW PATTERN:",
+                        ""
+                    ])
+                    
+                    for row_type, comp_data in adjacent_vs_distant.items():
+                        comp_pref = comp_data['preference_rate']
+                        comp_ci_lower = comp_data.get('ci_lower', np.nan)
+                        comp_ci_upper = comp_data.get('ci_upper', np.nan)
+                        comp_p_value = comp_data.get('p_value', np.nan)
+                        comp_n = comp_data['n_instances']
+                        
+                        # FIXED: Correct percentage and effect size calculation
+                        if comp_pref > 0.5:
+                            display_pref = comp_pref
+                            display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
+                            interpretation = "adjacent columns"
+                        else:
+                            display_pref = 1 - comp_pref
+                            display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
+                            interpretation = "distant columns"
+                        
+                        comp_effect = abs(comp_pref - 0.5)
+                        
+                        # Statistical significance indicator
+                        comp_sig_indicator = ""
+                        if not np.isnan(comp_p_value):
+                            if comp_p_value < 0.001:
+                                comp_sig_indicator = " ***"
+                            elif comp_p_value < 0.01:
+                                comp_sig_indicator = " **"
+                            elif comp_p_value < 0.05:
+                                comp_sig_indicator = " *"
+                        
+                        # Enhanced descriptions based on row pattern
+                        if row_type == "same_row":
+                            type_name = "Same Row Movements (0 row separation)"
+                        elif row_type == "reach_1_apart":
+                            type_name = "Reach Movements (1 row separation)"
+                        elif row_type == "hurdle_2_apart":
+                            type_name = "Hurdle Movements (2 row separation)"
+                        else:
+                            type_name = row_type.replace('_', ' ').title()
+                        
+                        report_lines.extend([
+                            f"    {type_name}:",
+                            f"      Preference: {display_pref:.1%} favor {interpretation} (effect size: {comp_effect:.1%})",
+                            f"      95% CI: [{display_ci_lower:.1%}, {display_ci_upper:.1%}]" if not np.isnan(display_ci_lower) else "      95% CI: Not available",
+                            f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
+                            ""
+                        ])
+                
+                # Reach vs Hurdle by Column Separation
+                reach_vs_hurdle = obj_results.get('reach_vs_hurdle_results', {})
+                if reach_vs_hurdle:
+                    report_lines.extend([
+                        f"  REACH (1 ROW) VS HURDLE (2 ROWS) - BY COLUMN PATTERN:",
+                        f"  (Controls for column separation - comparing only bigrams with same column distance)",
+                        ""
+                    ])
+                    
+                    for col_type, comp_data in reach_vs_hurdle.items():
+                        comp_pref = comp_data['preference_rate']  # preference rate for reach
+                        comp_ci_lower = comp_data.get('ci_lower', np.nan)
+                        comp_ci_upper = comp_data.get('ci_upper', np.nan)
+                        comp_p_value = comp_data.get('p_value', np.nan)
+                        comp_n = comp_data['n_instances']
+                        
+                        # For reach vs hurdle, comp_pref is already the preference rate for reach (smaller row separation)
+                        if comp_pref > 0.5:
+                            display_pref = comp_pref
+                            display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
+                            interpretation = "reach movements"
+                        else:
+                            display_pref = 1 - comp_pref
+                            display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
+                            interpretation = "hurdle movements"
+                        
+                        comp_effect = abs(comp_pref - 0.5)
+                        
+                        # Statistical significance indicator
+                        comp_sig_indicator = ""
+                        if not np.isnan(comp_p_value):
+                            if comp_p_value < 0.001:
+                                comp_sig_indicator = " ***"
+                            elif comp_p_value < 0.01:
+                                comp_sig_indicator = " **"
+                            elif comp_p_value < 0.05:
+                                comp_sig_indicator = " *"
+                        
+                        # Enhanced descriptions based on column pattern
+                        if col_type == "same_column":
+                            type_name = "Same Column (0 column separation)"
+                            detail = "Same finger, different rows"
+                        elif col_type == "adjacent_columns":
+                            type_name = "Adjacent Columns (1 column separation)"
+                            detail = "Neighboring fingers"
+                        elif col_type == "distant_columns":
+                            type_name = "Distant Columns (2 column separation)"
+                            detail = "Ring-pinky or middle-index fingers"
+                        elif col_type == "very_distant_columns":
+                            type_name = "Very Distant Columns (3 column separation)"
+                            detail = "Index-pinky fingers"
+                        else:
+                            type_name = col_type.replace('_', ' ').title()
+                            detail = ""
+                        
+                        report_lines.extend([
+                            f"    {type_name}:",
+                            f"      {detail}" if detail else "",
+                            f"      Preference: {display_pref:.1%} favor {interpretation} (effect size: {comp_effect:.1%})",
+                            f"      95% CI: [{display_ci_lower:.1%}, {display_ci_upper:.1%}]" if not np.isnan(display_ci_lower) else "      95% CI: Not available",
+                            f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
+                            ""
+                        ])
+                    
+                    # Add interpretation summary for reach vs hurdle
+                    report_lines.extend([
+                        f"  REACH VS HURDLE INTERPRETATION:",
+                        f"  - Reach = 1 row separation (e.g., A→W, S→E)",
+                        f"  - Hurdle = 2 row separation (e.g., A→Q, S→W)", 
+                        f"  - Analysis shows how row preferences vary by finger coordination requirements",
+                        f"  - Expected pattern: Same finger prefers reach, distant fingers may prefer hurdle",
+                        ""
+                    ])
+
+            elif obj_name == 'row_separation' and 'preference_rate' in obj_results:
                 pref_rate = obj_results['preference_rate']
                 ci_lower = obj_results.get('ci_lower', np.nan)
                 ci_upper = obj_results.get('ci_upper', np.nan)
@@ -1107,16 +1447,15 @@ class MOOObjectiveAnalyzer:
                         sig_indicator = " *"
                 
                 report_lines.extend([
-                    f"  OVERALL {obj_name.upper().replace('_', ' ')} PREFERENCE:",
+                    f"  OVERALL ROW SEPARATION PREFERENCE:",
                     f"  Preference rate: {pref_rate:.1%} favor smaller distances (effect size: {effect_size:.1%})",
                     f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     ""
                 ])
                 
-                # Show breakdowns with statistical tests
-                breakdown_key = 'comparison_results' if 'comparison_results' in obj_results else 'pattern_results'
-                breakdown = obj_results.get(breakdown_key, {})
+                # Show breakdowns with clearer descriptions
+                breakdown = obj_results.get('comparison_results', {})
                 
                 if breakdown:
                     report_lines.extend([
@@ -1142,14 +1481,16 @@ class MOOObjectiveAnalyzer:
                                 comp_sig_indicator = " *"
                         
                         type_name = comp_type.replace('_', ' ').title()
+                        interpretation = "Smaller distance" if comp_pref > 0.5 else "Larger distance"
+                        
                         report_lines.extend([
                             f"    {type_name}:",
-                            f"      Preference rate: {comp_pref:.1%} (effect size: {comp_effect:.1%})",
+                            f"      Preference: {comp_pref:.1%} favor {interpretation} (effect size: {comp_effect:.1%})",
                             f"      95% CI: [{comp_ci_lower:.1%}, {comp_ci_upper:.1%}]" if not np.isnan(comp_ci_lower) else "      95% CI: Not available",
                             f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
                             ""
                         ])
-                        
+                                                
             elif obj_name == 'column_4_vs_5' and 'preference_rate' in obj_results:
                 pref_rate = obj_results['preference_rate']
                 ci_lower = obj_results.get('ci_lower', np.nan)
@@ -1204,7 +1545,7 @@ class MOOObjectiveAnalyzer:
             "- *** p < 0.001 (very strong evidence)",
             "- ** p < 0.01 (strong evidence)",
             "- * p < 0.05 (moderate evidence)",
-            "- No asterisk: p ≥ 0.05 (weak/no evidence)",
+            "- No asterisk: p >= 0.05 (weak/no evidence)",
             "",
             "Confidence Intervals:",
             "- Narrow CI: More precise estimate",
@@ -1221,7 +1562,7 @@ class MOOObjectiveAnalyzer:
             f.write('\n'.join(report_lines))
 
         logger.info(f"Comprehensive report with statistical tests saved to {report_path}")
-        
+
     def _save_key_preference_tables(self, results: Dict[str, Any], output_folder: str) -> None:
         """Save detailed CSV tables for all key preference methods."""
         
