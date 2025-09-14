@@ -19,7 +19,11 @@ MOO Objectives Analyzed:
    - Bigram pair comparisons
 2. Row separation: Preferences across keyboard rows (same > reach > hurdle)  
 3. Column separation: Adjacent vs. distant finger movements
-4. Column 4 vs 5: Index finger column preferences
+4. Inward vs Outward Roll: Preference for increasing vs decreasing finger sequences
+   - Same row movements (horizontal rolls)
+   - Different row movements (diagonal/vertical rolls)
+5. Side reach movement preferences: Avoiding vs accepting movements that require side reach
+   - Compares bigrams staying in standard area vs those requiring reach to column 5
 
 Usage:
     poetry run python3 analyze_objectives.py --data output/nonProlific/process_data/tables/processed_consistent_choices.csv \
@@ -298,6 +302,28 @@ class MOOObjectiveAnalyzer:
         """Get column 5 keys for column 4 vs 5 analysis."""
         return {'t', 'g', 'b'}
 
+    def _apply_frequency_weights(self, instances_df: pd.DataFrame) -> pd.DataFrame:
+        """Apply frequency weighting to balance comparison frequencies."""
+        if instances_df.empty:
+            return instances_df
+        
+        # Create unique comparison identifier
+        if 'comparison' not in instances_df.columns:
+            instances_df['comparison'] = instances_df.apply(
+                lambda row: tuple(sorted([row['chosen_bigram'], row['unchosen_bigram']])), axis=1
+            )
+        
+        # Calculate frequency weights
+        freq_counts = instances_df['comparison'].value_counts()
+        method = self.config.get('frequency_weighting_method', 'inverse_frequency')
+        
+        if method == 'inverse_frequency':
+            instances_df['frequency_weight'] = instances_df['comparison'].map(lambda x: 1.0 / freq_counts[x])
+        else:
+            instances_df['frequency_weight'] = 1.0
+        
+        return instances_df
+
     def analyze_moo_objectives(self, data_path: str, output_folder: str, sample_size: int = None) -> Dict[str, Any]:
         """Run complete MOO objectives analysis focusing on practical significance."""
         logger.info("Starting MOO objectives analysis for practical significance...")
@@ -331,8 +357,11 @@ class MOOObjectiveAnalyzer:
         logger.info("=== COLUMN SEPARATION PREFERENCES ===")  
         results['column_separation'] = self._analyze_column_separation()
 
-        logger.info("=== COLUMN 4 VS 5 PREFERENCES ===")  
-        results['column_4_vs_5'] = self._analyze_column_4_vs_5()
+        logger.info("=== INWARD VS OUTWARD ROLL PREFERENCES ===")
+        results['inward_outward_roll'] = self._analyze_inward_outward_roll()
+
+        logger.info("=== SIDE REACH MOVEMENT PREFERENCES ===")
+        results['side_reach'] = self._analyze_side_reach()
 
         # Generate reports and save results
         enhanced_results = {
@@ -344,36 +373,19 @@ class MOOObjectiveAnalyzer:
         self._generate_comprehensive_report(enhanced_results, output_folder)
 
         # Save detailed key preference comparison tables
-        self._save_key_preference_tables(enhanced_results['objectives'], output_folder)        
+        self._save_key_preference_tables(enhanced_results['objectives'], output_folder)
+        
+        # Generate comprehensive diagnostic CSV
+        logger.info("=== GENERATING COMPREHENSIVE DIAGNOSTIC CSV ===")
+        self._generate_comprehensive_diagnostic_csv(enhanced_results['objectives'], output_folder)
+        
         logger.info(f"Results saved to {output_folder}")
-    
+        
         # Generate visualizations
         self._create_visualizations(results, output_folder)
         
         logger.info(f"MOO objectives analysis complete! Results saved to {output_folder}")
         return enhanced_results
-
-    def _apply_frequency_weights(self, instances_df: pd.DataFrame) -> pd.DataFrame:
-        """Apply frequency weighting to balance comparison frequencies."""
-        if instances_df.empty:
-            return instances_df
-        
-        # Create unique comparison identifier
-        if 'comparison' not in instances_df.columns:
-            instances_df['comparison'] = instances_df.apply(
-                lambda row: tuple(sorted([row['chosen_bigram'], row['unchosen_bigram']])), axis=1
-            )
-        
-        # Calculate frequency weights
-        freq_counts = instances_df['comparison'].value_counts()
-        method = self.config.get('frequency_weighting_method', 'inverse_frequency')
-        
-        if method == 'inverse_frequency':
-            instances_df['frequency_weight'] = instances_df['comparison'].map(lambda x: 1.0 / freq_counts[x])
-        else:
-            instances_df['frequency_weight'] = 1.0
-        
-        return instances_df
 
     # =========================================================================
     # KEY PREFERENCES: SAME-LETTER BIGRAMS (BRADLEY-TERRY MODEL)
@@ -626,7 +638,7 @@ class MOOObjectiveAnalyzer:
         z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
         p_value = 2 * (1 - norm.cdf(abs(z_score)))
         
-        # Analysis by comparison type
+        # Analysis by comparison type (THIS WAS MISSING THE DETAILED BREAKDOWN)
         comparison_results = {}
         for comp_type in instances_df['comparison_type'].unique():
             comp_data = instances_df[instances_df['comparison_type'] == comp_type]
@@ -646,6 +658,9 @@ class MOOObjectiveAnalyzer:
                     'ci_upper': ci_upper_comp,
                     'p_value': p_comp
                 }
+                logger.info(f"Row separation - {comp_type}: {n_comp} instances, {pref_rate_comp:.1%} prefer smaller")
+            else:
+                logger.info(f"Skipped row separation - {comp_type}: only {len(comp_data)} instances (need >= 10)")
         
         return {
             'description': 'Preferences for smaller row separation distances',
@@ -655,10 +670,10 @@ class MOOObjectiveAnalyzer:
             'ci_lower': ci_lower,
             'ci_upper': ci_upper,
             'p_value': p_value,
-            'comparison_results': comparison_results,
+            'comparison_results': comparison_results,  # This provides the detailed breakdown
             'interpretation': f"Row separation preference: {preference_rate:.1%} favor smaller distances"
         }
-    
+
     def _extract_row_separation_instances(self) -> pd.DataFrame:
         """Extract row separation comparison instances."""
         instances = []
@@ -952,92 +967,242 @@ class MOOObjectiveAnalyzer:
         return 0
 
     # =========================================================================
-    # COLUMN 4 VS 5 PREFERENCES
+    # INWARD VS OUTWARD ROLL PREFERENCES (NEW ANALYSIS)
     # =========================================================================
-
-    def _analyze_column_4_vs_5(self) -> Dict[str, Any]:
-        """Analyze preference for column 4 (RFV) vs column 5 (TGB)."""
+    
+    def _analyze_inward_outward_roll(self) -> Dict[str, Any]:
+        """Analyze preference for inward roll (increasing finger numbers) vs outward roll (decreasing finger numbers)."""
         
-        instances_df = self._extract_column_4_vs_5_instances()
+        instances_df = self._extract_inward_outward_instances()
         
         if instances_df.empty:
-            logger.warning('No column 4 vs 5 instances found - skipping this analysis')
+            logger.warning('No inward/outward roll instances found - skipping this analysis')
             return {
-                'description': 'Column 4 (RFV) vs Column 5 (TGB) preference',
-                'method': 'column_4_vs_5_analysis',
+                'description': 'Inward roll (increasing finger) vs Outward roll (decreasing finger) preference',
+                'method': 'inward_outward_roll_analysis',
                 'status': 'insufficient_data',
                 'n_instances': 0,
-                'interpretation': 'No column 4 vs 5 comparisons found in data'
+                'interpretation': 'No inward vs outward roll comparisons found in data'
             }
         
-        logger.info(f"Found {len(instances_df)} column 4 vs 5 instances")
+        logger.info(f"Found {len(instances_df)} inward vs outward roll instances")
         
-        # Analysis
+        # Overall analysis
         n_instances = len(instances_df)
-        n_chose_col4 = instances_df['chose_column_4'].sum()
-        preference_rate = n_chose_col4 / n_instances
+        n_chose_inward = instances_df['chose_inward_roll'].sum()
+        preference_rate = n_chose_inward / n_instances
         
         confidence = self.config.get('confidence_level', 0.95)
-        ci_lower, ci_upper = self._wilson_ci(n_chose_col4, n_instances, confidence)
+        ci_lower, ci_upper = self._wilson_ci(n_chose_inward, n_instances, confidence)
         
         # Statistical test
         z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
         p_value = 2 * (1 - norm.cdf(abs(z_score)))
         
+        # Analysis by row pattern (same row vs different rows)
+        pattern_results = {}
+        for row_pattern in instances_df['row_pattern'].unique():
+            pattern_data = instances_df[instances_df['row_pattern'] == row_pattern]
+            if len(pattern_data) >= 10:  # Minimum threshold
+                n_pattern = len(pattern_data)
+                n_chose_inward_pattern = pattern_data['chose_inward_roll'].sum()
+                pref_rate_pattern = n_chose_inward_pattern / n_pattern
+                ci_lower_pattern, ci_upper_pattern = self._wilson_ci(n_chose_inward_pattern, n_pattern, confidence)
+                
+                z_pattern = (pref_rate_pattern - 0.5) / np.sqrt(0.25 / n_pattern)
+                p_pattern = 2 * (1 - norm.cdf(abs(z_pattern)))
+                
+                pattern_results[row_pattern] = {
+                    'n_instances': n_pattern,
+                    'preference_rate': pref_rate_pattern,
+                    'ci_lower': ci_lower_pattern,
+                    'ci_upper': ci_upper_pattern,
+                    'p_value': p_pattern
+                }
+                logger.info(f"Inward/Outward roll - {row_pattern}: {n_pattern} instances, {pref_rate_pattern:.1%} prefer inward")
+            else:
+                logger.info(f"Skipped inward/outward roll - {row_pattern}: only {len(pattern_data)} instances (need >= 10)")
+        
         return {
-            'description': 'Column 4 (RFV) vs Column 5 (TGB) preference',
-            'method': 'column_4_vs_5_analysis',
+            'description': 'Inward roll (increasing finger) vs Outward roll (decreasing finger) preference',
+            'method': 'inward_outward_roll_analysis',
             'n_instances': n_instances,
             'preference_rate': preference_rate,
             'ci_lower': ci_lower,
             'ci_upper': ci_upper,
             'p_value': p_value,
-            'interpretation': f"Column 4 preference rate: {preference_rate:.1%}"
+            'pattern_results': pattern_results,
+            'interpretation': f"Inward roll preference rate: {preference_rate:.1%} (separated by row pattern)"
         }
 
-    def _extract_column_4_vs_5_instances(self) -> pd.DataFrame:
-        """Extract instances comparing column 4 vs column 5 bigrams."""
+    def _extract_inward_outward_instances(self) -> pd.DataFrame:
+        """Extract instances comparing inward vs outward roll bigrams."""
         instances = []
         
         for _, row in self.data.iterrows():
             chosen = str(row['chosen_bigram']).lower()
             unchosen = str(row['unchosen_bigram']).lower()
             
-            chosen_type = self._classify_column_4_vs_5(chosen)
-            unchosen_type = self._classify_column_4_vs_5(unchosen)
+            # Only analyze left-hand bigrams
+            if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
+                continue
             
-            if {chosen_type, unchosen_type} == {'column_4', 'column_5'}:
-                chose_column_4 = 1 if chosen_type == 'column_4' else 0
+            chosen_roll_type = self._classify_roll_direction(chosen)
+            unchosen_roll_type = self._classify_roll_direction(unchosen)
+            
+            # Only include comparisons between inward and outward rolls
+            if {chosen_roll_type, unchosen_roll_type} == {'inward', 'outward'}:
+                chose_inward_roll = 1 if chosen_roll_type == 'inward' else 0
+                
+                # Determine row pattern
+                chosen_row_sep = self._calculate_row_separation(chosen)
+                unchosen_row_sep = self._calculate_row_separation(unchosen)
+                
+                # For this analysis, we want to separate same-row from different-row movements
+                if chosen_row_sep == 0 and unchosen_row_sep == 0:
+                    row_pattern = "same_row"
+                elif chosen_row_sep > 0 and unchosen_row_sep > 0:
+                    row_pattern = "different_rows"
+                else:
+                    # Mixed pattern (one same-row, one different-row) - skip for cleaner analysis
+                    continue
                 
                 instances.append({
                     'user_id': row['user_id'],
                     'chosen_bigram': chosen,
                     'unchosen_bigram': unchosen,
-                    'chose_column_4': chose_column_4
+                    'chose_inward_roll': chose_inward_roll,
+                    'chosen_roll_type': chosen_roll_type,
+                    'unchosen_roll_type': unchosen_roll_type,
+                    'row_pattern': row_pattern,
+                    'chosen_row_separation': chosen_row_sep,
+                    'unchosen_row_separation': unchosen_row_sep
                 })
         
         return pd.DataFrame(instances)
 
-    def _classify_column_4_vs_5(self, bigram: str) -> str:
-        """Classify bigram as column 4, column 5, or neither based on key presence."""
-        col4_keys = {'r', 'f', 'v'}
-        col5_keys = self._get_column_5_keys()
+    def _classify_roll_direction(self, bigram: str) -> str:
+        """Classify bigram as inward roll, outward roll, or neither."""
+        if len(bigram) != 2:
+            return 'invalid'
         
-        bigram_keys = set(bigram)
+        key1, key2 = bigram[0], bigram[1]
         
-        # Check which column keys are present
-        has_col4 = bool(bigram_keys.intersection(col4_keys))
-        has_col5 = bool(bigram_keys.intersection(col5_keys))
+        # Get finger assignments
+        if key1 not in self.key_positions or key2 not in self.key_positions:
+            return 'invalid'
         
-        # Classify based on presence, excluding mixed cases
-        if has_col4 and not has_col5:
-            return 'column_4'
-        elif has_col5 and not has_col4:
-            return 'column_5'
+        finger1 = self.key_positions[key1].finger
+        finger2 = self.key_positions[key2].finger
+        
+        # Don't analyze same-finger bigrams
+        if finger1 == finger2:
+            return 'same_finger'
+        
+        # Classify roll direction
+        if finger2 > finger1:  # Finger number increases (pinky → index)
+            return 'inward'
+        elif finger2 < finger1:  # Finger number decreases (index → pinky)
+            return 'outward'
         else:
-            # Neither (no column 4/5 keys) or mixed (contains both)
-            return 'neither'
+            return 'same_finger'  # Should not reach here given the check above
+        
+    # =========================================================================
+    # SIDE REACH PREFERENCES (MOVEMENT-BASED CLASSIFICATION)
+    # =========================================================================
 
+    def _analyze_side_reach(self) -> Dict[str, Any]:
+        """Analyze preference for movements that avoid vs require side reach to column 5."""
+        
+        instances_df = self._extract_side_reach_instances()
+        
+        if instances_df.empty:
+            logger.warning('No side reach movement instances found - skipping this analysis')
+            return {
+                'description': 'Side reach movement analysis: Standard area vs requiring side reach',
+                'method': 'side_reach_movement_analysis',
+                'status': 'insufficient_data',
+                'n_instances': 0,
+                'interpretation': 'No side reach movement comparisons found in data'
+            }
+        
+        logger.info(f"Found {len(instances_df)} side reach movement instances")
+        
+        # Overall analysis
+        n_instances = len(instances_df)
+        n_chose_no_side_reach = instances_df['chose_no_side_reach'].sum()
+        preference_rate = n_chose_no_side_reach / n_instances
+        
+        confidence = self.config.get('confidence_level', 0.95)
+        ci_lower, ci_upper = self._wilson_ci(n_chose_no_side_reach, n_instances, confidence)
+        
+        # Statistical test
+        z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
+        p_value = 2 * (1 - norm.cdf(abs(z_score)))
+        
+        return {
+            'description': 'Side reach movement analysis: Movements staying in standard area vs requiring side reach',
+            'method': 'side_reach_movement_analysis',
+            'n_instances': n_instances,
+            'no_side_reach_preference_rate': preference_rate,
+            'ci_lower': ci_lower,
+            'ci_upper': ci_upper,
+            'p_value': p_value,
+            'interpretation': f"No side reach preference rate: {preference_rate:.1%} (prefer movements staying in standard left-hand area)"
+        }
+
+    def _extract_side_reach_instances(self) -> pd.DataFrame:
+        """Extract instances comparing movements with vs without side reach."""
+        instances = []
+        
+        for _, row in self.data.iterrows():
+            chosen = str(row['chosen_bigram']).lower()
+            unchosen = str(row['unchosen_bigram']).lower()
+            
+            chosen_requires_side_reach = self._requires_side_reach_movement(chosen)
+            unchosen_requires_side_reach = self._requires_side_reach_movement(unchosen)
+            
+            # Only compare bigrams where one requires side reach and the other doesn't
+            if chosen_requires_side_reach != unchosen_requires_side_reach:
+                # chose_no_side_reach = 1 if chose the bigram that doesn't require side reach
+                chose_no_side_reach = 1 if not chosen_requires_side_reach else 0
+                
+                instances.append({
+                    'user_id': row['user_id'],
+                    'chosen_bigram': chosen,
+                    'unchosen_bigram': unchosen,
+                    'chose_no_side_reach': chose_no_side_reach,
+                    'chosen_requires_side_reach': chosen_requires_side_reach,
+                    'unchosen_requires_side_reach': unchosen_requires_side_reach
+                })
+        
+        return pd.DataFrame(instances)
+
+    def _requires_side_reach_movement(self, bigram: str) -> bool:
+        """Check if typing this bigram requires reaching to column 5."""
+        if len(bigram) != 2:
+            return False
+        
+        side_reach_keys = self._get_column_5_keys()  # T, G, B
+        
+        # Returns True if any key in the bigram is in column 5
+        return any(key in side_reach_keys for key in bigram)
+
+    def _classify_side_reach_movement(self, bigram: str) -> str:
+        """Classify bigram by whether it requires side reach movement."""
+        if not self._all_keys_in_analysis_area(bigram):
+            return 'invalid'  # Contains keys outside our analysis area
+        
+        if self._requires_side_reach_movement(bigram):
+            return 'requires_side_reach'
+        else:
+            return 'no_side_reach'
+
+    def _all_keys_in_analysis_area(self, bigram: str) -> bool:
+        """Check if all keys are in our analysis area (left hand + column 5)."""
+        analysis_keys = set(self.key_positions.keys()) | self._get_column_5_keys()
+        return all(key in analysis_keys for key in bigram)
+    
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
@@ -1094,7 +1259,7 @@ class MOOObjectiveAnalyzer:
             f"Approach: Practical significance focus with statistical support",
             f"Emphasis: Effect sizes and confidence intervals for MOO design",
             "",
-            "METHODOLOGY:",
+            "APPROACH:",
             "- Effect sizes and confidence intervals quantify practical differences",
             "- Statistical tests confirm preferences are detectable above chance",
             "- No corrections across objectives (each addresses distinct mechanics)",
@@ -1208,8 +1373,6 @@ class MOOObjectiveAnalyzer:
                 ci_upper = obj_results.get('ci_upper', np.nan)
                 p_value = obj_results.get('p_value', np.nan)
                 n_instances = obj_results.get('n_instances', 0)
-                n_row_instances = obj_results.get('n_row_instances', 0)
-                n_total_instances = obj_results.get('n_total_instances', n_instances + n_row_instances)
                 
                 # Calculate effect size (departure from no preference)
                 effect_size = abs(pref_rate - 0.5)
@@ -1225,21 +1388,15 @@ class MOOObjectiveAnalyzer:
                         sig_indicator = " *"
                 
                 report_lines.extend([
-                    f"  COLUMN SEPARATION ANALYSIS:",
-                    f"  Column comparison instances: {n_instances}",
-                    f"  Row comparison instances: {n_row_instances}",
-                    f"  Total instances: {n_total_instances}",
-                    "",
                     f"  OVERALL COLUMN SEPARATION PREFERENCE (WITH ROW CONTROLS):",
                     f"  Preference rate: {pref_rate:.1%} favor smaller distances (effect size: {effect_size:.1%})",
                     f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     "",
-                    f"  METHODOLOGY NOTES:",
+                    f"  METHODS NOTES:",
                     f"  - Same-vs-other column tests exclude same-row bigrams (row separation = 0)",
                     f"  - All comparisons control for row separation (1-row vs 1-row, 2-row vs 2-row)",
                     f"  - Adjacent-vs-distant tests separated by row pattern for precision",
-                    f"  - NEW: Reach vs hurdle analysis controls for column separation",
                     ""
                 ])
                 
@@ -1351,80 +1508,6 @@ class MOOObjectiveAnalyzer:
                             f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
                             ""
                         ])
-                
-                # Reach vs Hurdle by Column Separation
-                reach_vs_hurdle = obj_results.get('reach_vs_hurdle_results', {})
-                if reach_vs_hurdle:
-                    report_lines.extend([
-                        f"  REACH (1 ROW) VS HURDLE (2 ROWS) - BY COLUMN PATTERN:",
-                        f"  (Controls for column separation - comparing only bigrams with same column distance)",
-                        ""
-                    ])
-                    
-                    for col_type, comp_data in reach_vs_hurdle.items():
-                        comp_pref = comp_data['preference_rate']  # preference rate for reach
-                        comp_ci_lower = comp_data.get('ci_lower', np.nan)
-                        comp_ci_upper = comp_data.get('ci_upper', np.nan)
-                        comp_p_value = comp_data.get('p_value', np.nan)
-                        comp_n = comp_data['n_instances']
-                        
-                        # For reach vs hurdle, comp_pref is already the preference rate for reach (smaller row separation)
-                        if comp_pref > 0.5:
-                            display_pref = comp_pref
-                            display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
-                            interpretation = "reach movements"
-                        else:
-                            display_pref = 1 - comp_pref
-                            display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
-                            interpretation = "hurdle movements"
-                        
-                        comp_effect = abs(comp_pref - 0.5)
-                        
-                        # Statistical significance indicator
-                        comp_sig_indicator = ""
-                        if not np.isnan(comp_p_value):
-                            if comp_p_value < 0.001:
-                                comp_sig_indicator = " ***"
-                            elif comp_p_value < 0.01:
-                                comp_sig_indicator = " **"
-                            elif comp_p_value < 0.05:
-                                comp_sig_indicator = " *"
-                        
-                        # Enhanced descriptions based on column pattern
-                        if col_type == "same_column":
-                            type_name = "Same Column (0 column separation)"
-                            detail = "Same finger, different rows"
-                        elif col_type == "adjacent_columns":
-                            type_name = "Adjacent Columns (1 column separation)"
-                            detail = "Neighboring fingers"
-                        elif col_type == "distant_columns":
-                            type_name = "Distant Columns (2 column separation)"
-                            detail = "Ring-pinky or middle-index fingers"
-                        elif col_type == "very_distant_columns":
-                            type_name = "Very Distant Columns (3 column separation)"
-                            detail = "Index-pinky fingers"
-                        else:
-                            type_name = col_type.replace('_', ' ').title()
-                            detail = ""
-                        
-                        report_lines.extend([
-                            f"    {type_name}:",
-                            f"      {detail}" if detail else "",
-                            f"      Preference: {display_pref:.1%} favor {interpretation} (effect size: {comp_effect:.1%})",
-                            f"      95% CI: [{display_ci_lower:.1%}, {display_ci_upper:.1%}]" if not np.isnan(display_ci_lower) else "      95% CI: Not available",
-                            f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
-                            ""
-                        ])
-                    
-                    # Add interpretation summary for reach vs hurdle
-                    report_lines.extend([
-                        f"  REACH VS HURDLE INTERPRETATION:",
-                        f"  - Reach = 1 row separation (e.g., A→W, S→E)",
-                        f"  - Hurdle = 2 row separation (e.g., A→Q, S→W)", 
-                        f"  - Analysis shows how row preferences vary by finger coordination requirements",
-                        f"  - Expected pattern: Same finger prefers reach, distant fingers may prefer hurdle",
-                        ""
-                    ])
 
             elif obj_name == 'row_separation' and 'preference_rate' in obj_results:
                 pref_rate = obj_results['preference_rate']
@@ -1454,7 +1537,7 @@ class MOOObjectiveAnalyzer:
                     ""
                 ])
                 
-                # Show breakdowns with clearer descriptions
+                # Show detailed breakdown by comparison type
                 breakdown = obj_results.get('comparison_results', {})
                 
                 if breakdown:
@@ -1480,7 +1563,14 @@ class MOOObjectiveAnalyzer:
                             elif comp_p_value < 0.05:
                                 comp_sig_indicator = " *"
                         
-                        type_name = comp_type.replace('_', ' ').title()
+                        # Enhanced type descriptions
+                        if comp_type == "same_row_vs_1_apart":
+                            type_name = "Same Row (0) vs Reach (1)"
+                        elif comp_type == "1_apart_vs_2_apart":
+                            type_name = "Reach (1) vs Hurdle (2)"
+                        else:
+                            type_name = comp_type.replace('_', ' ').title()
+                        
                         interpretation = "Smaller distance" if comp_pref > 0.5 else "Larger distance"
                         
                         report_lines.extend([
@@ -1490,8 +1580,13 @@ class MOOObjectiveAnalyzer:
                             f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
                             ""
                         ])
-                                                
-            elif obj_name == 'column_4_vs_5' and 'preference_rate' in obj_results:
+                else:
+                    report_lines.extend([
+                        f"  No detailed breakdown available (insufficient data for individual comparison types)",
+                        ""
+                    ])
+
+            elif obj_name == 'inward_outward_roll' and 'preference_rate' in obj_results:
                 pref_rate = obj_results['preference_rate']
                 ci_lower = obj_results.get('ci_lower', np.nan)
                 ci_upper = obj_results.get('ci_upper', np.nan)
@@ -1512,14 +1607,105 @@ class MOOObjectiveAnalyzer:
                         sig_indicator = " *"
                 
                 report_lines.extend([
-                    f"  COLUMN 4 vs 5 PREFERENCE:",
-                    f"  Column 4 preference rate: {pref_rate:.1%} (effect size: {effect_size:.1%})",
+                    f"  OVERALL INWARD VS OUTWARD ROLL PREFERENCE:",
+                    f"  Inward roll preference rate: {pref_rate:.1%} (effect size: {effect_size:.1%})",
                     f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     "",
+                    f"  METHODS NOTES:",
+                    f"  - Inward roll: Finger number increases (pinky → index, e.g., 'as', 'aw')",
+                    f"  - Outward roll: Finger number decreases (index → pinky, e.g., 'sa', 'wa')",
+                    f"  - Analysis separated by row pattern (same row vs different rows)",
+                    ""
+                ])
+                
+                # Pattern-specific results
+                pattern_results = obj_results.get('pattern_results', {})
+                if pattern_results:
+                    report_lines.extend([
+                        f"  INWARD VS OUTWARD ROLL BY ROW PATTERN:",
+                        ""
+                    ])
+                    
+                    for row_pattern, pattern_data in pattern_results.items():
+                        pattern_pref = pattern_data['preference_rate']
+                        pattern_ci_lower = pattern_data.get('ci_lower', np.nan)
+                        pattern_ci_upper = pattern_data.get('ci_upper', np.nan)
+                        pattern_p_value = pattern_data.get('p_value', np.nan)
+                        pattern_n = pattern_data['n_instances']
+                        
+                        # Calculate effect size and interpretation
+                        pattern_effect = abs(pattern_pref - 0.5)
+                        if pattern_pref > 0.5:
+                            interpretation = "inward roll"
+                            display_pref = pattern_pref
+                            display_ci_lower, display_ci_upper = pattern_ci_lower, pattern_ci_upper
+                        else:
+                            interpretation = "outward roll"
+                            display_pref = 1 - pattern_pref
+                            display_ci_lower, display_ci_upper = 1 - pattern_ci_upper, 1 - pattern_ci_lower
+                        
+                        # Statistical significance indicator
+                        pattern_sig_indicator = ""
+                        if not np.isnan(pattern_p_value):
+                            if pattern_p_value < 0.001:
+                                pattern_sig_indicator = " ***"
+                            elif pattern_p_value < 0.01:
+                                pattern_sig_indicator = " **"
+                            elif pattern_p_value < 0.05:
+                                pattern_sig_indicator = " *"
+                        
+                        # Enhanced descriptions
+                        if row_pattern == "same_row":
+                            type_name = "Same Row Movements (horizontal rolls)"
+                        elif row_pattern == "different_rows":
+                            type_name = "Different Row Movements (diagonal/vertical rolls)"
+                        else:
+                            type_name = row_pattern.replace('_', ' ').title()
+                        
+                        report_lines.extend([
+                            f"    {type_name}:",
+                            f"      Preference: {display_pref:.1%} favor {interpretation} (effect size: {pattern_effect:.1%})",
+                            f"      95% CI: [{display_ci_lower:.1%}, {display_ci_upper:.1%}]" if not np.isnan(display_ci_lower) else "      95% CI: Not available",
+                            f"      Statistical test: p = {pattern_p_value:.4f}{pattern_sig_indicator} (n={pattern_n})" if not np.isnan(pattern_p_value) else f"      Statistical test: Not available (n={pattern_n})",
+                            ""
+                        ])
+                                                                    
+            elif obj_name == 'side_reach' and 'no_side_reach_preference_rate' in obj_results:
+                pref_rate = obj_results['no_side_reach_preference_rate']
+                ci_lower = obj_results.get('ci_lower', np.nan)
+                ci_upper = obj_results.get('ci_upper', np.nan)
+                p_value = obj_results.get('p_value', np.nan)
+                n_instances = obj_results.get('n_instances', 0)
+                
+                # Calculate effect size
+                effect_size = abs(pref_rate - 0.5)
+                
+                # Statistical significance indicator
+                sig_indicator = ""
+                if not np.isnan(p_value):
+                    if p_value < 0.001:
+                        sig_indicator = " ***"
+                    elif p_value < 0.01:
+                        sig_indicator = " **"
+                    elif p_value < 0.05:
+                        sig_indicator = " *"
+                
+                report_lines.extend([
+                    f"  SIDE REACH MOVEMENT PREFERENCE:",
+                    f"  No side reach preference rate: {pref_rate:.1%} (effect size: {effect_size:.1%})",
+                    f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
+                    f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
+                    "",
+                    f"  METHODOLOGY:",
+                    f"  - No side reach: Bigrams using only standard left-hand area (columns 1-4)",
+                    f"  - Requires side reach: Bigrams containing column 5 keys (T, G, B)",
+                    f"  - Examples: 'as' (no reach) vs 'at' (requires reach), 'df' vs 'dg'",
+                    "",
                     f"  INTERPRETATION:",
-                    f"  - Column 4 keys (R, F, V) vs Column 5 keys (T, G, B)",
-                    f"  - Rate > 50% indicates preference for index finger column (Column 4)",
+                    f"  - Rate > 50%: Preference for avoiding side reach movements",
+                    f"  - Rate < 50%: Willingness to use side reach movements",
+                    f"  - This measures ergonomic cost of extending beyond standard typing area",
                     ""
                 ])
             
@@ -1655,6 +1841,14 @@ class MOOObjectiveAnalyzer:
         if 'pairwise_preferences' in results:
             self._create_pairwise_plot(results['pairwise_preferences'], output_folder)
         
+        # Inward/Outward roll visualization
+        if 'inward_outward_roll' in results and results['inward_outward_roll'].get('status') != 'insufficient_data':
+            self._create_inward_outward_plot(results['inward_outward_roll'], output_folder)
+
+        # Side reach movement visualization
+        if 'side_reach' in results and results['side_reach'].get('n_instances', 0) > 0:
+            self._create_side_reach_movement_plot(results['side_reach'], output_folder)
+
         logger.info(f"Visualizations saved to {output_folder}")
 
     def _create_key_preference_plot(self, same_letter_results: Dict[str, Any], output_folder: str) -> None:
@@ -1746,6 +1940,532 @@ class MOOObjectiveAnalyzer:
         plt.savefig(os.path.join(output_folder, 'key_preferences_bigram_pair_comparisons.png'), 
                    dpi=300, bbox_inches='tight')
         plt.close()
+
+    def _create_inward_outward_plot(self, inward_outward_results: Dict[str, Any], output_folder: str) -> None:
+        """Create inward vs outward roll visualization."""
+        
+        if 'pattern_results' not in inward_outward_results:
+            return
+        
+        pattern_data = inward_outward_results['pattern_results']
+        
+        if not pattern_data:
+            return
+        
+        fig, ax = plt.subplots(figsize=(10, 6))
+        
+        patterns = list(pattern_data.keys())
+        preference_rates = [data['preference_rate'] for data in pattern_data.values()]
+        ci_lowers = [data['ci_lower'] for data in pattern_data.values()]
+        ci_uppers = [data['ci_upper'] for data in pattern_data.values()]
+        
+        x_pos = range(len(patterns))
+        
+        # Plot confidence intervals
+        for i, (lower, upper) in enumerate(zip(ci_lowers, ci_uppers)):
+            ax.plot([i, i], [lower, upper], color='gray', linewidth=3, alpha=0.6)
+        
+        # Plot points
+        colors = ['blue' if rate > 0.5 else 'red' for rate in preference_rates]
+        ax.scatter(x_pos, preference_rates, c=colors, s=150, alpha=0.7, 
+                  edgecolors='black', linewidth=2)
+        
+        # Formatting
+        ax.set_xticks(x_pos)
+        ax.set_xticklabels([p.replace('_', ' ').title() for p in patterns])
+        ax.set_ylabel('Inward Roll Preference Rate (95% CI)', fontsize=12)
+        ax.set_title('Inward vs Outward Roll Preferences by Movement Pattern', fontsize=14)
+        ax.axhline(y=0.5, color='black', linestyle='--', alpha=0.5, label='No preference')
+        ax.grid(True, alpha=0.3)
+        ax.set_ylim(0, 1)
+        
+        # Add text annotations
+        for i, rate in enumerate(preference_rates):
+            preference = "Inward" if rate > 0.5 else "Outward"
+            ax.annotate(f'{rate:.1%}\n({preference})', 
+                       (i, rate), textcoords="offset points", 
+                       xytext=(0,15), ha='center', fontsize=10)
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, 'inward_outward_roll_preferences.png'), 
+                   dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _create_side_reach_movement_plot(self, side_reach_results: Dict[str, Any], output_folder: str) -> None:
+        """Create side reach movement analysis visualization."""
+        
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        pref_rate = side_reach_results['no_side_reach_preference_rate']
+        ci_lower = side_reach_results.get('ci_lower', pref_rate)
+        ci_upper = side_reach_results.get('ci_upper', pref_rate)
+        n_instances = side_reach_results.get('n_instances', 0)
+        
+        # Plot confidence interval as vertical line
+        ax.plot([0, 0], [ci_lower, ci_upper], color='gray', linewidth=6, alpha=0.6, label='95% CI')
+        
+        # Plot preference point
+        color = 'green' if pref_rate > 0.6 else 'blue' if pref_rate > 0.5 else 'orange' if pref_rate > 0.4 else 'red'
+        ax.scatter([0], [pref_rate], c=color, s=300, alpha=0.8, 
+                  edgecolors='black', linewidth=2, zorder=5)
+        
+        # Formatting
+        ax.set_xlim(-0.8, 0.8)
+        ax.set_ylim(0, 1)
+        ax.set_xticks([0])
+        ax.set_xticklabels(['Side Reach\nMovement\nPreference'])
+        ax.set_ylabel('Preference Rate for No Side Reach', fontsize=14)
+        ax.set_title('Side Reach Movement Analysis\n(Standard Area vs Column 5 Reach)', fontsize=16)
+        
+        # Reference lines
+        ax.axhline(y=0.5, color='black', linestyle='--', alpha=0.7, 
+                  label='No preference (50%)')
+        ax.axhline(y=0.6, color='green', linestyle=':', alpha=0.5, 
+                  label='Strong avoidance (60%)')
+        ax.axhline(y=0.4, color='red', linestyle=':', alpha=0.5, 
+                  label='Acceptance (40%)')
+        
+        ax.grid(True, alpha=0.3)
+        
+        # Annotations
+        preference_strength = "Strong avoidance" if pref_rate > 0.6 else \
+                            "Mild avoidance" if pref_rate > 0.5 else \
+                            "Mild acceptance" if pref_rate > 0.4 else "Strong acceptance"
+        
+        ax.annotate(f'{pref_rate:.1%}\n{preference_strength}\n(n={n_instances})', 
+                   (0, pref_rate), textcoords="offset points", 
+                   xytext=(100, 0), ha='left', va='center',
+                   fontsize=12, weight='bold',
+                   bbox=dict(boxstyle="round,pad=0.3", facecolor=color, alpha=0.3))
+        
+        # Legend
+        ax.legend(loc='upper left', bbox_to_anchor=(0.02, 0.98))
+        
+        # Side annotations explaining the analysis
+        ax.text(-0.75, 0.85, 'Standard Area:\n• Columns 1-4\n• Q,W,E,R,A,S,D,F,Z,X,C,V\n• No reach required', 
+               fontsize=10, va='top', ha='left',
+               bbox=dict(boxstyle="round,pad=0.3", facecolor='lightblue', alpha=0.3))
+        
+        ax.text(-0.75, 0.15, 'Side Reach:\n• Column 5\n• T, G, B\n• Requires extension\n  beyond standard area', 
+               fontsize=10, va='bottom', ha='left',
+               bbox=dict(boxstyle="round,pad=0.3", facecolor='lightcoral', alpha=0.3))
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_folder, 'side_reach_movement_analysis.png'), 
+                   dpi=300, bbox_inches='tight')
+        plt.close()
+        
+    # =========================================================================
+    # DETAILED DIAGNOSTIC REPORTING
+    # =========================================================================
+
+    def _generate_comprehensive_diagnostic_csv(self, results: Dict[str, Any], output_folder: str) -> None:
+        """Generate comprehensive CSV with full diagnosis of each bigram pair."""
+        
+        # Get Bradley-Terry scores if available
+        key_scores = {}
+        if 'same_letter_preferences' in results and 'rankings' in results['same_letter_preferences']:
+            rankings = results['same_letter_preferences']['rankings']
+            for key, strength in rankings:
+                key_scores[key] = strength
+        
+        diagnostic_rows = []
+        
+        for _, row in self.data.iterrows():
+            chosen = str(row['chosen_bigram']).lower()
+            unchosen = str(row['unchosen_bigram']).lower()
+            
+            # Basic information
+            diagnostic_row = {
+                'user_id': row['user_id'],
+                'chosen_bigram': chosen,
+                'unchosen_bigram': unchosen,
+                'slider_value': row.get('sliderValue', 0),
+                'chosen_selected': 1,  # Always 1 since this is the chosen bigram
+            }
+            
+            # Analyze chosen bigram
+            chosen_diagnosis = self._diagnose_bigram(chosen, key_scores)
+            for key, value in chosen_diagnosis.items():
+                diagnostic_row[f'chosen_{key}'] = value
+                
+            # Analyze unchosen bigram  
+            unchosen_diagnosis = self._diagnose_bigram(unchosen, key_scores)
+            for key, value in unchosen_diagnosis.items():
+                diagnostic_row[f'unchosen_{key}'] = value
+            
+            # Comparative metrics
+            diagnostic_row.update(self._compute_comparative_metrics(chosen, unchosen, chosen_diagnosis, unchosen_diagnosis))
+            
+            # Analysis participation flags
+            diagnostic_row.update(self._compute_analysis_participation(chosen, unchosen, chosen_diagnosis, unchosen_diagnosis))
+            
+            diagnostic_rows.append(diagnostic_row)
+        
+        # Convert to DataFrame and save
+        diagnostic_df = pd.DataFrame(diagnostic_rows)
+        
+        # Add summary columns
+        diagnostic_df = self._add_summary_columns(diagnostic_df)
+        
+        # Save to CSV
+        csv_path = os.path.join(output_folder, 'comprehensive_bigram_diagnosis.csv')
+        diagnostic_df.to_csv(csv_path, index=False)
+        
+        logger.info(f"Comprehensive diagnostic CSV saved to {csv_path}")
+        logger.info(f"Contains {len(diagnostic_df)} bigram pair comparisons with full diagnosis")
+        
+        # Also save a data dictionary
+        self._save_diagnostic_csv_dictionary(output_folder)
+
+    def _diagnose_bigram(self, bigram: str, key_scores: Dict[str, float]) -> Dict[str, Any]:
+        """Generate comprehensive diagnosis for a single bigram."""
+        
+        if len(bigram) != 2:
+            return self._empty_diagnosis()
+        
+        key1, key2 = bigram[0], bigram[1]
+        
+        # Basic key information
+        diagnosis = {
+            'key1': key1,
+            'key2': key2,
+            'length': len(bigram),
+            'is_same_letter': key1 == key2,
+            'is_left_hand': self._all_keys_in_left_hand(bigram)
+        }
+        
+        # Key position information
+        if key1 in self.key_positions:
+            pos1 = self.key_positions[key1]
+            diagnosis.update({
+                'key1_row': pos1.row,
+                'key1_column': pos1.column, 
+                'key1_finger': pos1.finger
+            })
+        else:
+            diagnosis.update({
+                'key1_row': -1,
+                'key1_column': -1,
+                'key1_finger': -1
+            })
+            
+        if key2 in self.key_positions:
+            pos2 = self.key_positions[key2]
+            diagnosis.update({
+                'key2_row': pos2.row,
+                'key2_column': pos2.column,
+                'key2_finger': pos2.finger
+            })
+        else:
+            diagnosis.update({
+                'key2_row': -1,
+                'key2_column': -1, 
+                'key2_finger': -1
+            })
+        
+        # Separation metrics
+        diagnosis['row_separation'] = self._calculate_row_separation(bigram)
+        diagnosis['col_separation'] = self._calculate_column_separation(bigram)
+        
+        # Movement patterns
+        diagnosis['row_pattern'] = self._classify_row_pattern(diagnosis['row_separation'])
+        diagnosis['col_pattern'] = self._classify_col_pattern(diagnosis['col_separation'])
+        
+        # Key quality scores (Bradley-Terry if available)
+        diagnosis['key1_bt_score'] = key_scores.get(key1, np.nan)
+        diagnosis['key2_bt_score'] = key_scores.get(key2, np.nan)
+        diagnosis['avg_key_score'] = np.nanmean([diagnosis['key1_bt_score'], diagnosis['key2_bt_score']])
+        diagnosis['key_score_diff'] = diagnosis['key1_bt_score'] - diagnosis['key2_bt_score'] if not np.isnan(diagnosis['key1_bt_score']) and not np.isnan(diagnosis['key2_bt_score']) else np.nan
+        
+        # Roll direction classification
+        diagnosis['roll_direction'] = self._classify_roll_direction(bigram)
+
+        # Side reach movement classification
+        diagnosis['requires_side_reach'] = self._requires_side_reach_movement(bigram)
+        diagnosis['side_reach_movement_type'] = self._classify_side_reach_movement(bigram)
+        
+        # Ergonomic classification
+        diagnosis['movement_type'] = self._classify_movement_type(diagnosis['row_separation'], diagnosis['col_separation'])
+        diagnosis['same_finger'] = diagnosis['col_separation'] == 0
+        diagnosis['finger_coordination'] = self._classify_finger_coordination(diagnosis['col_separation'])
+        
+        return diagnosis
+
+    def _empty_diagnosis(self) -> Dict[str, Any]:
+        """Return empty diagnosis for invalid bigrams."""
+        return {
+            'key1': '', 'key2': '', 'length': 0, 'is_same_letter': False, 'is_left_hand': False,
+            'key1_row': -1, 'key1_column': -1, 'key1_finger': -1,
+            'key2_row': -1, 'key2_column': -1, 'key2_finger': -1,
+            'row_separation': -1, 'col_separation': -1,
+            'row_pattern': 'invalid', 'col_pattern': 'invalid',
+            'key1_bt_score': np.nan, 'key2_bt_score': np.nan, 'avg_key_score': np.nan, 'key_score_diff': np.nan,
+            'col4_vs_5_type': 'invalid', 'movement_type': 'invalid', 'same_finger': False, 'finger_coordination': 'invalid'
+        }
+
+    def _classify_row_pattern(self, row_separation: int) -> str:
+        """Classify row movement pattern."""
+        if row_separation == 0:
+            return 'same_row'
+        elif row_separation == 1:
+            return 'reach'
+        elif row_separation == 2:
+            return 'hurdle'
+        else:
+            return 'extreme' if row_separation > 2 else 'invalid'
+
+    def _classify_col_pattern(self, col_separation: int) -> str:
+        """Classify column movement pattern."""
+        if col_separation == 0:
+            return 'same_column'
+        elif col_separation == 1:
+            return 'adjacent'
+        elif col_separation == 2:
+            return 'distant' 
+        elif col_separation == 3:
+            return 'very_distant'
+        else:
+            return 'extreme' if col_separation > 3 else 'invalid'
+
+    def _classify_movement_type(self, row_sep: int, col_sep: int) -> str:
+        """Classify overall movement type."""
+        if row_sep == 0 and col_sep == 0:
+            return 'same_key'
+        elif col_sep == 0:
+            return 'same_finger'  
+        elif row_sep == 0:
+            return 'same_row'
+        elif row_sep == 1 and col_sep == 1:
+            return 'adjacent_reach'
+        elif row_sep == 2 and col_sep == 1:
+            return 'adjacent_hurdle'
+        elif row_sep == 1 and col_sep == 2:
+            return 'distant_reach'
+        elif row_sep == 2 and col_sep == 2:
+            return 'distant_hurdle'
+        else:
+            return 'complex'
+
+    def _classify_finger_coordination(self, col_separation: int) -> str:
+        """Classify finger coordination requirements."""
+        if col_separation == 0:
+            return 'single_finger'
+        elif col_separation == 1:
+            return 'adjacent_fingers'
+        elif col_separation == 2:
+            return 'distant_fingers'
+        elif col_separation == 3:
+            return 'extreme_spread'
+        else:
+            return 'invalid'
+
+    def _compute_comparative_metrics(self, chosen: str, unchosen: str, chosen_diag: Dict, unchosen_diag: Dict) -> Dict[str, Any]:
+        """Compute comparative metrics between chosen and unchosen bigrams."""
+        
+        return {
+            # Separation comparisons
+            'row_sep_advantage': chosen_diag['row_separation'] - unchosen_diag['row_separation'], # negative = chosen has smaller row sep
+            'col_sep_advantage': chosen_diag['col_separation'] - unchosen_diag['col_separation'], # negative = chosen has smaller col sep
+            'chosen_smaller_row_sep': 1 if chosen_diag['row_separation'] < unchosen_diag['row_separation'] else 0,
+            'chosen_smaller_col_sep': 1 if chosen_diag['col_separation'] < unchosen_diag['col_separation'] else 0,
+            
+            # Key quality comparisons
+            'key_quality_advantage': chosen_diag['avg_key_score'] - unchosen_diag['avg_key_score'] if not np.isnan(chosen_diag['avg_key_score']) and not np.isnan(unchosen_diag['avg_key_score']) else np.nan,
+            'chosen_better_keys': 1 if not np.isnan(chosen_diag['avg_key_score']) and not np.isnan(unchosen_diag['avg_key_score']) and chosen_diag['avg_key_score'] > unchosen_diag['avg_key_score'] else 0,
+            
+            # Pattern comparisons
+            'same_row_pattern': 1 if chosen_diag['row_pattern'] == unchosen_diag['row_pattern'] else 0,
+            'same_col_pattern': 1 if chosen_diag['col_pattern'] == unchosen_diag['col_pattern'] else 0,
+            'same_movement_type': 1 if chosen_diag['movement_type'] == unchosen_diag['movement_type'] else 0,
+            
+            # Finger coordination comparison
+            'chosen_same_finger': 1 if chosen_diag['same_finger'] else 0,
+            'unchosen_same_finger': 1 if unchosen_diag['same_finger'] else 0,
+            'finger_coordination_change': f"{unchosen_diag['finger_coordination']}_to_{chosen_diag['finger_coordination']}"
+        }
+
+    def _compute_analysis_participation(self, chosen: str, unchosen: str, chosen_diag: Dict, unchosen_diag: Dict) -> Dict[str, Any]:
+        """Determine which analyses this comparison participates in."""
+        
+        participation = {
+            'in_same_letter_analysis': 0,
+            'in_row_separation_analysis': 0, 
+            'in_col_separation_analysis': 0,
+            'in_reach_vs_hurdle_analysis': 0,
+            'in_inward_outward_analysis': 0,
+            'in_side_reach_analysis': 0,
+            'analysis_tags': []
+        }
+        
+        # Same letter analysis
+        if (chosen_diag['is_same_letter'] and unchosen_diag['is_same_letter'] and 
+            chosen_diag['is_left_hand'] and unchosen_diag['is_left_hand'] and
+            chosen_diag['key1'] != unchosen_diag['key1']):
+            participation['in_same_letter_analysis'] = 1
+            participation['analysis_tags'].append('same_letter_bt')
+        
+        # Row separation analysis  
+        if (chosen_diag['is_left_hand'] and unchosen_diag['is_left_hand'] and
+            {chosen_diag['row_separation'], unchosen_diag['row_separation']} in [{0, 1}, {1, 2}]):
+            participation['in_row_separation_analysis'] = 1
+            participation['analysis_tags'].append('row_separation')
+        
+        # Column separation analysis
+        if (chosen_diag['is_left_hand'] and unchosen_diag['is_left_hand'] and
+            chosen_diag['row_separation'] == unchosen_diag['row_separation'] and
+            chosen_diag['row_separation'] > 0):  # Exclude same-row from same_vs_other test
+            if ({chosen_diag['col_separation'], unchosen_diag['col_separation']} == {0, 1} or
+                {chosen_diag['col_separation'], unchosen_diag['col_separation']} == {0, 2} or  
+                {chosen_diag['col_separation'], unchosen_diag['col_separation']} == {0, 3}):
+                participation['in_col_separation_analysis'] = 1
+                participation['analysis_tags'].append('col_same_vs_other')
+            elif {chosen_diag['col_separation'], unchosen_diag['col_separation']} == {1, 2}:
+                participation['in_col_separation_analysis'] = 1
+                participation['analysis_tags'].append('col_adjacent_vs_distant')
+        
+        # Inward vs outward roll analysis
+        chosen_roll = chosen_diag['roll_direction'] 
+        unchosen_roll = unchosen_diag['roll_direction']
+        if (chosen_diag['is_left_hand'] and unchosen_diag['is_left_hand'] and
+            {chosen_roll, unchosen_roll} == {'inward', 'outward'}):
+            # Check if both have same row pattern (both same-row or both different-row)
+            chosen_row_sep = chosen_diag['row_separation']
+            unchosen_row_sep = unchosen_diag['row_separation']
+            if (chosen_row_sep == 0 and unchosen_row_sep == 0) or (chosen_row_sep > 0 and unchosen_row_sep > 0):
+                participation['in_inward_outward_analysis'] = 1
+                row_pattern = "same_row" if chosen_row_sep == 0 else "different_rows"
+                participation['analysis_tags'].append(f'inward_outward_{row_pattern}')
+        else:
+            participation['in_inward_outward_analysis'] = 0
+
+        # Side reach movement analysis
+        chosen_side_reach_type = chosen_diag['side_reach_movement_type']
+        unchosen_side_reach_type = unchosen_diag['side_reach_movement_type']
+        
+        participation['in_side_reach_analysis'] = 0
+        
+        # Movement-based comparison: no side reach vs requires side reach
+        if {chosen_side_reach_type, unchosen_side_reach_type} == {'no_side_reach', 'requires_side_reach'}:
+            participation['in_side_reach_analysis'] = 1
+            participation['analysis_tags'].append('side_reach_movement')
+        
+        return participation
+
+    def _add_summary_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add summary columns to the diagnostic DataFrame."""
+        
+        # Overall preference patterns
+        df['chose_smaller_overall'] = ((df['chosen_smaller_row_sep'] == 1) | (df['chosen_smaller_col_sep'] == 1)).astype(int)
+        df['chose_same_finger'] = df['chosen_same_finger']
+        df['chose_better_keys'] = df['chosen_better_keys']
+        
+        # Preference direction for slider
+        df['slider_direction'] = df['slider_value'].apply(lambda x: 'strong_left' if x < -50 else 'weak_left' if x < 0 else 'weak_right' if x <= 50 else 'strong_right')
+        df['slider_strength'] = df['slider_value'].abs()
+        
+        # Movement complexity
+        df['movement_complexity'] = df.apply(lambda row: 
+            'simple' if row['chosen_movement_type'] in ['same_key', 'same_finger', 'same_row'] 
+            else 'moderate' if 'adjacent' in row['chosen_movement_type']
+            else 'complex', axis=1)
+
+        # Side reach preference patterns
+        df['chose_no_side_reach'] = df.apply(lambda row: 
+            1 if not row['chosen_requires_side_reach'] and row['unchosen_requires_side_reach']
+            else 0 if row['chosen_requires_side_reach'] and not row['unchosen_requires_side_reach']
+            else np.nan, axis=1)
+        
+        df['comparison_involves_side_reach'] = df.apply(lambda row:
+            row['chosen_requires_side_reach'] or row['unchosen_requires_side_reach'], axis=1)
+        
+        return df
+
+    def _save_diagnostic_csv_dictionary(self, output_folder: str) -> None:
+        """Save data dictionary explaining the diagnostic CSV columns."""
+        
+        dictionary_content = """
+    COMPREHENSIVE BIGRAM DIAGNOSIS CSV - DATA DICTIONARY
+    ====================================================
+
+    BASIC INFORMATION:
+    - user_id: Participant identifier
+    - chosen_bigram: The bigram that was selected by the participant
+    - unchosen_bigram: The bigram that was not selected
+    - slider_value: Strength of preference (-100 to +100)
+    - chosen_selected: Always 1 (indicates this row represents the chosen option)
+
+    CHOSEN BIGRAM DIAGNOSIS (chosen_*):
+    - chosen_key1/key2: Individual keys in the chosen bigram
+    - chosen_length: Number of characters (should be 2)
+    - chosen_is_same_letter: True if both keys are the same (e.g., 'aa')
+    - chosen_is_left_hand: True if both keys are on left hand
+    - chosen_key1/2_row: Row position (1=top, 2=home, 3=bottom)
+    - chosen_key1/2_column: Column position (1=pinky, 4=index)
+    - chosen_key1/2_finger: Finger assignment (1=pinky, 4=index)
+    - chosen_row_separation: Absolute row distance between keys
+    - chosen_col_separation: Absolute column distance between keys
+    - chosen_row_pattern: same_row/reach/hurdle classification
+    - chosen_col_pattern: same_column/adjacent/distant classification
+    - chosen_key1/2_bt_score: Bradley-Terry strength scores (if available)
+    - chosen_avg_key_score: Average BT score for this bigram
+    - chosen_key_score_diff: Difference between key1 and key2 BT scores
+    - chosen_roll_direction: inward/outward/same_finger/invalid classification
+    - chosen_roll_direction: inward (finger number increases), outward (decreases), same_finger, or invalid
+    - chosen_requires_side_reach: True if bigram contains column 5 keys (T, G, B)
+    - chosen_side_reach_movement_type: no_side_reach/requires_side_reach/invalid classification
+    - chosen_requires_side_reach: Whether typing requires reaching beyond standard left-hand area
+    - chosen_side_reach_movement_type: Movement classification based on side reach requirement
+    - chosen_movement_type: Detailed movement classification
+    - chosen_same_finger: True if both keys use same finger
+    - chosen_finger_coordination: single_finger/adjacent_fingers/distant_fingers
+
+    UNCHOSEN BIGRAM DIAGNOSIS (unchosen_*):
+    [Same structure as chosen_* but for the non-selected bigram]
+
+    COMPARATIVE METRICS:
+    - row_sep_advantage: chosen_row_sep - unchosen_row_sep (negative = chosen smaller)
+    - col_sep_advantage: chosen_col_sep - unchosen_col_sep (negative = chosen smaller)
+    - chosen_smaller_row_sep: 1 if chosen bigram has smaller row separation
+    - chosen_smaller_col_sep: 1 if chosen bigram has smaller column separation
+    - key_quality_advantage: chosen_avg_key_score - unchosen_avg_key_score
+    - chosen_better_keys: 1 if chosen bigram has higher average key quality
+    - same_row_pattern: 1 if both bigrams have same row pattern
+    - same_col_pattern: 1 if both bigrams have same column pattern
+    - same_movement_type: 1 if both bigrams have same movement type
+    - finger_coordination_change: Description of coordination change
+
+    ANALYSIS PARTICIPATION FLAGS:
+    - in_same_letter_analysis: 1 if this comparison was used in same-letter BT analysis
+    - in_row_separation_analysis: 1 if used in row separation preference analysis
+    - in_col_separation_analysis: 1 if used in column separation preference analysis
+    - in_reach_vs_hurdle_analysis: 1 if used in reach vs hurdle analysis
+    - in_inward_outward_analysis: 1 if used in inward vs outward roll analysis
+    - in_side_reach_analysis: 1 if used in side reach movement analysis
+    - analysis_tags: Pipe-separated list of specific analyses this comparison contributed to
+    - num_analyses: Total number of analyses this comparison participated in
+
+    SUMMARY COLUMNS:
+    - chose_smaller_overall: 1 if chose smaller row OR column separation
+    - chose_same_finger: Same as chosen_same_finger
+    - chose_better_keys: Same as chosen_better_keys  
+    - slider_direction: strong_left/weak_left/weak_right/strong_right
+    - slider_strength: Absolute value of slider_value
+    - movement_complexity: simple/moderate/complex classification
+
+    USAGE NOTES:
+    - Use this file to understand exactly which comparisons contributed to each analysis
+    - Filter by analysis participation flags to recreate specific analysis datasets
+    - Comparative metrics show the "advantage" the chosen bigram had over unchosen
+    - Movement classifications help understand the ergonomic patterns in preferences
+    """
+        
+        dict_path = os.path.join(output_folder, 'diagnostic_csv_dictionary.txt')
+        with open(dict_path, 'w') as f:
+            f.write(dictionary_content)
+            
+        logger.info(f"Data dictionary saved to {dict_path}")
+
 
 def main():
     """Main function for command-line usage."""
