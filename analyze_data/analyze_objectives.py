@@ -19,11 +19,14 @@ MOO Objectives Analyzed:
    - Bigram pair comparisons
 2. Row separation: Preferences across keyboard rows (same > reach > hurdle)  
 3. Column separation: Adjacent vs. distant finger movements
-4. Inward vs Outward Roll: Preference for increasing vs decreasing finger sequences
-   - Same row movements (horizontal rolls)
-   - Different row movements (diagonal/vertical rolls)
-5. Side reach movement preferences: Avoiding vs accepting movements that require side reach
-   - Compares bigrams staying in standard area vs those requiring reach to column 5
+4. Inward vs Outward Roll: Preference for finger movement direction using same key pairs
+   - Constrained comparison: same two keys in both directions (e.g., 'df' vs 'fd')
+   - Inward roll: increasing finger numbers (pinky → index)
+   - Outward roll: decreasing finger numbers (index → pinky)
+   - Excludes same-column bigrams to ensure roll motion is possible
+5. Side reach preferences: Same-row bigrams only (no same-column)
+   - Purest test of side reach cost: standard area vs column 5 extension
+   - Eliminates row separation and finger coordination confounds
 
 Usage:
     poetry run python3 analyze_objectives.py --data output/nonProlific/process_data/tables/processed_consistent_choices.csv \
@@ -52,6 +55,8 @@ import networkx as nx
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+min_threshold = 3
 
 @dataclass
 class KeyPosition:
@@ -357,10 +362,10 @@ class MOOObjectiveAnalyzer:
         logger.info("=== COLUMN SEPARATION PREFERENCES ===")  
         results['column_separation'] = self._analyze_column_separation()
 
-        logger.info("=== INWARD VS OUTWARD ROLL PREFERENCES ===")
+        logger.info("=== INWARD VS OUTWARD ROLL PREFERENCES (CONSTRAINED) ===")
         results['inward_outward_roll'] = self._analyze_inward_outward_roll()
 
-        logger.info("=== SIDE REACH MOVEMENT PREFERENCES ===")
+        logger.info("=== SIDE REACH PREFERENCES (SAME-ROW ONLY) ===")
         results['side_reach'] = self._analyze_side_reach()
 
         # Generate reports and save results
@@ -552,7 +557,7 @@ class MOOObjectiveAnalyzer:
         
         for key1, key2 in valid_pairs:
             comparison_data = self._extract_specific_key_comparison(key1, key2)
-            if comparison_data and comparison_data['n_instances'] >= 10:
+            if comparison_data and comparison_data['n_instances'] >= min_threshold:
                 pairwise_results[(key1, key2)] = comparison_data
         
         return {
@@ -638,11 +643,11 @@ class MOOObjectiveAnalyzer:
         z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
         p_value = 2 * (1 - norm.cdf(abs(z_score)))
         
-        # Analysis by comparison type (THIS WAS MISSING THE DETAILED BREAKDOWN)
+        # Analysis by comparison type
         comparison_results = {}
         for comp_type in instances_df['comparison_type'].unique():
             comp_data = instances_df[instances_df['comparison_type'] == comp_type]
-            if len(comp_data) >= 10:
+            if len(comp_data) >= min_threshold:
                 n_comp = len(comp_data)
                 n_chose_comp = comp_data['chose_smaller_separation'].sum()
                 pref_rate_comp = n_chose_comp / n_comp
@@ -660,7 +665,7 @@ class MOOObjectiveAnalyzer:
                 }
                 logger.info(f"Row separation - {comp_type}: {n_comp} instances, {pref_rate_comp:.1%} prefer smaller")
             else:
-                logger.info(f"Skipped row separation - {comp_type}: only {len(comp_data)} instances (need >= 10)")
+                logger.info(f"Skipped row separation - {comp_type}: only {len(comp_data)} instances (need >= min_threshold)")
         
         return {
             'description': 'Preferences for smaller row separation distances',
@@ -729,7 +734,7 @@ class MOOObjectiveAnalyzer:
     # =========================================================================
     
     def _extract_column_separation_instances(self) -> pd.DataFrame:
-        """Extract column separation instances with proper row controls AND reach vs hurdle analysis."""
+        """Extract column separation instances."""
         instances = []
         
         for _, row in self.data.iterrows():
@@ -744,8 +749,7 @@ class MOOObjectiveAnalyzer:
             chosen_col_sep = self._calculate_column_separation(chosen)
             unchosen_col_sep = self._calculate_column_separation(unchosen)
             
-            # EXISTING ANALYSIS: Column comparisons with row control
-            # Only compare bigrams with identical row separation
+            # Column comparisons with identical row separation
             if chosen_row_sep == unchosen_row_sep:
                 # Define row pattern
                 if chosen_row_sep == 0:
@@ -762,17 +766,22 @@ class MOOObjectiveAnalyzer:
                     chose_smaller = None
                     comparison_type = None
                     
-                    # Test 1: Same column (0) vs other columns (1-3)
-                    # EXCLUDE same-row comparisons from this test per user requirements
-                    if (row_pattern != "same_row" and 
-                        ({chosen_col_sep, unchosen_col_sep} == {0, 1} or
-                         {chosen_col_sep, unchosen_col_sep} == {0, 2} or
-                         {chosen_col_sep, unchosen_col_sep} == {0, 3})):
-                        chose_smaller = 1 if chosen_col_sep == 0 else 0
-                        comparison_type = f"same_vs_other_{row_pattern}"
+                    # SAME-COLUMN TESTS (excluding same-row per user requirements)
+                    if row_pattern != "same_row":
+                        # Test 1a: Same column (0) vs Adjacent (1)
+                        if {chosen_col_sep, unchosen_col_sep} == {0, 1}:
+                            chose_smaller = 1 if chosen_col_sep == 0 else 0
+                            comparison_type = f"same_vs_adjacent_{row_pattern}"
+                        
+                        # Test 1b: Same column (0) vs Distant (2-3) - COMBINED
+                        elif ({chosen_col_sep, unchosen_col_sep} == {0, 2} or 
+                              {chosen_col_sep, unchosen_col_sep} == {0, 3}):
+                            chose_smaller = 1 if chosen_col_sep == 0 else 0
+                            comparison_type = f"same_vs_distant_{row_pattern}"
                     
-                    # Test 2: Adjacent (1) vs distant (2) - separate by row pattern
-                    elif {chosen_col_sep, unchosen_col_sep} == {1, 2}:
+                    # Test 2: Adjacent (1) vs Distant (2-3) - COMBINED - separate by row pattern
+                    elif ({chosen_col_sep, unchosen_col_sep} == {1, 2} or 
+                          {chosen_col_sep, unchosen_col_sep} == {1, 3}):
                         chose_smaller = 1 if chosen_col_sep == 1 else 0
                         comparison_type = f"adjacent_vs_distant_{row_pattern}"
                     
@@ -792,8 +801,7 @@ class MOOObjectiveAnalyzer:
                             'analysis_type': 'column_comparison'
                         })
             
-            # NEW ANALYSIS: Row comparisons (reach vs hurdle) with column control
-            # Only compare bigrams with identical column separation
+            # Row comparisons (reach vs hurdle) with identical column separation
             if chosen_col_sep == unchosen_col_sep:
                 # Test: Reach (1 row) vs Hurdle (2 rows) for each column separation level
                 if {chosen_row_sep, unchosen_row_sep} == {1, 2}:
@@ -804,10 +812,8 @@ class MOOObjectiveAnalyzer:
                         col_category = "same_column"
                     elif chosen_col_sep == 1:
                         col_category = "adjacent_columns"
-                    elif chosen_col_sep == 2:
+                    elif chosen_col_sep >= 2:  # Combine 2 and 3 into distant
                         col_category = "distant_columns"
-                    elif chosen_col_sep == 3:
-                        col_category = "very_distant_columns"
                     else:
                         col_category = f"col_sep_{chosen_col_sep}"
                     
@@ -828,7 +834,7 @@ class MOOObjectiveAnalyzer:
                     })
         
         return pd.DataFrame(instances)
-
+        
     def _analyze_column_separation(self) -> Dict[str, Any]:
         """Analyze column separation preferences with proper row controls AND reach vs hurdle analysis."""
         
@@ -872,7 +878,7 @@ class MOOObjectiveAnalyzer:
         column_pattern_results = {}
         for comp_type in column_instances['comparison_type'].unique():
             comp_data = column_instances[column_instances['comparison_type'] == comp_type]
-            if len(comp_data) >= 10:  # Minimum threshold
+            if len(comp_data) >= min_threshold:  # Minimum threshold
                 n_comp = len(comp_data)
                 n_chose_comp = comp_data['chose_smaller_separation'].sum()
                 pref_rate_comp = n_chose_comp / n_comp
@@ -890,13 +896,13 @@ class MOOObjectiveAnalyzer:
                 }
                 logger.info(f"Column analysis - {comp_type}: {n_comp} instances, {pref_rate_comp:.1%} preference")
             else:
-                logger.info(f"Skipped column analysis - {comp_type}: only {len(comp_data)} instances (need >= 10)")
+                logger.info(f"Skipped column analysis - {comp_type}: only {len(comp_data)} instances (need >= min_threshold)")
         
         # Analysis by comparison type - ROW COMPARISONS (NEW!)
         row_pattern_results = {}
         for comp_type in row_instances['comparison_type'].unique():
             comp_data = row_instances[row_instances['comparison_type'] == comp_type]
-            if len(comp_data) >= 10:  # Minimum threshold
+            if len(comp_data) >= min_threshold:  # Minimum threshold
                 n_comp = len(comp_data)
                 n_chose_comp = comp_data['chose_smaller_separation'].sum()  # chose_smaller_separation = chose reach
                 pref_rate_comp = n_chose_comp / n_comp  # preference rate for reach
@@ -914,7 +920,7 @@ class MOOObjectiveAnalyzer:
                 }
                 logger.info(f"Row analysis - {comp_type}: {n_comp} instances, {pref_rate_comp:.1%} prefer reach")
             else:
-                logger.info(f"Skipped row analysis - {comp_type}: only {len(comp_data)} instances (need >= 10)")
+                logger.info(f"Skipped row analysis - {comp_type}: only {len(comp_data)} instances (need >= min_threshold)")
         
         # Group column results for cleaner reporting
         same_vs_other_results = {}
@@ -947,7 +953,7 @@ class MOOObjectiveAnalyzer:
             'p_value': p_value,
             'same_vs_other_results': same_vs_other_results,
             'adjacent_vs_distant_results': adjacent_vs_distant_results,
-            'reach_vs_hurdle_results': reach_vs_hurdle_results,  # NEW!
+            'reach_vs_hurdle_results': reach_vs_hurdle_results,
             'pattern_results': column_pattern_results,  # Keep for backward compatibility
             'interpretation': f"Column separation preference: {preference_rate:.1%} favor smaller distances (with row controls) + reach vs hurdle analysis"
         }
@@ -967,25 +973,25 @@ class MOOObjectiveAnalyzer:
         return 0
 
     # =========================================================================
-    # INWARD VS OUTWARD ROLL PREFERENCES (NEW ANALYSIS)
+    # INWARD VS OUTWARD ROLL PREFERENCES (CONSTRAINED TO SAME KEY PAIRS)
     # =========================================================================
     
     def _analyze_inward_outward_roll(self) -> Dict[str, Any]:
-        """Analyze preference for inward roll (increasing finger numbers) vs outward roll (decreasing finger numbers)."""
+        """Analyze inward vs outward roll preference using same key pairs in both directions."""
         
-        instances_df = self._extract_inward_outward_instances()
+        instances_df = self._extract_constrained_inward_outward_instances()
         
         if instances_df.empty:
-            logger.warning('No inward/outward roll instances found - skipping this analysis')
+            logger.warning('No constrained inward/outward roll instances found - skipping this analysis')
             return {
-                'description': 'Inward roll (increasing finger) vs Outward roll (decreasing finger) preference',
-                'method': 'inward_outward_roll_analysis',
+                'description': 'Inward vs outward roll preference (same key pairs, different directions)',
+                'method': 'constrained_inward_outward_analysis',
                 'status': 'insufficient_data',
                 'n_instances': 0,
-                'interpretation': 'No inward vs outward roll comparisons found in data'
+                'interpretation': 'No constrained inward vs outward roll comparisons found in data'
             }
         
-        logger.info(f"Found {len(instances_df)} inward vs outward roll instances")
+        logger.info(f"Found {len(instances_df)} constrained inward vs outward roll instances")
         
         # Overall analysis
         n_instances = len(instances_df)
@@ -999,11 +1005,11 @@ class MOOObjectiveAnalyzer:
         z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
         p_value = 2 * (1 - norm.cdf(abs(z_score)))
         
-        # Analysis by row pattern (same row vs different rows)
+        # Analysis by row pattern (optional - can be simplified if not needed)
         pattern_results = {}
         for row_pattern in instances_df['row_pattern'].unique():
             pattern_data = instances_df[instances_df['row_pattern'] == row_pattern]
-            if len(pattern_data) >= 10:  # Minimum threshold
+            if len(pattern_data) >= min_threshold:  # Minimum threshold
                 n_pattern = len(pattern_data)
                 n_chose_inward_pattern = pattern_data['chose_inward_roll'].sum()
                 pref_rate_pattern = n_chose_inward_pattern / n_pattern
@@ -1019,24 +1025,24 @@ class MOOObjectiveAnalyzer:
                     'ci_upper': ci_upper_pattern,
                     'p_value': p_pattern
                 }
-                logger.info(f"Inward/Outward roll - {row_pattern}: {n_pattern} instances, {pref_rate_pattern:.1%} prefer inward")
+                logger.info(f"Constrained inward/outward - {row_pattern}: {n_pattern} instances, {pref_rate_pattern:.1%} prefer inward")
             else:
-                logger.info(f"Skipped inward/outward roll - {row_pattern}: only {len(pattern_data)} instances (need >= 10)")
+                logger.info(f"Skipped constrained inward/outward - {row_pattern}: only {len(pattern_data)} instances (need >= min_threshold)")
         
         return {
-            'description': 'Inward roll (increasing finger) vs Outward roll (decreasing finger) preference',
-            'method': 'inward_outward_roll_analysis',
+            'description': 'Inward vs outward roll preference (same key pairs, different directions)',
+            'method': 'constrained_inward_outward_analysis',
             'n_instances': n_instances,
-            'preference_rate': preference_rate,
+            'inward_preference_rate': preference_rate,
             'ci_lower': ci_lower,
             'ci_upper': ci_upper,
             'p_value': p_value,
             'pattern_results': pattern_results,
-            'interpretation': f"Inward roll preference rate: {preference_rate:.1%} (separated by row pattern)"
+            'interpretation': f"Inward roll preference rate: {preference_rate:.1%} (prefer increasing finger number sequence)"
         }
 
-    def _extract_inward_outward_instances(self) -> pd.DataFrame:
-        """Extract instances comparing inward vs outward roll bigrams."""
+    def _extract_constrained_inward_outward_instances(self) -> pd.DataFrame:
+        """Extract inward vs outward roll instances using same key pairs."""
         instances = []
         
         for _, row in self.data.iterrows():
@@ -1047,25 +1053,33 @@ class MOOObjectiveAnalyzer:
             if not (self._all_keys_in_left_hand(chosen) and self._all_keys_in_left_hand(unchosen)):
                 continue
             
+            # Check if they contain the same two keys in reverse order
+            if not self._are_same_keys_reverse_order(chosen, unchosen):
+                continue
+            
+            # Exclude same-column bigrams (no roll motion possible)
+            if self._is_same_column_bigram(chosen):
+                continue
+            
+            # Classify roll directions
             chosen_roll_type = self._classify_roll_direction(chosen)
             unchosen_roll_type = self._classify_roll_direction(unchosen)
             
-            # Only include comparisons between inward and outward rolls
+            # Only include if one is inward and one is outward
             if {chosen_roll_type, unchosen_roll_type} == {'inward', 'outward'}:
                 chose_inward_roll = 1 if chosen_roll_type == 'inward' else 0
                 
-                # Determine row pattern
-                chosen_row_sep = self._calculate_row_separation(chosen)
-                unchosen_row_sep = self._calculate_row_separation(unchosen)
+                # Determine row pattern for sub-analysis
+                row_separation = self._calculate_row_separation(chosen)  # Same for both since same keys
                 
-                # For this analysis, we want to separate same-row from different-row movements
-                if chosen_row_sep == 0 and unchosen_row_sep == 0:
+                if row_separation == 0:
                     row_pattern = "same_row"
-                elif chosen_row_sep > 0 and unchosen_row_sep > 0:
-                    row_pattern = "different_rows"
+                elif row_separation == 1:
+                    row_pattern = "reach"
+                elif row_separation == 2:
+                    row_pattern = "hurdle"
                 else:
-                    # Mixed pattern (one same-row, one different-row) - skip for cleaner analysis
-                    continue
+                    row_pattern = "extreme"
                 
                 instances.append({
                     'user_id': row['user_id'],
@@ -1075,11 +1089,19 @@ class MOOObjectiveAnalyzer:
                     'chosen_roll_type': chosen_roll_type,
                     'unchosen_roll_type': unchosen_roll_type,
                     'row_pattern': row_pattern,
-                    'chosen_row_separation': chosen_row_sep,
-                    'unchosen_row_separation': unchosen_row_sep
+                    'row_separation': row_separation,
+                    'key_pair': tuple(sorted([chosen[0], chosen[1]]))
                 })
         
         return pd.DataFrame(instances)
+
+    def _are_same_keys_reverse_order(self, bigram1: str, bigram2: str) -> bool:
+        """Check if two bigrams contain the same keys in reverse order."""
+        if len(bigram1) != 2 or len(bigram2) != 2:
+            return False
+        
+        # Check if bigram2 is the reverse of bigram1
+        return bigram1 == bigram2[::-1] and bigram1 != bigram2
 
     def _classify_roll_direction(self, bigram: str) -> str:
         """Classify bigram as inward roll, outward roll, or neither."""
@@ -1106,72 +1128,99 @@ class MOOObjectiveAnalyzer:
             return 'outward'
         else:
             return 'same_finger'  # Should not reach here given the check above
+
+    def _is_same_column_bigram(self, bigram: str) -> bool:
+        """Check if bigram uses keys from the same column."""
+        if len(bigram) != 2:
+            return False
         
+        key1, key2 = bigram[0], bigram[1]
+        
+        if key1 in self.key_positions and key2 in self.key_positions:
+            col1 = self.key_positions[key1].column
+            col2 = self.key_positions[key2].column
+            return col1 == col2
+        
+        return False
+            
     # =========================================================================
-    # SIDE REACH PREFERENCES (MOVEMENT-BASED CLASSIFICATION)
+    # SIDE REACH PREFERENCES (SAME-ROW ONLY, NO SAME-COLUMN)
     # =========================================================================
 
     def _analyze_side_reach(self) -> Dict[str, Any]:
-        """Analyze preference for movements that avoid vs require side reach to column 5."""
+        """Analyze side reach preferences using only same-row bigrams (no same-column)."""
         
-        instances_df = self._extract_side_reach_instances()
+        instances_df = self._extract_same_row_side_reach_instances()
         
         if instances_df.empty:
-            logger.warning('No side reach movement instances found - skipping this analysis')
+            logger.warning('No same-row side reach instances found - skipping this analysis')
             return {
-                'description': 'Side reach movement analysis: Standard area vs requiring side reach',
-                'method': 'side_reach_movement_analysis',
+                'description': 'Side reach analysis: Same-row bigrams only (no same-column)',
+                'method': 'same_row_side_reach_analysis',
                 'status': 'insufficient_data',
                 'n_instances': 0,
-                'interpretation': 'No side reach movement comparisons found in data'
+                'interpretation': 'No same-row side reach comparisons found in data'
             }
         
-        logger.info(f"Found {len(instances_df)} side reach movement instances")
+        logger.info(f"Found {len(instances_df)} same-row side reach instances")
         
-        # Overall analysis
+        # Analysis
         n_instances = len(instances_df)
-        n_chose_no_side_reach = instances_df['chose_no_side_reach'].sum()
-        preference_rate = n_chose_no_side_reach / n_instances
+        n_chose_standard = instances_df['chose_standard_area'].sum()
+        preference_rate = n_chose_standard / n_instances
         
         confidence = self.config.get('confidence_level', 0.95)
-        ci_lower, ci_upper = self._wilson_ci(n_chose_no_side_reach, n_instances, confidence)
+        ci_lower, ci_upper = self._wilson_ci(n_chose_standard, n_instances, confidence)
         
         # Statistical test
         z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
         p_value = 2 * (1 - norm.cdf(abs(z_score)))
         
         return {
-            'description': 'Side reach movement analysis: Movements staying in standard area vs requiring side reach',
-            'method': 'side_reach_movement_analysis',
+            'description': 'Side reach analysis: Same-row bigrams only (no same-column)',
+            'method': 'same_row_side_reach_analysis',
             'n_instances': n_instances,
-            'no_side_reach_preference_rate': preference_rate,
+            'standard_area_preference_rate': preference_rate,
             'ci_lower': ci_lower,
             'ci_upper': ci_upper,
             'p_value': p_value,
-            'interpretation': f"No side reach preference rate: {preference_rate:.1%} (prefer movements staying in standard left-hand area)"
+            'interpretation': f"Same-row standard area preference: {preference_rate:.1%} (pure side reach cost)"
         }
 
-    def _extract_side_reach_instances(self) -> pd.DataFrame:
-        """Extract instances comparing movements with vs without side reach."""
+    def _extract_same_row_side_reach_instances(self) -> pd.DataFrame:
+        """Extract same-row side reach instances (no same-column bigrams)."""
         instances = []
         
         for _, row in self.data.iterrows():
             chosen = str(row['chosen_bigram']).lower()
             unchosen = str(row['unchosen_bigram']).lower()
             
+            # Only analyze valid bigrams in our area
+            if not (self._all_keys_in_analysis_area(chosen) and self._all_keys_in_analysis_area(unchosen)):
+                continue
+                
+            chosen_row_sep = self._calculate_row_separation(chosen)
+            unchosen_row_sep = self._calculate_row_separation(unchosen)
             chosen_requires_side_reach = self._requires_side_reach_movement(chosen)
             unchosen_requires_side_reach = self._requires_side_reach_movement(unchosen)
             
-            # Only compare bigrams where one requires side reach and the other doesn't
+            # SAME-ROW ONLY: Both bigrams must have 0 row separation
+            if chosen_row_sep != 0 or unchosen_row_sep != 0:
+                continue
+            
+            # EXCLUDE SAME-COLUMN: Neither bigram should be same-column
+            if self._is_same_column_bigram(chosen) or self._is_same_column_bigram(unchosen):
+                continue
+            
+            # DIFFERENT SIDE REACH: One requires side reach, one doesn't
             if chosen_requires_side_reach != unchosen_requires_side_reach:
-                # chose_no_side_reach = 1 if chose the bigram that doesn't require side reach
-                chose_no_side_reach = 1 if not chosen_requires_side_reach else 0
+                chose_standard_area = 1 if not chosen_requires_side_reach else 0
                 
                 instances.append({
                     'user_id': row['user_id'],
                     'chosen_bigram': chosen,
                     'unchosen_bigram': unchosen,
-                    'chose_no_side_reach': chose_no_side_reach,
+                    'chose_standard_area': chose_standard_area,
                     'chosen_requires_side_reach': chosen_requires_side_reach,
                     'unchosen_requires_side_reach': unchosen_requires_side_reach
                 })
@@ -1188,6 +1237,25 @@ class MOOObjectiveAnalyzer:
         # Returns True if any key in the bigram is in column 5
         return any(key in side_reach_keys for key in bigram)
 
+    def _all_keys_in_analysis_area(self, bigram: str) -> bool:
+        """Check if all keys are in our analysis area (left hand + column 5)."""
+        analysis_keys = set(self.key_positions.keys()) | self._get_column_5_keys()
+        return all(key in analysis_keys for key in bigram)
+
+    def _is_same_column_bigram(self, bigram: str) -> bool:
+        """Check if bigram uses keys from the same column."""
+        if len(bigram) != 2:
+            return False
+        
+        key1, key2 = bigram[0], bigram[1]
+        
+        if key1 in self.key_positions and key2 in self.key_positions:
+            col1 = self.key_positions[key1].column
+            col2 = self.key_positions[key2].column
+            return col1 == col2
+        
+        return False
+
     def _classify_side_reach_movement(self, bigram: str) -> str:
         """Classify bigram by whether it requires side reach movement."""
         if not self._all_keys_in_analysis_area(bigram):
@@ -1197,12 +1265,7 @@ class MOOObjectiveAnalyzer:
             return 'requires_side_reach'
         else:
             return 'no_side_reach'
-
-    def _all_keys_in_analysis_area(self, bigram: str) -> bool:
-        """Check if all keys are in our analysis area (left hand + column 5)."""
-        analysis_keys = set(self.key_positions.keys()) | self._get_column_5_keys()
-        return all(key in analysis_keys for key in bigram)
-    
+        
     # =========================================================================
     # HELPER METHODS
     # =========================================================================
@@ -1400,23 +1463,41 @@ class MOOObjectiveAnalyzer:
                     ""
                 ])
                 
-                # Same vs Other Column Analysis (excluding same-row)
-                same_vs_other = obj_results.get('same_vs_other_results', {})
-                if same_vs_other:
+                # Get pattern results from the analysis
+                column_pattern_results = obj_results.get('pattern_results', {})
+
+                # Group column results for simplified reporting
+                same_vs_adjacent_results = {}
+                same_vs_distant_results = {}
+                adjacent_vs_distant_results = {}
+                
+                for comp_type, results in column_pattern_results.items():
+                    if comp_type.startswith('same_vs_adjacent_'):
+                        row_type = comp_type.replace('same_vs_adjacent_', '')
+                        same_vs_adjacent_results[row_type] = results
+                    elif comp_type.startswith('same_vs_distant_'):
+                        row_type = comp_type.replace('same_vs_distant_', '')
+                        same_vs_distant_results[row_type] = results
+                    elif comp_type.startswith('adjacent_vs_distant_'):
+                        row_type = comp_type.replace('adjacent_vs_distant_', '')
+                        adjacent_vs_distant_results[row_type] = results
+
+                # Report same vs adjacent comparisons
+                if same_vs_adjacent_results:
                     report_lines.extend([
-                        f"  SAME COLUMN (0) VS OTHER COLUMNS (1-3) - ROW CONTROLLED:",
+                        f"  SAME COLUMN (0) VS ADJACENT COLUMN (1) - ROW CONTROLLED:",
                         f"  (Excludes same-row bigrams per methodology)",
                         ""
                     ])
                     
-                    for row_type, comp_data in same_vs_other.items():
+                    for row_type, comp_data in same_vs_adjacent_results.items():
                         comp_pref = comp_data['preference_rate']
                         comp_ci_lower = comp_data.get('ci_lower', np.nan)
                         comp_ci_upper = comp_data.get('ci_upper', np.nan)
                         comp_p_value = comp_data.get('p_value', np.nan)
                         comp_n = comp_data['n_instances']
                         
-                        # FIXED: Correct percentage and effect size calculation
+                        # Calculate display values
                         if comp_pref > 0.5:
                             display_pref = comp_pref
                             display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
@@ -1424,7 +1505,7 @@ class MOOObjectiveAnalyzer:
                         else:
                             display_pref = 1 - comp_pref
                             display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
-                            interpretation = "other columns"
+                            interpretation = "adjacent column"
                         
                         comp_effect = abs(comp_pref - 0.5)
                         
@@ -1453,23 +1534,75 @@ class MOOObjectiveAnalyzer:
                             f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
                             ""
                         ])
-                
-                # Adjacent vs Distant Column Analysis (separated by row)
-                adjacent_vs_distant = obj_results.get('adjacent_vs_distant_results', {})
-                if adjacent_vs_distant:
+
+                # Report same vs distant comparisons (2-3 columns combined)
+                if same_vs_distant_results:
                     report_lines.extend([
-                        f"  ADJACENT (1) VS DISTANT (2) COLUMNS - BY ROW PATTERN:",
+                        f"  SAME COLUMN (0) VS DISTANT COLUMNS (2-3) - ROW CONTROLLED:",
+                        f"  (Excludes same-row bigrams per methodology)",
                         ""
                     ])
                     
-                    for row_type, comp_data in adjacent_vs_distant.items():
+                    for row_type, comp_data in same_vs_distant_results.items():
                         comp_pref = comp_data['preference_rate']
                         comp_ci_lower = comp_data.get('ci_lower', np.nan)
                         comp_ci_upper = comp_data.get('ci_upper', np.nan)
                         comp_p_value = comp_data.get('p_value', np.nan)
                         comp_n = comp_data['n_instances']
                         
-                        # FIXED: Correct percentage and effect size calculation
+                        # Calculate display values
+                        if comp_pref > 0.5:
+                            display_pref = comp_pref
+                            display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
+                            interpretation = "same column"
+                        else:
+                            display_pref = 1 - comp_pref
+                            display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
+                            interpretation = "distant columns"
+                        
+                        comp_effect = abs(comp_pref - 0.5)
+                        
+                        # Statistical significance indicator
+                        comp_sig_indicator = ""
+                        if not np.isnan(comp_p_value):
+                            if comp_p_value < 0.001:
+                                comp_sig_indicator = " ***"
+                            elif comp_p_value < 0.01:
+                                comp_sig_indicator = " **"
+                            elif comp_p_value < 0.05:
+                                comp_sig_indicator = " *"
+                        
+                        # Enhanced descriptions
+                        if row_type == "reach_1_apart":
+                            type_name = "Reach Movements (1 row apart)"
+                        elif row_type == "hurdle_2_apart":
+                            type_name = "Hurdle Movements (2 rows apart)"
+                        else:
+                            type_name = row_type.replace('_', ' ').title()
+                        
+                        report_lines.extend([
+                            f"    {type_name}:",
+                            f"      Preference: {display_pref:.1%} favor {interpretation} (effect size: {comp_effect:.1%})",
+                            f"      95% CI: [{display_ci_lower:.1%}, {display_ci_upper:.1%}]" if not np.isnan(display_ci_lower) else "      95% CI: Not available",
+                            f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
+                            ""
+                        ])
+
+                # Adjacent vs distant reporting
+                if adjacent_vs_distant_results:
+                    report_lines.extend([
+                        f"  ADJACENT (1) VS DISTANT (2-3) COLUMNS - BY ROW PATTERN:",
+                        ""
+                    ])
+                    
+                    for row_type, comp_data in adjacent_vs_distant_results.items():
+                        comp_pref = comp_data['preference_rate']
+                        comp_ci_lower = comp_data.get('ci_lower', np.nan)
+                        comp_ci_upper = comp_data.get('ci_upper', np.nan)
+                        comp_p_value = comp_data.get('p_value', np.nan)
+                        comp_n = comp_data['n_instances']
+                        
+                        # Calculate display values
                         if comp_pref > 0.5:
                             display_pref = comp_pref
                             display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
@@ -1586,8 +1719,8 @@ class MOOObjectiveAnalyzer:
                         ""
                     ])
 
-            elif obj_name == 'inward_outward_roll' and 'preference_rate' in obj_results:
-                pref_rate = obj_results['preference_rate']
+            elif obj_name == 'inward_outward_roll' and 'inward_preference_rate' in obj_results:
+                pref_rate = obj_results['inward_preference_rate']
                 ci_lower = obj_results.get('ci_lower', np.nan)
                 ci_upper = obj_results.get('ci_upper', np.nan)
                 p_value = obj_results.get('p_value', np.nan)
@@ -1607,23 +1740,30 @@ class MOOObjectiveAnalyzer:
                         sig_indicator = " *"
                 
                 report_lines.extend([
-                    f"  OVERALL INWARD VS OUTWARD ROLL PREFERENCE:",
+                    f"  CONSTRAINED INWARD VS OUTWARD ROLL PREFERENCE:",
                     f"  Inward roll preference rate: {pref_rate:.1%} (effect size: {effect_size:.1%})",
                     f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     "",
-                    f"  METHODS NOTES:",
-                    f"  - Inward roll: Finger number increases (pinky → index, e.g., 'as', 'aw')",
-                    f"  - Outward roll: Finger number decreases (index → pinky, e.g., 'sa', 'wa')",
-                    f"  - Analysis separated by row pattern (same row vs different rows)",
+                    f"  CONSTRAINED METHODOLOGY:",
+                    f"  - Compares same key pairs in both movement directions",
+                    f"  - Inward roll: Finger number increases (pinky → index)",
+                    f"  - Outward roll: Finger number decreases (index → pinky)", 
+                    f"  - Excludes same-column bigrams (no roll motion possible)",
+                    f"  - Controls for key identity, distance, and quality differences",
+                    "",
+                    f"  EXAMPLES:",
+                    f"  - 'as' (inward: finger 1→2) vs 'sa' (outward: finger 2→1)",
+                    f"  - 'df' (inward: finger 3→4) vs 'fd' (outward: finger 4→3)",
+                    f"  - 'aw' (inward: finger 1→2) vs 'wa' (outward: finger 2→1)",
                     ""
                 ])
                 
-                # Pattern-specific results
+                # Pattern-specific results by row separation
                 pattern_results = obj_results.get('pattern_results', {})
                 if pattern_results:
                     report_lines.extend([
-                        f"  INWARD VS OUTWARD ROLL BY ROW PATTERN:",
+                        f"  INWARD ROLL PREFERENCE BY MOVEMENT COMPLEXITY:",
                         ""
                     ])
                     
@@ -1655,24 +1795,41 @@ class MOOObjectiveAnalyzer:
                             elif pattern_p_value < 0.05:
                                 pattern_sig_indicator = " *"
                         
-                        # Enhanced descriptions
+                        # Enhanced descriptions with constrained examples
                         if row_pattern == "same_row":
-                            type_name = "Same Row Movements (horizontal rolls)"
-                        elif row_pattern == "different_rows":
-                            type_name = "Different Row Movements (diagonal/vertical rolls)"
+                            type_name = "Same Row Movements"
+                            examples = "'as'/'sa', 'df'/'fd', 'qw'/'wq'"
+                        elif row_pattern == "reach":
+                            type_name = "Reach Movements (1 row apart)"
+                            examples = "'aw'/'wa', 'dr'/'rd', 'sz'/'zs'"
+                        elif row_pattern == "hurdle":
+                            type_name = "Hurdle Movements (2 rows apart)"
+                            examples = "'az'/'za', 'qx'/'xq', 'ec'/'ce'"
                         else:
                             type_name = row_pattern.replace('_', ' ').title()
+                            examples = ""
                         
                         report_lines.extend([
                             f"    {type_name}:",
+                            f"      Examples: {examples}" if examples else "",
                             f"      Preference: {display_pref:.1%} favor {interpretation} (effect size: {pattern_effect:.1%})",
                             f"      95% CI: [{display_ci_lower:.1%}, {display_ci_upper:.1%}]" if not np.isnan(display_ci_lower) else "      95% CI: Not available",
                             f"      Statistical test: p = {pattern_p_value:.4f}{pattern_sig_indicator} (n={pattern_n})" if not np.isnan(pattern_p_value) else f"      Statistical test: Not available (n={pattern_n})",
                             ""
                         ])
-                                                                    
-            elif obj_name == 'side_reach' and 'no_side_reach_preference_rate' in obj_results:
-                pref_rate = obj_results['no_side_reach_preference_rate']
+                
+                report_lines.extend([
+                    f"  INTERPRETATION:",
+                    f"  - Constrained analysis isolates pure movement direction preference",
+                    f"  - Controls for key identity, distance, and quality by using same key pairs",
+                    f"  - Rate > 50%: Natural preference for inward rolling motion (pinky→index)",
+                    f"  - Rate < 50%: Natural preference for outward rolling motion (index→pinky)",
+                    f"  - This measures fundamental finger movement biomechanics",
+                    ""
+                ])
+
+            elif obj_name == 'side_reach' and 'standard_area_preference_rate' in obj_results:
+                pref_rate = obj_results['standard_area_preference_rate']
                 ci_lower = obj_results.get('ci_lower', np.nan)
                 ci_upper = obj_results.get('ci_upper', np.nan)
                 p_value = obj_results.get('p_value', np.nan)
@@ -1692,23 +1849,35 @@ class MOOObjectiveAnalyzer:
                         sig_indicator = " *"
                 
                 report_lines.extend([
-                    f"  SIDE REACH MOVEMENT PREFERENCE:",
-                    f"  No side reach preference rate: {pref_rate:.1%} (effect size: {effect_size:.1%})",
+                    f"  SAME-ROW SIDE REACH PREFERENCE:",
+                    f"  Standard area preference rate: {pref_rate:.1%} (effect size: {effect_size:.1%})",
                     f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     "",
-                    f"  METHODOLOGY:",
-                    f"  - No side reach: Bigrams using only standard left-hand area (columns 1-4)",
-                    f"  - Requires side reach: Bigrams containing column 5 keys (T, G, B)",
-                    f"  - Examples: 'as' (no reach) vs 'at' (requires reach), 'df' vs 'dg'",
+                    f"  SIMPLIFIED METHODOLOGY:",
+                    f"  - Same-row bigrams only: Both keys on same keyboard row (0 row separation)",
+                    f"  - No same-column bigrams: Excludes same-finger movements for cleaner results",
+                    f"  - Standard area: Bigrams using only columns 1-4 (Q,W,E,R,A,S,D,F,Z,X,C,V)",
+                    f"  - Side reach: Bigrams containing column 5 keys (T,G,B)",
+                    f"  - Purest test of side reach cost without movement complexity confounds",
+                    "",
+                    f"  EXAMPLES OF VALID COMPARISONS:",
+                    f"  - Row 1: 'qw' vs 'qt', 'er' vs 'et', 'wr' vs 'wt'",
+                    f"  - Row 2: 'as' vs 'ag', 'df' vs 'dg', 'sf' vs 'sg'",
+                    f"  - Row 3: 'zx' vs 'zb', 'cv' vs 'cb', 'xv' vs 'xb'",
+                    "",
+                    f"  EXCLUDED COMPARISONS:",
+                    f"  - Different rows: 'aw' vs 'at' (reach movements)",
+                    f"  - Same column: 'de' vs 'gt' (same finger movements)",
                     "",
                     f"  INTERPRETATION:",
-                    f"  - Rate > 50%: Preference for avoiding side reach movements",
-                    f"  - Rate < 50%: Willingness to use side reach movements",
-                    f"  - This measures ergonomic cost of extending beyond standard typing area",
+                    f"  - Rate > 50%: Users prefer staying within standard left-hand area",
+                    f"  - Rate < 50%: Users comfortable with side reach movements",
+                    f"  - Effect measures pure ergonomic cost of extending to column 5",
+                    f"  - Same-row restriction eliminates row movement complexity",
                     ""
                 ])
-            
+                            
             # Add interpretation for each objective
             interpretation = obj_results.get('interpretation', '')
             if interpretation:
@@ -1841,9 +2010,9 @@ class MOOObjectiveAnalyzer:
         if 'pairwise_preferences' in results:
             self._create_pairwise_plot(results['pairwise_preferences'], output_folder)
         
-        # Inward/Outward roll visualization
-        if 'inward_outward_roll' in results and results['inward_outward_roll'].get('status') != 'insufficient_data':
-            self._create_inward_outward_plot(results['inward_outward_roll'], output_folder)
+        # Constrained inward/outward roll visualization
+        if 'inward_outward_roll' in results and results['inward_outward_roll'].get('n_instances', 0) > 0:
+            self._create_constrained_inward_outward_plot(results['inward_outward_roll'], output_folder)
 
         # Side reach movement visualization
         if 'side_reach' in results and results['side_reach'].get('n_instances', 0) > 0:
@@ -1941,62 +2110,96 @@ class MOOObjectiveAnalyzer:
                    dpi=300, bbox_inches='tight')
         plt.close()
 
-    def _create_inward_outward_plot(self, inward_outward_results: Dict[str, Any], output_folder: str) -> None:
-        """Create inward vs outward roll visualization."""
+    def _create_constrained_inward_outward_plot(self, inward_outward_results: Dict[str, Any], output_folder: str) -> None:
+        """Create constrained inward vs outward roll visualization."""
         
-        if 'pattern_results' not in inward_outward_results:
-            return
-        
-        pattern_data = inward_outward_results['pattern_results']
+        pattern_data = inward_outward_results.get('pattern_results', {})
         
         if not pattern_data:
-            return
+            # Simple single-point plot if no pattern breakdown
+            fig, ax = plt.subplots(figsize=(10, 8))
+            
+            pref_rate = inward_outward_results['inward_preference_rate']
+            ci_lower = inward_outward_results.get('ci_lower', pref_rate)
+            ci_upper = inward_outward_results.get('ci_upper', pref_rate)
+            n_instances = inward_outward_results.get('n_instances', 0)
+            
+            # Plot confidence interval
+            ax.plot([0, 0], [ci_lower, ci_upper], color='gray', linewidth=6, alpha=0.6)
+            
+            # Plot point
+            color = 'blue' if pref_rate > 0.5 else 'red'
+            ax.scatter([0], [pref_rate], c=color, s=300, alpha=0.8, 
+                      edgecolors='black', linewidth=2, zorder=5)
+            
+            ax.set_xlim(-0.5, 0.5)
+            ax.set_ylim(0, 1)
+            ax.set_xticks([0])
+            ax.set_xticklabels(['Inward vs\nOutward Roll\n(Constrained)'])
+            ax.set_ylabel('Inward Roll Preference Rate', fontsize=14)
+            ax.set_title('Constrained Inward vs Outward Roll Preference\n(Same Key Pairs, Different Directions)', fontsize=16)
+            ax.axhline(y=0.5, color='black', linestyle='--', alpha=0.5)
+            ax.grid(True, alpha=0.3)
+            
+            # Annotation
+            preference = "Inward" if pref_rate > 0.5 else "Outward"
+            ax.annotate(f'{pref_rate:.1%}\n({preference})\nn={n_instances}', 
+                       (0, pref_rate), textcoords="offset points", 
+                       xytext=(0,25), ha='center', fontsize=12, weight='bold')
+            
+        else:
+            # Multi-pattern plot
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            patterns = list(pattern_data.keys())
+            preference_rates = [data['preference_rate'] for data in pattern_data.values()]
+            ci_lowers = [data['ci_lower'] for data in pattern_data.values()]
+            ci_uppers = [data['ci_upper'] for data in pattern_data.values()]
+            n_instances = [data['n_instances'] for data in pattern_data.values()]
+            
+            x_pos = range(len(patterns))
+            
+            # Plot confidence intervals
+            for i, (lower, upper) in enumerate(zip(ci_lowers, ci_uppers)):
+                ax.plot([i, i], [lower, upper], color='gray', linewidth=3, alpha=0.6)
+            
+            # Plot points
+            colors = ['blue' if rate > 0.5 else 'red' for rate in preference_rates]
+            ax.scatter(x_pos, preference_rates, c=colors, s=150, alpha=0.7, 
+                      edgecolors='black', linewidth=2)
+            
+            # Formatting
+            ax.set_xticks(x_pos)
+            pattern_labels = [p.replace('_', ' ').title() for p in patterns]
+            ax.set_xticklabels(pattern_labels)
+            ax.set_ylabel('Inward Roll Preference Rate', fontsize=14)
+            ax.set_title('Constrained Inward vs Outward Roll by Movement Pattern', fontsize=16)
+            ax.axhline(y=0.5, color='black', linestyle='--', alpha=0.5)
+            ax.grid(True, alpha=0.3)
+            
+            # Annotations
+            for i, (rate, n) in enumerate(zip(preference_rates, n_instances)):
+                preference = "Inward" if rate > 0.5 else "Outward"
+                ax.annotate(f'{rate:.1%}\n({preference})\nn={n}', 
+                           (i, rate), textcoords="offset points", 
+                           xytext=(0,15), ha='center', fontsize=10, weight='bold')
         
-        fig, ax = plt.subplots(figsize=(10, 6))
-        
-        patterns = list(pattern_data.keys())
-        preference_rates = [data['preference_rate'] for data in pattern_data.values()]
-        ci_lowers = [data['ci_lower'] for data in pattern_data.values()]
-        ci_uppers = [data['ci_upper'] for data in pattern_data.values()]
-        
-        x_pos = range(len(patterns))
-        
-        # Plot confidence intervals
-        for i, (lower, upper) in enumerate(zip(ci_lowers, ci_uppers)):
-            ax.plot([i, i], [lower, upper], color='gray', linewidth=3, alpha=0.6)
-        
-        # Plot points
-        colors = ['blue' if rate > 0.5 else 'red' for rate in preference_rates]
-        ax.scatter(x_pos, preference_rates, c=colors, s=150, alpha=0.7, 
-                  edgecolors='black', linewidth=2)
-        
-        # Formatting
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels([p.replace('_', ' ').title() for p in patterns])
-        ax.set_ylabel('Inward Roll Preference Rate (95% CI)', fontsize=12)
-        ax.set_title('Inward vs Outward Roll Preferences by Movement Pattern', fontsize=14)
-        ax.axhline(y=0.5, color='black', linestyle='--', alpha=0.5, label='No preference')
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(0, 1)
-        
-        # Add text annotations
-        for i, rate in enumerate(preference_rates):
-            preference = "Inward" if rate > 0.5 else "Outward"
-            ax.annotate(f'{rate:.1%}\n({preference})', 
-                       (i, rate), textcoords="offset points", 
-                       xytext=(0,15), ha='center', fontsize=10)
+        # Add methodology note
+        ax.text(0.02, 0.98, 'Constrained: Same key pairs in both directions (e.g., \'df\' vs \'fd\')', 
+               transform=ax.transAxes, fontsize=10, style='italic', va='top',
+               bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray', alpha=0.5))
         
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'inward_outward_roll_preferences.png'), 
+        plt.savefig(os.path.join(output_folder, 'constrained_inward_outward_roll.png'), 
                    dpi=300, bbox_inches='tight')
         plt.close()
 
     def _create_side_reach_movement_plot(self, side_reach_results: Dict[str, Any], output_folder: str) -> None:
-        """Create side reach movement analysis visualization."""
+        """Create same-row side reach analysis visualization."""
         
         fig, ax = plt.subplots(figsize=(10, 8))
         
-        pref_rate = side_reach_results['no_side_reach_preference_rate']
+        pref_rate = side_reach_results['standard_area_preference_rate']
         ci_lower = side_reach_results.get('ci_lower', pref_rate)
         ci_upper = side_reach_results.get('ci_upper', pref_rate)
         n_instances = side_reach_results.get('n_instances', 0)
@@ -2005,7 +2208,19 @@ class MOOObjectiveAnalyzer:
         ax.plot([0, 0], [ci_lower, ci_upper], color='gray', linewidth=6, alpha=0.6, label='95% CI')
         
         # Plot preference point
-        color = 'green' if pref_rate > 0.6 else 'blue' if pref_rate > 0.5 else 'orange' if pref_rate > 0.4 else 'red'
+        if pref_rate > 0.6:
+            color = 'green'
+            interpretation = 'Strong avoidance'
+        elif pref_rate > 0.5:
+            color = 'blue'
+            interpretation = 'Mild avoidance'
+        elif pref_rate > 0.4:
+            color = 'orange' 
+            interpretation = 'Mild acceptance'
+        else:
+            color = 'red'
+            interpretation = 'Strong acceptance'
+            
         ax.scatter([0], [pref_rate], c=color, s=300, alpha=0.8, 
                   edgecolors='black', linewidth=2, zorder=5)
         
@@ -2013,9 +2228,9 @@ class MOOObjectiveAnalyzer:
         ax.set_xlim(-0.8, 0.8)
         ax.set_ylim(0, 1)
         ax.set_xticks([0])
-        ax.set_xticklabels(['Side Reach\nMovement\nPreference'])
-        ax.set_ylabel('Preference Rate for No Side Reach', fontsize=14)
-        ax.set_title('Side Reach Movement Analysis\n(Standard Area vs Column 5 Reach)', fontsize=16)
+        ax.set_xticklabels(['Same-Row\nSide Reach\nPreference'])
+        ax.set_ylabel('Standard Area Preference Rate', fontsize=14)
+        ax.set_title('Same-Row Side Reach Analysis\n(Standard Area vs Column 5 Extension)', fontsize=16)
         
         # Reference lines
         ax.axhline(y=0.5, color='black', linestyle='--', alpha=0.7, 
@@ -2027,34 +2242,34 @@ class MOOObjectiveAnalyzer:
         
         ax.grid(True, alpha=0.3)
         
-        # Annotations
-        preference_strength = "Strong avoidance" if pref_rate > 0.6 else \
-                            "Mild avoidance" if pref_rate > 0.5 else \
-                            "Mild acceptance" if pref_rate > 0.4 else "Strong acceptance"
-        
-        ax.annotate(f'{pref_rate:.1%}\n{preference_strength}\n(n={n_instances})', 
+        # Main annotation
+        ax.annotate(f'{pref_rate:.1%}\n{interpretation}\n(n={n_instances})', 
                    (0, pref_rate), textcoords="offset points", 
                    xytext=(100, 0), ha='left', va='center',
                    fontsize=12, weight='bold',
                    bbox=dict(boxstyle="round,pad=0.3", facecolor=color, alpha=0.3))
         
-        # Legend
-        ax.legend(loc='upper left', bbox_to_anchor=(0.02, 0.98))
-        
-        # Side annotations explaining the analysis
-        ax.text(-0.75, 0.85, 'Standard Area:\n• Columns 1-4\n• Q,W,E,R,A,S,D,F,Z,X,C,V\n• No reach required', 
+        # Example annotations
+        ax.text(-0.75, 0.85, 'Standard Area\n(Same-row):\n• qw, er, wr\n• as, df, sf\n• zx, cv, xv', 
                fontsize=10, va='top', ha='left',
                bbox=dict(boxstyle="round,pad=0.3", facecolor='lightblue', alpha=0.3))
         
-        ax.text(-0.75, 0.15, 'Side Reach:\n• Column 5\n• T, G, B\n• Requires extension\n  beyond standard area', 
+        ax.text(-0.75, 0.15, 'Side Reach\n(Same-row):\n• qt, et, wt\n• ag, dg, sg\n• zb, cb, xb', 
                fontsize=10, va='bottom', ha='left',
                bbox=dict(boxstyle="round,pad=0.3", facecolor='lightcoral', alpha=0.3))
         
+        ax.legend(loc='upper right', bbox_to_anchor=(0.98, 0.98))
+        
+        # Methodology note
+        ax.text(0.02, 0.02, 'Methodology: Same-row bigrams only, no same-column movements', 
+               transform=ax.transAxes, fontsize=10, style='italic',
+               bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray', alpha=0.5))
+        
         plt.tight_layout()
-        plt.savefig(os.path.join(output_folder, 'side_reach_movement_analysis.png'), 
+        plt.savefig(os.path.join(output_folder, 'same_row_side_reach_analysis.png'), 
                    dpi=300, bbox_inches='tight')
         plt.close()
-        
+
     # =========================================================================
     # DETAILED DIAGNOSTIC REPORTING
     # =========================================================================
@@ -2071,41 +2286,89 @@ class MOOObjectiveAnalyzer:
         
         diagnostic_rows = []
         
-        for _, row in self.data.iterrows():
-            chosen = str(row['chosen_bigram']).lower()
-            unchosen = str(row['unchosen_bigram']).lower()
-            
-            # Basic information
-            diagnostic_row = {
-                'user_id': row['user_id'],
-                'chosen_bigram': chosen,
-                'unchosen_bigram': unchosen,
-                'slider_value': row.get('sliderValue', 0),
-                'chosen_selected': 1,  # Always 1 since this is the chosen bigram
-            }
-            
-            # Analyze chosen bigram
-            chosen_diagnosis = self._diagnose_bigram(chosen, key_scores)
-            for key, value in chosen_diagnosis.items():
-                diagnostic_row[f'chosen_{key}'] = value
+        for i, (_, row) in enumerate(self.data.iterrows()):
+            try:
+                chosen = str(row['chosen_bigram']).lower()
+                unchosen = str(row['unchosen_bigram']).lower()
                 
-            # Analyze unchosen bigram  
-            unchosen_diagnosis = self._diagnose_bigram(unchosen, key_scores)
-            for key, value in unchosen_diagnosis.items():
-                diagnostic_row[f'unchosen_{key}'] = value
-            
-            # Comparative metrics
-            diagnostic_row.update(self._compute_comparative_metrics(chosen, unchosen, chosen_diagnosis, unchosen_diagnosis))
-            
-            # Analysis participation flags
-            diagnostic_row.update(self._compute_analysis_participation(chosen, unchosen, chosen_diagnosis, unchosen_diagnosis))
-            
-            diagnostic_rows.append(diagnostic_row)
+                # Basic information
+                diagnostic_row = {
+                    'user_id': row['user_id'],
+                    'chosen_bigram': chosen,
+                    'unchosen_bigram': unchosen,
+                    'slider_value': row.get('sliderValue', 0),
+                    'chosen_selected': 1,  # Always 1 since this is the chosen bigram
+                }
+                
+                # Analyze chosen bigram
+                logger.debug(f"Row {i}: Analyzing chosen bigram '{chosen}'")
+                chosen_diagnosis = self._diagnose_bigram(chosen, key_scores)
+                if chosen_diagnosis is None:
+                    logger.error(f"Row {i}: _diagnose_bigram returned None for chosen '{chosen}'")
+                    continue
+                
+                logger.debug(f"Row {i}: chosen_diagnosis type: {type(chosen_diagnosis)}")
+                try:
+                    for key, value in chosen_diagnosis.items():
+                        diagnostic_row[f'chosen_{key}'] = value
+                except Exception as e:
+                    logger.error(f"Row {i}: Error iterating chosen_diagnosis.items(): {e}")
+                    logger.error(f"Row {i}: chosen_diagnosis = {chosen_diagnosis}")
+                    raise
+                    
+                # Analyze unchosen bigram  
+                logger.debug(f"Row {i}: Analyzing unchosen bigram '{unchosen}'")
+                unchosen_diagnosis = self._diagnose_bigram(unchosen, key_scores)
+                if unchosen_diagnosis is None:
+                    logger.error(f"Row {i}: _diagnose_bigram returned None for unchosen '{unchosen}'")
+                    continue
+                
+                logger.debug(f"Row {i}: unchosen_diagnosis type: {type(unchosen_diagnosis)}")
+                try:
+                    for key, value in unchosen_diagnosis.items():
+                        diagnostic_row[f'unchosen_{key}'] = value
+                except Exception as e:
+                    logger.error(f"Row {i}: Error iterating unchosen_diagnosis.items(): {e}")
+                    logger.error(f"Row {i}: unchosen_diagnosis = {unchosen_diagnosis}")
+                    raise
+                
+                # Comparative metrics
+                logger.debug(f"Row {i}: Computing comparative metrics")
+                try:
+                    comparative_metrics = self._compute_comparative_metrics(chosen, unchosen, chosen_diagnosis, unchosen_diagnosis)
+                    if comparative_metrics is None:
+                        logger.error(f"Row {i}: _compute_comparative_metrics returned None")
+                        continue
+                    diagnostic_row.update(comparative_metrics)
+                except Exception as e:
+                    logger.error(f"Row {i}: Error in _compute_comparative_metrics: {e}")
+                    raise
+                
+                # Analysis participation flags
+                logger.debug(f"Row {i}: Computing analysis participation")
+                try:
+                    analysis_participation = self._compute_analysis_participation(chosen, unchosen, chosen_diagnosis, unchosen_diagnosis)
+                    if analysis_participation is None:
+                        logger.error(f"Row {i}: _compute_analysis_participation returned None")
+                        continue
+                    diagnostic_row.update(analysis_participation)
+                except Exception as e:
+                    logger.error(f"Row {i}: Error in _compute_analysis_participation: {e}")
+                    raise
+                
+                diagnostic_rows.append(diagnostic_row)
+                
+            except Exception as e:
+                logger.error(f"Row {i}: Failed to process row: {e}")
+                logger.error(f"Row {i}: chosen='{chosen}', unchosen='{unchosen}'")
+                raise  # Re-raise to see the full stack trace
         
         # Convert to DataFrame and save
+        logger.info(f"Converting {len(diagnostic_rows)} rows to DataFrame")
         diagnostic_df = pd.DataFrame(diagnostic_rows)
         
         # Add summary columns
+        logger.info("Adding summary columns")
         diagnostic_df = self._add_summary_columns(diagnostic_df)
         
         # Save to CSV
@@ -2175,9 +2438,21 @@ class MOOObjectiveAnalyzer:
         # Key quality scores (Bradley-Terry if available)
         diagnosis['key1_bt_score'] = key_scores.get(key1, np.nan)
         diagnosis['key2_bt_score'] = key_scores.get(key2, np.nan)
-        diagnosis['avg_key_score'] = np.nanmean([diagnosis['key1_bt_score'], diagnosis['key2_bt_score']])
-        diagnosis['key_score_diff'] = diagnosis['key1_bt_score'] - diagnosis['key2_bt_score'] if not np.isnan(diagnosis['key1_bt_score']) and not np.isnan(diagnosis['key2_bt_score']) else np.nan
         
+        # Safe average calculation
+        scores = [diagnosis['key1_bt_score'], diagnosis['key2_bt_score']]
+        valid_scores = [s for s in scores if not np.isnan(s)]
+        if valid_scores:
+            diagnosis['avg_key_score'] = np.mean(valid_scores)
+        else:
+            diagnosis['avg_key_score'] = np.nan
+        
+        # Safe difference calculation    
+        if not np.isnan(diagnosis['key1_bt_score']) and not np.isnan(diagnosis['key2_bt_score']):
+            diagnosis['key_score_diff'] = diagnosis['key1_bt_score'] - diagnosis['key2_bt_score']
+        else:
+            diagnosis['key_score_diff'] = np.nan
+                    
         # Roll direction classification
         diagnosis['roll_direction'] = self._classify_roll_direction(bigram)
 
@@ -2293,62 +2568,86 @@ class MOOObjectiveAnalyzer:
             'in_row_separation_analysis': 0, 
             'in_col_separation_analysis': 0,
             'in_reach_vs_hurdle_analysis': 0,
-            'in_inward_outward_analysis': 0,
             'in_side_reach_analysis': 0,
+            'in_inward_outward_analysis': 0,
             'analysis_tags': []
         }
         
         # Same letter analysis
-        if (chosen_diag['is_same_letter'] and unchosen_diag['is_same_letter'] and 
-            chosen_diag['is_left_hand'] and unchosen_diag['is_left_hand'] and
-            chosen_diag['key1'] != unchosen_diag['key1']):
+        if (chosen_diag.get('is_same_letter', False) and unchosen_diag.get('is_same_letter', False) and 
+            chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
+            chosen_diag.get('key1', '') != unchosen_diag.get('key1', '')):
             participation['in_same_letter_analysis'] = 1
             participation['analysis_tags'].append('same_letter_bt')
         
         # Row separation analysis  
-        if (chosen_diag['is_left_hand'] and unchosen_diag['is_left_hand'] and
-            {chosen_diag['row_separation'], unchosen_diag['row_separation']} in [{0, 1}, {1, 2}]):
+        chosen_row_sep = chosen_diag.get('row_separation', -1)
+        unchosen_row_sep = unchosen_diag.get('row_separation', -1)
+        if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
+            {chosen_row_sep, unchosen_row_sep} in [{0, 1}, {1, 2}]):
             participation['in_row_separation_analysis'] = 1
             participation['analysis_tags'].append('row_separation')
         
         # Column separation analysis
-        if (chosen_diag['is_left_hand'] and unchosen_diag['is_left_hand'] and
-            chosen_diag['row_separation'] == unchosen_diag['row_separation'] and
-            chosen_diag['row_separation'] > 0):  # Exclude same-row from same_vs_other test
-            if ({chosen_diag['col_separation'], unchosen_diag['col_separation']} == {0, 1} or
-                {chosen_diag['col_separation'], unchosen_diag['col_separation']} == {0, 2} or  
-                {chosen_diag['col_separation'], unchosen_diag['col_separation']} == {0, 3}):
+        chosen_col_sep = chosen_diag.get('col_separation', -1)
+        unchosen_col_sep = unchosen_diag.get('col_separation', -1)
+        if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
+            chosen_row_sep == unchosen_row_sep and chosen_row_sep > 0):
+            if ({chosen_col_sep, unchosen_col_sep} == {0, 1} or
+                {chosen_col_sep, unchosen_col_sep} == {0, 2} or  
+                {chosen_col_sep, unchosen_col_sep} == {0, 3}):
                 participation['in_col_separation_analysis'] = 1
                 participation['analysis_tags'].append('col_same_vs_other')
-            elif {chosen_diag['col_separation'], unchosen_diag['col_separation']} == {1, 2}:
+            elif {chosen_col_sep, unchosen_col_sep} == {1, 2}:
                 participation['in_col_separation_analysis'] = 1
                 participation['analysis_tags'].append('col_adjacent_vs_distant')
         
-        # Inward vs outward roll analysis
-        chosen_roll = chosen_diag['roll_direction'] 
-        unchosen_roll = unchosen_diag['roll_direction']
-        if (chosen_diag['is_left_hand'] and unchosen_diag['is_left_hand'] and
-            {chosen_roll, unchosen_roll} == {'inward', 'outward'}):
-            # Check if both have same row pattern (both same-row or both different-row)
-            chosen_row_sep = chosen_diag['row_separation']
-            unchosen_row_sep = unchosen_diag['row_separation']
-            if (chosen_row_sep == 0 and unchosen_row_sep == 0) or (chosen_row_sep > 0 and unchosen_row_sep > 0):
+        # Reach vs hurdle analysis
+        if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
+            chosen_col_sep == unchosen_col_sep and
+            {chosen_row_sep, unchosen_row_sep} == {1, 2}):
+            participation['in_reach_vs_hurdle_analysis'] = 1
+            participation['analysis_tags'].append('reach_vs_hurdle')
+        
+        # Same-row side reach analysis (simplified)
+        if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
+            self._all_keys_in_analysis_area(chosen) and self._all_keys_in_analysis_area(unchosen)):
+            
+            chosen_side_reach = chosen_diag.get('requires_side_reach', False)
+            unchosen_side_reach = unchosen_diag.get('requires_side_reach', False)
+            
+            # Same-row only, no same-column, different side reach
+            if (chosen_row_sep == 0 and unchosen_row_sep == 0 and  # Same-row only
+                not self._is_same_column_bigram(chosen) and not self._is_same_column_bigram(unchosen) and  # No same-column
+                chosen_side_reach != unchosen_side_reach):  # Different side reach
+                
+                participation['in_side_reach_analysis'] = 1
+                participation['analysis_tags'].append('side_reach_same_row_only')
+        
+        # Constrained inward vs outward roll analysis
+        if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
+            self._are_same_keys_reverse_order(chosen, unchosen) and
+            not self._is_same_column_bigram(chosen)):
+            
+            chosen_roll = chosen_diag.get('roll_direction', 'invalid')
+            unchosen_roll = unchosen_diag.get('roll_direction', 'invalid')
+            
+            if {chosen_roll, unchosen_roll} == {'inward', 'outward'}:
                 participation['in_inward_outward_analysis'] = 1
-                row_pattern = "same_row" if chosen_row_sep == 0 else "different_rows"
-                participation['analysis_tags'].append(f'inward_outward_{row_pattern}')
-        else:
-            participation['in_inward_outward_analysis'] = 0
-
-        # Side reach movement analysis
-        chosen_side_reach_type = chosen_diag['side_reach_movement_type']
-        unchosen_side_reach_type = unchosen_diag['side_reach_movement_type']
+                row_separation = chosen_diag.get('row_separation', -1)
+                
+                if row_separation == 0:
+                    participation['analysis_tags'].append('inward_outward_same_row')
+                elif row_separation == 1:
+                    participation['analysis_tags'].append('inward_outward_reach')
+                elif row_separation == 2:
+                    participation['analysis_tags'].append('inward_outward_hurdle')
+                else:
+                    participation['analysis_tags'].append('inward_outward_extreme')
         
-        participation['in_side_reach_analysis'] = 0
-        
-        # Movement-based comparison: no side reach vs requires side reach
-        if {chosen_side_reach_type, unchosen_side_reach_type} == {'no_side_reach', 'requires_side_reach'}:
-            participation['in_side_reach_analysis'] = 1
-            participation['analysis_tags'].append('side_reach_movement')
+        # Finalize
+        participation['analysis_tags'] = '|'.join(participation['analysis_tags'])
+        participation['num_analyses'] = sum([participation[key] for key in participation if key.startswith('in_')])
         
         return participation
 
@@ -2370,12 +2669,14 @@ class MOOObjectiveAnalyzer:
             else 'moderate' if 'adjacent' in row['chosen_movement_type']
             else 'complex', axis=1)
 
-        # Side reach preference patterns
-        df['chose_no_side_reach'] = df.apply(lambda row: 
-            1 if not row['chosen_requires_side_reach'] and row['unchosen_requires_side_reach']
-            else 0 if row['chosen_requires_side_reach'] and not row['unchosen_requires_side_reach']
+        # Same-row side reach preference patterns
+        df['chose_standard_area_same_row'] = df.apply(lambda row: 
+            1 if (row['chosen_row_separation'] == 0 and row['unchosen_row_separation'] == 0 and
+                  not row['chosen_requires_side_reach'] and row['unchosen_requires_side_reach'])
+            else 0 if (row['chosen_row_separation'] == 0 and row['unchosen_row_separation'] == 0 and
+                       row['chosen_requires_side_reach'] and not row['unchosen_requires_side_reach'])
             else np.nan, axis=1)
-        
+                
         df['comparison_involves_side_reach'] = df.apply(lambda row:
             row['chosen_requires_side_reach'] or row['unchosen_requires_side_reach'], axis=1)
         
@@ -2423,6 +2724,12 @@ class MOOObjectiveAnalyzer:
     UNCHOSEN BIGRAM DIAGNOSIS (unchosen_*):
     [Same structure as chosen_* but for the non-selected bigram]
 
+    SAME-ROW SIDE REACH ANALYSIS:
+    - Restricted to same-row bigrams (0 row separation) with no same-column movements
+    - Compares standard left-hand area (columns 1-4) vs side reach (column 5)
+    - Purest test of side reach ergonomic cost without movement complexity
+    - in_side_reach_analysis: 1 if used in same-row side reach analysis
+    
     COMPARATIVE METRICS:
     - row_sep_advantage: chosen_row_sep - unchosen_row_sep (negative = chosen smaller)
     - col_sep_advantage: chosen_col_sep - unchosen_col_sep (negative = chosen smaller)
