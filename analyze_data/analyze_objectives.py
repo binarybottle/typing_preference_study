@@ -18,14 +18,17 @@ MOO Objectives Analyzed:
    - Same-letter bigram comparisons (Bradley-Terry model)
    - Bigram pair comparisons
 2. Row separation: Preferences across keyboard rows (same > reach > hurdle)  
-3. Column separation: Adjacent vs. distant finger movements
-4. Inward vs Outward Roll: Preference for finger movement direction using same key pairs
+3. Column separation (each with a shared key constraint): 
+   - Same vs. other columns
+   - Adjacent vs. 2-column separation
+   - Adjacent vs. 3-column separation
+4. Inward vs outward roll: Preference for finger movement direction using same key pairs
    - Constrained comparison: same two keys in both directions (e.g., 'df' vs 'fd')
    - Inward roll: increasing finger numbers (pinky → index)
    - Outward roll: decreasing finger numbers (index → pinky)
    - Excludes same-column bigrams to ensure roll motion is possible
-5. Side reach preferences: Same-row bigrams only (no same-column)
-   - Purest test of side reach cost: standard area vs column 5 extension
+5. Same row, side reach preferences (no same-column key-pairs):
+   - Purest test of side reach cost: within-row, standard area vs lateral extension
    - Eliminates row separation and finger coordination confounds
 
 Usage:
@@ -750,7 +753,7 @@ class MOOObjectiveAnalyzer:
             unchosen_col_sep = self._calculate_column_separation(unchosen)
 
             # Column comparisons with identical row separation AND shared key constraint
-            if (chosen_row_sep == unchosen_row_sep and 
+            if (chosen_row_sep == unchosen_row_sep and chosen_row_sep > 0 and
                 self._bigrams_share_one_key(chosen, unchosen)):
 
                 # Define row pattern
@@ -768,16 +771,13 @@ class MOOObjectiveAnalyzer:
                     chose_smaller = None
                     comparison_type = None
 
-                    # Test 1a: Same column (0) vs Adjacent (1)
-                    if {chosen_col_sep, unchosen_col_sep} == {0, 1}:
-                        chose_smaller = 1 if chosen_col_sep == 0 else 0
-                        comparison_type = f"same_vs_adjacent_{row_pattern}"
-
-                    # Test 1b: Same column (0) vs Distant (2-3) - COMBINED
-                    elif ({chosen_col_sep, unchosen_col_sep} == {0, 2} or 
-                        {chosen_col_sep, unchosen_col_sep} == {0, 3}):
-                        chose_smaller = 1 if chosen_col_sep == 0 else 0
-                        comparison_type = f"same_vs_distant_{row_pattern}"
+                    # Test 1: Combined same column (0) vs any other column (1, 2, 3)
+                    if chosen_col_sep == 0 and unchosen_col_sep > 0:
+                        chose_smaller = 1  # chose same column
+                        comparison_type = f"same_vs_other_{row_pattern}"
+                    elif chosen_col_sep > 0 and unchosen_col_sep == 0:
+                        chose_smaller = 0  # chose other column (not same)
+                        comparison_type = f"same_vs_other_{row_pattern}"
 
                     # Test 2: Adjacent (1) vs Distant (2-3) - COMBINED
                     elif ({chosen_col_sep, unchosen_col_sep} == {1, 2} or 
@@ -841,7 +841,14 @@ class MOOObjectiveAnalyzer:
         """Analyze column separation preferences with proper row controls AND reach vs hurdle analysis."""
         
         instances_df = self._extract_column_separation_instances()
-        
+
+        logger.info(f"Column separation instances AFTER shared key constraint: {len(instances_df)}")
+        if not instances_df.empty:
+            # Count instances with shared keys vs without
+            shares_key_count = sum(1 for _, row in instances_df.iterrows() 
+                                if self._bigrams_share_one_key(row['chosen_bigram'], row['unchosen_bigram']))
+            logger.info(f"Instances with shared key: {shares_key_count}/{len(instances_df)}")
+
         if instances_df.empty:
             logger.warning('No column separation instances found - skipping column separation analysis')
             return {
@@ -1470,9 +1477,10 @@ class MOOObjectiveAnalyzer:
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     "",
                     f"  METHODS NOTES:",
-                    f"  - Same-vs-other column tests exclude same-row bigrams (row separation = 0)",
-                    f"  - All comparisons control for row separation (1-row vs 1-row, 2-row vs 2-row)",
+                    f"  - All comparisons require same row separation AND exactly one shared key",
+                    f"  - Same-vs-other column tests exclude same-row bigrams (row separation = 0)", 
                     f"  - Adjacent-vs-distant tests separated by row pattern for precision",
+                    f"  - Shared key constraint controls for key identity differences",
                     ""
                 ])
                 
@@ -1480,30 +1488,26 @@ class MOOObjectiveAnalyzer:
                 column_pattern_results = obj_results.get('pattern_results', {})
 
                 # Group column results for simplified reporting
-                same_vs_adjacent_results = {}
-                same_vs_distant_results = {}
+                same_vs_other_results = {}
                 adjacent_vs_distant_results = {}
-                
+
                 for comp_type, results in column_pattern_results.items():
-                    if comp_type.startswith('same_vs_adjacent_'):
-                        row_type = comp_type.replace('same_vs_adjacent_', '')
-                        same_vs_adjacent_results[row_type] = results
-                    elif comp_type.startswith('same_vs_distant_'):
-                        row_type = comp_type.replace('same_vs_distant_', '')
-                        same_vs_distant_results[row_type] = results
+                    if comp_type.startswith('same_vs_other_'):
+                        row_type = comp_type.replace('same_vs_other_', '')
+                        same_vs_other_results[row_type] = results
                     elif comp_type.startswith('adjacent_vs_distant_'):
                         row_type = comp_type.replace('adjacent_vs_distant_', '')
                         adjacent_vs_distant_results[row_type] = results
 
-                # Report same vs adjacent comparisons
-                if same_vs_adjacent_results:
+                # Report same vs other comparisons
+                if same_vs_other_results:
                     report_lines.extend([
-                        f"  SAME COLUMN (0) VS ADJACENT COLUMN (1) - ROW CONTROLLED:",
-                        f"  (Excludes same-row bigrams per methodology)",
+                        f"  SAME COLUMN (0) VS OTHER COLUMNS (1-3) - ROW & KEY CONTROLLED:",
+                        f"  (Same row separation + exactly one shared key)",
                         ""
                     ])
                     
-                    for row_type, comp_data in same_vs_adjacent_results.items():
+                    for row_type, comp_data in same_vs_other_results.items():
                         comp_pref = comp_data['preference_rate']
                         comp_ci_lower = comp_data.get('ci_lower', np.nan)
                         comp_ci_upper = comp_data.get('ci_upper', np.nan)
@@ -1518,60 +1522,7 @@ class MOOObjectiveAnalyzer:
                         else:
                             display_pref = 1 - comp_pref
                             display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
-                            interpretation = "adjacent column"
-                        
-                        comp_effect = abs(comp_pref - 0.5)
-                        
-                        # Statistical significance indicator
-                        comp_sig_indicator = ""
-                        if not np.isnan(comp_p_value):
-                            if comp_p_value < 0.001:
-                                comp_sig_indicator = " ***"
-                            elif comp_p_value < 0.01:
-                                comp_sig_indicator = " **"
-                            elif comp_p_value < 0.05:
-                                comp_sig_indicator = " *"
-                        
-                        # Enhanced descriptions
-                        if row_type == "reach_1_apart":
-                            type_name = "Reach Movements (1 row apart)"
-                        elif row_type == "hurdle_2_apart":
-                            type_name = "Hurdle Movements (2 rows apart)"
-                        else:
-                            type_name = row_type.replace('_', ' ').title()
-                        
-                        report_lines.extend([
-                            f"    {type_name}:",
-                            f"      Preference: {display_pref:.1%} favor {interpretation} (effect size: {comp_effect:.1%})",
-                            f"      95% CI: [{display_ci_lower:.1%}, {display_ci_upper:.1%}]" if not np.isnan(display_ci_lower) else "      95% CI: Not available",
-                            f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
-                            ""
-                        ])
-
-                # Report same vs distant comparisons (2-3 columns combined)
-                if same_vs_distant_results:
-                    report_lines.extend([
-                        f"  SAME COLUMN (0) VS DISTANT COLUMNS (2-3) - ROW CONTROLLED:",
-                        f"  (Excludes same-row bigrams per methodology)",
-                        ""
-                    ])
-                    
-                    for row_type, comp_data in same_vs_distant_results.items():
-                        comp_pref = comp_data['preference_rate']
-                        comp_ci_lower = comp_data.get('ci_lower', np.nan)
-                        comp_ci_upper = comp_data.get('ci_upper', np.nan)
-                        comp_p_value = comp_data.get('p_value', np.nan)
-                        comp_n = comp_data['n_instances']
-                        
-                        # Calculate display values
-                        if comp_pref > 0.5:
-                            display_pref = comp_pref
-                            display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
-                            interpretation = "same column"
-                        else:
-                            display_pref = 1 - comp_pref
-                            display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
-                            interpretation = "distant columns"
+                            interpretation = "other columns"
                         
                         comp_effect = abs(comp_pref - 0.5)
                         
@@ -2605,17 +2556,18 @@ class MOOObjectiveAnalyzer:
             {chosen_row_sep, unchosen_row_sep} in [{0, 1}, {1, 2}]):
             participation['in_row_separation_analysis'] = 1
             participation['analysis_tags'].append('row_separation')
-        
+
         # Column separation analysis (with shared key constraint)
         if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
             chosen_row_sep == unchosen_row_sep and chosen_row_sep > 0 and
             self._bigrams_share_one_key(chosen, unchosen)):
-            if ({chosen_col_sep, unchosen_col_sep} == {0, 1} or
-                {chosen_col_sep, unchosen_col_sep} == {0, 2} or  
-                {chosen_col_sep, unchosen_col_sep} == {0, 3}):
+            
+            # Same vs other test (matches main analysis)
+            if (chosen_col_sep == 0 and unchosen_col_sep > 0) or (chosen_col_sep > 0 and unchosen_col_sep == 0):
                 participation['in_col_separation_analysis'] = 1
                 participation['analysis_tags'].append('col_same_vs_other')
-            elif {chosen_col_sep, unchosen_col_sep} == {1, 2}:
+            # Adjacent vs distant test  
+            elif ({chosen_col_sep, unchosen_col_sep} == {1, 2} or {chosen_col_sep, unchosen_col_sep} == {1, 3}):
                 participation['in_col_separation_analysis'] = 1
                 participation['analysis_tags'].append('col_adjacent_vs_distant')
         
