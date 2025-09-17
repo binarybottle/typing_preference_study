@@ -730,7 +730,7 @@ class MOOObjectiveAnalyzer:
         return 0
 
     # =========================================================================
-    # COLUMN SEPARATION PREFERENCES
+    # COLUMN SEPARATION PREFERENCES (SAME ROW SEPARATION, SHARE ONE KEY)
     # =========================================================================
     
     def _extract_column_separation_instances(self) -> pd.DataFrame:
@@ -748,9 +748,11 @@ class MOOObjectiveAnalyzer:
             unchosen_row_sep = self._calculate_row_separation(unchosen)
             chosen_col_sep = self._calculate_column_separation(chosen)
             unchosen_col_sep = self._calculate_column_separation(unchosen)
-            
-            # Column comparisons with identical row separation
-            if chosen_row_sep == unchosen_row_sep:
+
+            # Column comparisons with identical row separation AND shared key constraint
+            if (chosen_row_sep == unchosen_row_sep and 
+                self._bigrams_share_one_key(chosen, unchosen)):
+
                 # Define row pattern
                 if chosen_row_sep == 0:
                     row_pattern = "same_row"
@@ -760,28 +762,26 @@ class MOOObjectiveAnalyzer:
                     row_pattern = "hurdle_2_apart"
                 else:
                     row_pattern = None
-                
+
                 if row_pattern:
                     # Column separation comparisons
                     chose_smaller = None
                     comparison_type = None
-                    
-                    # SAME-COLUMN TESTS (excluding same-row per user requirements)
-                    if row_pattern != "same_row":
-                        # Test 1a: Same column (0) vs Adjacent (1)
-                        if {chosen_col_sep, unchosen_col_sep} == {0, 1}:
-                            chose_smaller = 1 if chosen_col_sep == 0 else 0
-                            comparison_type = f"same_vs_adjacent_{row_pattern}"
-                        
-                        # Test 1b: Same column (0) vs Distant (2-3) - COMBINED
-                        elif ({chosen_col_sep, unchosen_col_sep} == {0, 2} or 
-                              {chosen_col_sep, unchosen_col_sep} == {0, 3}):
-                            chose_smaller = 1 if chosen_col_sep == 0 else 0
-                            comparison_type = f"same_vs_distant_{row_pattern}"
-                    
-                    # Test 2: Adjacent (1) vs Distant (2-3) - COMBINED - separate by row pattern
+
+                    # Test 1a: Same column (0) vs Adjacent (1)
+                    if {chosen_col_sep, unchosen_col_sep} == {0, 1}:
+                        chose_smaller = 1 if chosen_col_sep == 0 else 0
+                        comparison_type = f"same_vs_adjacent_{row_pattern}"
+
+                    # Test 1b: Same column (0) vs Distant (2-3) - COMBINED
+                    elif ({chosen_col_sep, unchosen_col_sep} == {0, 2} or 
+                        {chosen_col_sep, unchosen_col_sep} == {0, 3}):
+                        chose_smaller = 1 if chosen_col_sep == 0 else 0
+                        comparison_type = f"same_vs_distant_{row_pattern}"
+
+                    # Test 2: Adjacent (1) vs Distant (2-3) - COMBINED
                     elif ({chosen_col_sep, unchosen_col_sep} == {1, 2} or 
-                          {chosen_col_sep, unchosen_col_sep} == {1, 3}):
+                        {chosen_col_sep, unchosen_col_sep} == {1, 3}):
                         chose_smaller = 1 if chosen_col_sep == 1 else 0
                         comparison_type = f"adjacent_vs_distant_{row_pattern}"
                     
@@ -800,13 +800,15 @@ class MOOObjectiveAnalyzer:
                             'unchosen_row_separation': unchosen_row_sep,
                             'analysis_type': 'column_comparison'
                         })
-            
-            # Row comparisons (reach vs hurdle) with identical column separation
+
+            # Row comparisons (reach vs hurdle) with identical column separation, and 1 shared key
             if chosen_col_sep == unchosen_col_sep:
                 # Test: Reach (1 row) vs Hurdle (2 rows) for each column separation level
-                if {chosen_row_sep, unchosen_row_sep} == {1, 2}:
+                if ({chosen_row_sep, unchosen_row_sep} == {1, 2} and
+                    self._bigrams_share_one_key(chosen, unchosen)):
+
                     chose_smaller_row = 1 if chosen_row_sep == 1 else 0  # 1 = chose reach, 0 = chose hurdle
-                    
+  
                     # Define column separation category for clearer reporting
                     if chosen_col_sep == 0:
                         col_category = "same_column"
@@ -1291,6 +1293,17 @@ class MOOObjectiveAnalyzer:
         """Check if all keys in bigram are left-hand keys."""
         return all(key in self.left_hand_keys for key in bigram)
 
+    def _bigrams_share_one_key(self, bigram1: str, bigram2: str) -> bool:
+        """Check if two bigrams share exactly one key."""
+        if len(bigram1) != 2 or len(bigram2) != 2:
+            return False
+        
+        keys1 = set(bigram1)
+        keys2 = set(bigram2)
+        shared_keys = keys1.intersection(keys2)
+        
+        return len(shared_keys) == 1
+    
     # =========================================================================
     # REPORTING AND VISUALIZATION
     # =========================================================================
@@ -2537,13 +2550,14 @@ class MOOObjectiveAnalyzer:
 
     def _compute_comparative_metrics(self, chosen: str, unchosen: str, chosen_diag: Dict, unchosen_diag: Dict) -> Dict[str, Any]:
         """Compute comparative metrics between chosen and unchosen bigrams."""
-        
+
         return {
             # Separation comparisons
             'row_sep_advantage': chosen_diag['row_separation'] - unchosen_diag['row_separation'], # negative = chosen has smaller row sep
             'col_sep_advantage': chosen_diag['col_separation'] - unchosen_diag['col_separation'], # negative = chosen has smaller col sep
             'chosen_smaller_row_sep': 1 if chosen_diag['row_separation'] < unchosen_diag['row_separation'] else 0,
             'chosen_smaller_col_sep': 1 if chosen_diag['col_separation'] < unchosen_diag['col_separation'] else 0,
+            'bigrams_share_one_key': 1 if self._bigrams_share_one_key(chosen, unchosen) else 0,
             
             # Key quality comparisons
             'key_quality_advantage': chosen_diag['avg_key_score'] - unchosen_diag['avg_key_score'] if not np.isnan(chosen_diag['avg_key_score']) and not np.isnan(unchosen_diag['avg_key_score']) else np.nan,
@@ -2573,6 +2587,12 @@ class MOOObjectiveAnalyzer:
             'analysis_tags': []
         }
         
+        # Get row and column separations FIRST
+        chosen_row_sep = chosen_diag.get('row_separation', -1)
+        unchosen_row_sep = unchosen_diag.get('row_separation', -1)
+        chosen_col_sep = chosen_diag.get('col_separation', -1)
+        unchosen_col_sep = unchosen_diag.get('col_separation', -1)
+        
         # Same letter analysis
         if (chosen_diag.get('is_same_letter', False) and unchosen_diag.get('is_same_letter', False) and 
             chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
@@ -2581,18 +2601,15 @@ class MOOObjectiveAnalyzer:
             participation['analysis_tags'].append('same_letter_bt')
         
         # Row separation analysis  
-        chosen_row_sep = chosen_diag.get('row_separation', -1)
-        unchosen_row_sep = unchosen_diag.get('row_separation', -1)
         if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
             {chosen_row_sep, unchosen_row_sep} in [{0, 1}, {1, 2}]):
             participation['in_row_separation_analysis'] = 1
             participation['analysis_tags'].append('row_separation')
         
-        # Column separation analysis
-        chosen_col_sep = chosen_diag.get('col_separation', -1)
-        unchosen_col_sep = unchosen_diag.get('col_separation', -1)
+        # Column separation analysis (with shared key constraint)
         if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
-            chosen_row_sep == unchosen_row_sep and chosen_row_sep > 0):
+            chosen_row_sep == unchosen_row_sep and chosen_row_sep > 0 and
+            self._bigrams_share_one_key(chosen, unchosen)):
             if ({chosen_col_sep, unchosen_col_sep} == {0, 1} or
                 {chosen_col_sep, unchosen_col_sep} == {0, 2} or  
                 {chosen_col_sep, unchosen_col_sep} == {0, 3}):
@@ -2602,13 +2619,14 @@ class MOOObjectiveAnalyzer:
                 participation['in_col_separation_analysis'] = 1
                 participation['analysis_tags'].append('col_adjacent_vs_distant')
         
-        # Reach vs hurdle analysis
+        # Reach vs hurdle analysis (with shared key constraint)
         if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
             chosen_col_sep == unchosen_col_sep and
-            {chosen_row_sep, unchosen_row_sep} == {1, 2}):
+            {chosen_row_sep, unchosen_row_sep} == {1, 2} and
+            self._bigrams_share_one_key(chosen, unchosen)):
             participation['in_reach_vs_hurdle_analysis'] = 1
             participation['analysis_tags'].append('reach_vs_hurdle')
-        
+  
         # Same-row side reach analysis (simplified)
         if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
             self._all_keys_in_analysis_area(chosen) and self._all_keys_in_analysis_area(unchosen)):

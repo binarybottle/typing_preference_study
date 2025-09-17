@@ -13,6 +13,9 @@ Examples:
     python search_csv.py data.csv --columns  # List all available columns
     python search_csv.py data.csv --select user_id,chosen_bigram,slider_value chosen_selected=1
     python search_csv.py data.csv --table chosen_movement_type=same_finger  # Table format
+
+    # This example compares bigrams in the output with different column separations but same row separations:
+    poetry run python3 search_table.py output/nonProlific/analyze_objectives/comprehensive_bigram_diagnosis.csv --select chosen_bigram,unchosen_bigram,chosen_row_separation,unchosen_row_separation,chosen_col_separation,unchosen_col_separation chosen_col_separation=0 unchosen_col_separation=">0" in_col_separation_analysis=1    
 """
 
 import pandas as pd
