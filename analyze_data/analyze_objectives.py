@@ -752,10 +752,33 @@ class MOOObjectiveAnalyzer:
             chosen_col_sep = self._calculate_column_separation(chosen)
             unchosen_col_sep = self._calculate_column_separation(unchosen)
 
-            # Column comparisons with identical row separation AND shared key constraint
-            if (chosen_row_sep == unchosen_row_sep and chosen_row_sep > 0 and
-                self._bigrams_share_one_key(chosen, unchosen)):
+            # Block 1: Same-column vs other-column (NO row constraints)
+            if (self._bigrams_share_one_key(chosen, unchosen) and
+                ((chosen_col_sep == 0 and unchosen_col_sep > 0) or 
+                (chosen_col_sep > 0 and unchosen_col_sep == 0))):
+                
+                chose_smaller = 1 if chosen_col_sep == 0 else 0
+                comparison_type = "same_vs_other_no_row_control"
+                
+                instances.append({
+                    'user_id': row['user_id'],
+                    'chosen_bigram': chosen,
+                    'unchosen_bigram': unchosen,
+                    'row_pattern': None,  # No row pattern since no row control
+                    'comparison_type': comparison_type,
+                    'chose_smaller_separation': chose_smaller,
+                    'chosen_col_separation': chosen_col_sep,
+                    'unchosen_col_separation': unchosen_col_sep,
+                    'chosen_row_separation': chosen_row_sep,
+                    'unchosen_row_separation': unchosen_row_sep,
+                    'analysis_type': 'column_comparison'
+                })
 
+            # Block 2: Adjacent vs distant (WITH row constraints) 
+            elif (chosen_row_sep == unchosen_row_sep and 
+                self._bigrams_share_one_key(chosen, unchosen) and
+                ({chosen_col_sep, unchosen_col_sep} == {1, 2} or {chosen_col_sep, unchosen_col_sep} == {1, 3})):
+                
                 # Define row pattern
                 if chosen_row_sep == 0:
                     row_pattern = "same_row"
@@ -767,41 +790,24 @@ class MOOObjectiveAnalyzer:
                     row_pattern = None
 
                 if row_pattern:
-                    # Column separation comparisons
-                    chose_smaller = None
-                    comparison_type = None
-
-                    # Test 1: Combined same column (0) vs any other column (1, 2, 3)
-                    if chosen_col_sep == 0 and unchosen_col_sep > 0:
-                        chose_smaller = 1  # chose same column
-                        comparison_type = f"same_vs_other_{row_pattern}"
-                    elif chosen_col_sep > 0 and unchosen_col_sep == 0:
-                        chose_smaller = 0  # chose other column (not same)
-                        comparison_type = f"same_vs_other_{row_pattern}"
-
-                    # Test 2: Adjacent (1) vs Distant (2-3) - COMBINED
-                    elif ({chosen_col_sep, unchosen_col_sep} == {1, 2} or 
-                        {chosen_col_sep, unchosen_col_sep} == {1, 3}):
-                        chose_smaller = 1 if chosen_col_sep == 1 else 0
-                        comparison_type = f"adjacent_vs_distant_{row_pattern}"
+                    chose_smaller = 1 if chosen_col_sep == 1 else 0
+                    comparison_type = f"adjacent_vs_distant_{row_pattern}"
                     
-                    # Add valid comparisons
-                    if chose_smaller is not None and comparison_type is not None:
-                        instances.append({
-                            'user_id': row['user_id'],
-                            'chosen_bigram': chosen,
-                            'unchosen_bigram': unchosen,
-                            'row_pattern': row_pattern,
-                            'comparison_type': comparison_type,
-                            'chose_smaller_separation': chose_smaller,
-                            'chosen_col_separation': chosen_col_sep,
-                            'unchosen_col_separation': unchosen_col_sep,
-                            'chosen_row_separation': chosen_row_sep,
-                            'unchosen_row_separation': unchosen_row_sep,
-                            'analysis_type': 'column_comparison'
-                        })
-
-            # Row comparisons (reach vs hurdle) with identical column separation, and 1 shared key
+                    instances.append({
+                        'user_id': row['user_id'],
+                        'chosen_bigram': chosen,
+                        'unchosen_bigram': unchosen,
+                        'row_pattern': row_pattern,
+                        'comparison_type': comparison_type,
+                        'chose_smaller_separation': chose_smaller,
+                        'chosen_col_separation': chosen_col_sep,
+                        'unchosen_col_separation': unchosen_col_sep,
+                        'chosen_row_separation': chosen_row_sep,
+                        'unchosen_row_separation': unchosen_row_sep,
+                        'analysis_type': 'column_comparison'
+                    })
+                    
+            # Row comparisons (reach vs hurdle) with identical column separation and 1 shared key
             if chosen_col_sep == unchosen_col_sep:
                 # Test: Reach (1 row) vs Hurdle (2 rows) for each column separation level
                 if ({chosen_row_sep, unchosen_row_sep} == {1, 2} and
@@ -841,24 +847,6 @@ class MOOObjectiveAnalyzer:
         """Analyze column separation preferences with proper row controls AND reach vs hurdle analysis."""
         
         instances_df = self._extract_column_separation_instances()
-
-        logger.info(f"Column separation instances AFTER shared key constraint: {len(instances_df)}")
-        if not instances_df.empty:
-            # Count instances with shared keys vs without
-            shares_key_count = sum(1 for _, row in instances_df.iterrows() 
-                                if self._bigrams_share_one_key(row['chosen_bigram'], row['unchosen_bigram']))
-            logger.info(f"Instances with shared key: {shares_key_count}/{len(instances_df)}")
-
-        if instances_df.empty:
-            logger.warning('No column separation instances found - skipping column separation analysis')
-            return {
-                'description': 'Preferences for smaller column separation distances',
-                'method': 'column_separation_analysis',
-                'status': 'insufficient_data',
-                'n_instances': 0,
-                'interpretation': 'No column separation instances found in data'
-            }
-        
         logger.info(f"Found {len(instances_df)} total separation instances")
         
         # Split analyses by type
@@ -1014,7 +1002,7 @@ class MOOObjectiveAnalyzer:
         z_score = (preference_rate - 0.5) / np.sqrt(0.25 / n_instances)
         p_value = 2 * (1 - norm.cdf(abs(z_score)))
         
-        # Analysis by row pattern (optional - can be simplified if not needed)
+        # Analysis by row pattern
         pattern_results = {}
         for row_pattern in instances_df['row_pattern'].unique():
             pattern_data = instances_df[instances_df['row_pattern'] == row_pattern]
@@ -1471,30 +1459,29 @@ class MOOObjectiveAnalyzer:
                         sig_indicator = " *"
                 
                 report_lines.extend([
-                    f"  OVERALL COLUMN SEPARATION PREFERENCE (WITH ROW CONTROLS):",
+                    f"  OVERALL COLUMN SEPARATION PREFERENCE:",
                     f"  Preference rate: {pref_rate:.1%} favor smaller distances (effect size: {effect_size:.1%})",
                     f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     "",
                     f"  METHODS NOTES:",
-                    f"  - All comparisons require same row separation AND exactly one shared key",
-                    f"  - Same-vs-other column tests exclude same-row bigrams (row separation = 0)", 
-                    f"  - Adjacent-vs-distant tests separated by row pattern for precision",
-                    f"  - Shared key constraint controls for key identity differences",
+                    f"  - Same-column vs other-column: No row constraints (tests fundamental same-finger preference)",
+                    f"  - Adjacent vs distant: Row constraints maintained (isolates pure column separation effect)", 
+                    f"  - All comparisons require exactly one shared key",
+                    f"  - Mixed approach balances sample size with experimental control",
                     ""
                 ])
                 
                 # Get pattern results from the analysis
                 column_pattern_results = obj_results.get('pattern_results', {})
 
-                # Group column results for simplified reporting
+                # Group column results for mixed reporting
                 same_vs_other_results = {}
                 adjacent_vs_distant_results = {}
 
                 for comp_type, results in column_pattern_results.items():
-                    if comp_type.startswith('same_vs_other_'):
-                        row_type = comp_type.replace('same_vs_other_', '')
-                        same_vs_other_results[row_type] = results
+                    if comp_type == 'same_vs_other_no_row_control':
+                        same_vs_other_results['no_row_control'] = results
                     elif comp_type.startswith('adjacent_vs_distant_'):
                         row_type = comp_type.replace('adjacent_vs_distant_', '')
                         adjacent_vs_distant_results[row_type] = results
@@ -1502,8 +1489,8 @@ class MOOObjectiveAnalyzer:
                 # Report same vs other comparisons
                 if same_vs_other_results:
                     report_lines.extend([
-                        f"  SAME COLUMN (0) VS OTHER COLUMNS (1-3) - ROW & KEY CONTROLLED:",
-                        f"  (Same row separation + exactly one shared key)",
+                        f"  SAME COLUMN (0) VS OTHER COLUMNS (1-3) - NO ROW CONTROLS:",
+                        f"  (All row separations included + shared key constraint)",
                         ""
                     ])
                     
@@ -1518,11 +1505,11 @@ class MOOObjectiveAnalyzer:
                         if comp_pref > 0.5:
                             display_pref = comp_pref
                             display_ci_lower, display_ci_upper = comp_ci_lower, comp_ci_upper
-                            interpretation = "same column"
+                            interpretation = "same-finger movements"
                         else:
                             display_pref = 1 - comp_pref
                             display_ci_lower, display_ci_upper = 1 - comp_ci_upper, 1 - comp_ci_lower
-                            interpretation = "other columns"
+                            interpretation = "different-finger movements"
                         
                         comp_effect = abs(comp_pref - 0.5)
                         
@@ -1536,13 +1523,7 @@ class MOOObjectiveAnalyzer:
                             elif comp_p_value < 0.05:
                                 comp_sig_indicator = " *"
                         
-                        # Enhanced descriptions
-                        if row_type == "reach_1_apart":
-                            type_name = "Reach Movements (1 row apart)"
-                        elif row_type == "hurdle_2_apart":
-                            type_name = "Hurdle Movements (2 rows apart)"
-                        else:
-                            type_name = row_type.replace('_', ' ').title()
+                        type_name = "All Movement Types (0, 1, 2 row separations combined)"
                         
                         report_lines.extend([
                             f"    {type_name}:",
@@ -1551,7 +1532,7 @@ class MOOObjectiveAnalyzer:
                             f"      Statistical test: p = {comp_p_value:.4f}{comp_sig_indicator} (n={comp_n})" if not np.isnan(comp_p_value) else f"      Statistical test: Not available (n={comp_n})",
                             ""
                         ])
-
+                        
                 # Adjacent vs distant reporting
                 if adjacent_vs_distant_results:
                     report_lines.extend([
@@ -1709,7 +1690,7 @@ class MOOObjectiveAnalyzer:
                     f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     "",
-                    f"  CONSTRAINED METHODOLOGY:",
+                    f"  CONSTRAINED APPROACH:",
                     f"  - Compares same key pairs in both movement directions",
                     f"  - Inward roll: Finger number increases (pinky → index)",
                     f"  - Outward roll: Finger number decreases (index → pinky)", 
@@ -1818,7 +1799,7 @@ class MOOObjectiveAnalyzer:
                     f"  95% CI: [{ci_lower:.1%}, {ci_upper:.1%}]" if not np.isnan(ci_lower) else "  95% CI: Not available",
                     f"  Statistical test: p = {p_value:.4f}{sig_indicator} (n={n_instances})" if not np.isnan(p_value) else f"  Statistical test: Not available (n={n_instances})",
                     "",
-                    f"  SIMPLIFIED METHODOLOGY:",
+                    f"  METHODS:",
                     f"  - Same-row bigrams only: Both keys on same keyboard row (0 row separation)",
                     f"  - No same-column bigrams: Excludes same-finger movements for cleaner results",
                     f"  - Standard area: Bigrams using only columns 1-4 (Q,W,E,R,A,S,D,F,Z,X,C,V)",
@@ -2148,7 +2129,6 @@ class MOOObjectiveAnalyzer:
                            (i, rate), textcoords="offset points", 
                            xytext=(0,15), ha='center', fontsize=10, weight='bold')
         
-        # Add methodology note
         ax.text(0.02, 0.98, 'Constrained: Same key pairs in both directions (e.g., \'df\' vs \'fd\')', 
                transform=ax.transAxes, fontsize=10, style='italic', va='top',
                bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray', alpha=0.5))
@@ -2224,8 +2204,7 @@ class MOOObjectiveAnalyzer:
         
         ax.legend(loc='upper right', bbox_to_anchor=(0.98, 0.98))
         
-        # Methodology note
-        ax.text(0.02, 0.02, 'Methodology: Same-row bigrams only, no same-column movements', 
+        ax.text(0.02, 0.02, 'Method: Same-row bigrams only, no same-column movements', 
                transform=ax.transAxes, fontsize=10, style='italic',
                bbox=dict(boxstyle="round,pad=0.3", facecolor='lightgray', alpha=0.5))
         
@@ -2579,7 +2558,7 @@ class MOOObjectiveAnalyzer:
             participation['in_reach_vs_hurdle_analysis'] = 1
             participation['analysis_tags'].append('reach_vs_hurdle')
   
-        # Same-row side reach analysis (simplified)
+        # Same-row side reach analysis
         if (chosen_diag.get('is_left_hand', False) and unchosen_diag.get('is_left_hand', False) and
             self._all_keys_in_analysis_area(chosen) and self._all_keys_in_analysis_area(unchosen)):
             
