@@ -19,9 +19,9 @@ MOO Objectives Analyzed:
    - Bigram pair comparisons
 2. Row separation: Preferences across keyboard rows (same > reach > hurdle)  
 3. Column separation (each with a shared key constraint): 
-   - Same vs. other columns
-   - Adjacent vs. 2-column separation
-   - Adjacent vs. 3-column separation
+   - Same vs. other (no row control)
+   - Adjacent vs. distant (with row controls, where distant includes both 2 and 3 column separations)
+   - Plus reach vs hurdle controlled for column patterns
 4. Inward vs outward roll: Preference for finger movement direction using same key pairs
    - Constrained comparison: same two keys in both directions (e.g., 'df' vs 'fd')
    - Inward roll: increasing finger numbers (pinky → index)
@@ -774,12 +774,15 @@ class MOOObjectiveAnalyzer:
                     'analysis_type': 'column_comparison'
                 })
 
-            # Block 2: Adjacent vs distant (WITH row constraints) 
-            elif (chosen_row_sep == unchosen_row_sep and 
-                self._bigrams_share_one_key(chosen, unchosen) and
-                ({chosen_col_sep, unchosen_col_sep} == {1, 2} or {chosen_col_sep, unchosen_col_sep} == {1, 3})):
+            # Block 2: Adjacent (1) vs Distant (2-3) columns - WITH row controls
+            if (chosen_row_sep == unchosen_row_sep and  # Same row separation
+                self._bigrams_share_one_key(chosen, unchosen) and  # Share one key
+                ((chosen_col_sep == 1 and unchosen_col_sep >= 2) or  # Adjacent vs distant
+                (chosen_col_sep >= 2 and unchosen_col_sep == 1))):
                 
-                # Define row pattern
+                chose_smaller = 1 if chosen_col_sep == 1 else 0  # 1 = chose adjacent
+                
+                # Determine row pattern for sub-analysis
                 if chosen_row_sep == 0:
                     row_pattern = "same_row"
                 elif chosen_row_sep == 1:
@@ -787,26 +790,56 @@ class MOOObjectiveAnalyzer:
                 elif chosen_row_sep == 2:
                     row_pattern = "hurdle_2_apart"
                 else:
-                    row_pattern = None
+                    row_pattern = f"row_sep_{chosen_row_sep}"
+                
+                comparison_type = f"adjacent_vs_distant_{row_pattern}"
+                
+                instances.append({
+                    'user_id': row['user_id'],
+                    'chosen_bigram': chosen,
+                    'unchosen_bigram': unchosen,
+                    'row_pattern': row_pattern,
+                    'comparison_type': comparison_type,
+                    'chose_smaller_separation': chose_smaller,
+                    'chosen_col_separation': chosen_col_sep,
+                    'unchosen_col_separation': unchosen_col_sep,
+                    'chosen_row_separation': chosen_row_sep,
+                    'unchosen_row_separation': unchosen_row_sep,
+                    'analysis_type': 'column_comparison'
+                })
 
-                if row_pattern:
-                    chose_smaller = 1 if chosen_col_sep == 1 else 0
-                    comparison_type = f"adjacent_vs_distant_{row_pattern}"
-                    
-                    instances.append({
-                        'user_id': row['user_id'],
-                        'chosen_bigram': chosen,
-                        'unchosen_bigram': unchosen,
-                        'row_pattern': row_pattern,
-                        'comparison_type': comparison_type,
-                        'chose_smaller_separation': chose_smaller,
-                        'chosen_col_separation': chosen_col_sep,
-                        'unchosen_col_separation': unchosen_col_sep,
-                        'chosen_row_separation': chosen_row_sep,
-                        'unchosen_row_separation': unchosen_row_sep,
-                        'analysis_type': 'column_comparison'
-                    })
-                    
+            # Block 2b: Adjacent vs Distant - NO shared key constraint
+            if (chosen_row_sep == unchosen_row_sep and  # Same row separation
+                ((chosen_col_sep == 1 and unchosen_col_sep >= 2) or
+                (chosen_col_sep >= 2 and unchosen_col_sep == 1))):
+                
+                chose_smaller = 1 if chosen_col_sep == 1 else 0
+                
+                if chosen_row_sep == 0:
+                    row_pattern = "same_row"
+                elif chosen_row_sep == 1:
+                    row_pattern = "reach_1_apart"
+                elif chosen_row_sep == 2:
+                    row_pattern = "hurdle_2_apart"
+                else:
+                    row_pattern = f"row_sep_{chosen_row_sep}"
+                
+                comparison_type = f"adjacent_vs_distant_{row_pattern}_no_shared_key"
+                
+                instances.append({
+                    'user_id': row['user_id'],
+                    'chosen_bigram': chosen,
+                    'unchosen_bigram': unchosen,
+                    'row_pattern': row_pattern,
+                    'comparison_type': comparison_type,
+                    'chose_smaller_separation': chose_smaller,
+                    'chosen_col_separation': chosen_col_sep,
+                    'unchosen_col_separation': unchosen_col_sep,
+                    'chosen_row_separation': chosen_row_sep,
+                    'unchosen_row_separation': unchosen_row_sep,
+                    'analysis_type': 'column_comparison'
+                })
+                
             # Row comparisons (reach vs hurdle) with identical column separation and 1 shared key
             if chosen_col_sep == unchosen_col_sep:
                 # Test: Reach (1 row) vs Hurdle (2 rows) for each column separation level
@@ -840,7 +873,40 @@ class MOOObjectiveAnalyzer:
                         'unchosen_row_separation': unchosen_row_sep,
                         'analysis_type': 'row_comparison'
                     })
-        
+
+            # Row comparisons (reach vs hurdle) with identical column separation and NO shared key constraint
+            if chosen_col_sep == unchosen_col_sep:
+                # Test: Reach (1 row) vs Hurdle (2 rows) for each column separation level
+                if {chosen_row_sep, unchosen_row_sep} == {1, 2}:
+
+                    chose_smaller_row = 1 if chosen_row_sep == 1 else 0  # 1 = chose reach, 0 = chose hurdle
+
+                    # Define column separation category for clearer reporting
+                    if chosen_col_sep == 0:
+                        col_category = "same_column"
+                    elif chosen_col_sep == 1:
+                        col_category = "adjacent_columns"
+                    elif chosen_col_sep >= 2:  # Combine 2 and 3 into distant
+                        col_category = "distant_columns"
+                    else:
+                        col_category = f"col_sep_{chosen_col_sep}"
+                    
+                    comparison_type = f"reach_vs_hurdle_{col_category}_no_shared_key"
+                    
+                    instances.append({
+                        'user_id': row['user_id'],
+                        'chosen_bigram': chosen,
+                        'unchosen_bigram': unchosen,
+                        'row_pattern': None,  # Not applicable for this analysis
+                        'comparison_type': comparison_type,
+                        'chose_smaller_separation': chose_smaller_row,  # For row analysis, smaller = reach
+                        'chosen_col_separation': chosen_col_sep,
+                        'unchosen_col_separation': unchosen_col_sep,
+                        'chosen_row_separation': chosen_row_sep,
+                        'unchosen_row_separation': unchosen_row_sep,
+                        'analysis_type': 'row_comparison'
+                    })
+
         return pd.DataFrame(instances)
         
     def _analyze_column_separation(self) -> Dict[str, Any]:
@@ -895,7 +961,7 @@ class MOOObjectiveAnalyzer:
             else:
                 logger.info(f"Skipped column analysis - {comp_type}: only {len(comp_data)} instances (need >= min_threshold)")
         
-        # Analysis by comparison type - ROW COMPARISONS (NEW!)
+        # Analysis by comparison type - ROW COMPARISONS
         row_pattern_results = {}
         for comp_type in row_instances['comparison_type'].unique():
             comp_data = row_instances[row_instances['comparison_type'] == comp_type]
