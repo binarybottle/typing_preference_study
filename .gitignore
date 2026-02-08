@@ -1,5 +1,6 @@
 input
 output
+token.json
 
 vite-project
 package-lock.json
