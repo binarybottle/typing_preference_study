@@ -1,38 +1,59 @@
-# bigram-typing-comfort-experiment
-Arno Klein: binarybottle GitHub name 
-bigram-typing-comfort-experiment GitHub repo
-(heavily modified from jspsych-typing repo)
+# Installation
 
-## README
+## Prerequisites
 
-The code takes in a list of bigram pairs and presents, and for each pair,
-presents each bigram in a web browser and instructs the user to type the 
-bigram three times in a row. Once both bigrams are typed three times in a row
-correctly, the user is asked to choose which is easier (more comfortable) to type.
-All timing and selection data are saved to OSF.io and return codes sent to Prolific.
-er
-## Build 
+- Node.js >= 18.x (on your local machine only)
 
-Installation steps for either local/remote hosting:
+## Local Development
 
-1. Clone the project's repository (``git clone git@github.com:binarybottle/bigram-typing-preference-study.git``)
-2. ``cd bigram-typing-comfort-experiment``
-3. Make sure you have ``Node.js >= 18.x``
-4. Run ``npm install`` to install the necessary dependencies
-5. ``npm install vite``
-6. ``npm install jspsych @jspsych/plugin-html-button-response @jspsych/plugin-html-keyboard-response @jspsych/plugin-survey-multi-choice``
+```bash
+git clone git@github.com:binarybottle/facets_constructs.git
+cd facets_constructs/study
+npm install
+npm run dev
+```
 
-Run the experiment locally:
+Visit the URL shown (e.g., `http://localhost:8082/...`) to preview.
 
-7. Run ``npm run dev`` to start the preview server
-8. Visit ``localhost:8080`` in your browser to preview the project.
+## Remote Production Deployment
 
-Remote production (with vite):
+Build locally, then upload static files (no Node.js needed on server):
 
-7. Add ``base: '/typing/bigram-prolific-study/',`` to vite.config.js
-8. ``export STUDY='/home/binarybottle/arnoklein.info/typing/bigram-prolific-study'``
-8. ``mkdir $STUDY``
-9. ``cp ./token.json $STUDY/``
-10. ``cp -R bigram_tables $STUDY/``
-11. ``npm run build``
-12. ``cp -R dist/* $STUDY/``
+```bash
+# 1. Build locally
+cd /Users/arno/Software/facets_constructs/study
+npm run build
+
+# 2. Set remote path
+export STUDY='/home/binarybottle/arnoklein.info/facets/facets_study'
+
+# 3. Create directory and upload
+ssh binarybottle@arnoklein.info "mkdir -p $STUDY"
+scp -r dist/* binarybottle@arnoklein.info:$STUDY/
+scp token.json binarybottle@arnoklein.info:$STUDY/
+scp -r data binarybottle@arnoklein.info:$STUDY/
+```
+
+## Vite Configuration
+
+If deploying to a subdirectory, update `vite.config.js`:
+
+```javascript
+export default {
+  base: '/facets/facets_study/',
+}
+```
+
+The `base` path should match your server's URL path.
+
+## Files Required on Server
+
+After deployment, the server directory should contain:
+```
+facets_study/
+├── index.html
+├── assets/          # Built JS/CSS
+├── data/
+│   └── items.csv
+└── token.json       # OSF API token (for data upload)
+```

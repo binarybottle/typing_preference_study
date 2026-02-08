@@ -1,59 +1,34 @@
-/* Typing experiment -- See README.md and INSTALL.md */
+/* Teacher Quality Assessment Study -- Forced-choice pairs */
 import { initJsPsych } from 'jspsych';
 import htmlButtonResponse from '@jspsych/plugin-html-button-response';
-import htmlKeyboardResponse from '@jspsych/plugin-html-keyboard-response';
 import 'jspsych/css/jspsych.css';
 
 // Initialize jsPsych
 const jsPsych = initJsPsych();
 
-// Global variables and configuration
+// Experiment configuration
 let experimentConfig = {
-  practiceOnly: false,  // If true, only run the practice set
-  nbigramRepetitions: 1,  // 2 in studies 1-8, 1 in study 9:number of repetitions of each bigram
-  ncharacters: 1,  // 3 in studies 1-6, 2 in study 7, 1 in studies 8-9: number of random characters (from character_list) preceding each block of bigrams 
-  character_list: 'abcdefghijklmnopqrstuvwxyz',  // 'abcdefghijklmnopqrstuvwxyz,./', // Default list of characters
-  trainingBigramFile: 'bigram_tables/study2/bigram_1pair_easy_choice_LH_noheader.csv',  // Default filename for training bigram pairs
-  //study1: nbigramRepetitions: 3,  // number of repetitions of each bigram
-  //study1: ncharacters: 5,  // number of random characters (from character_list) preceding each block of bigrams 
-  //study1: trainingBigramFile: 'bigram_tables/study1/bigram_3pairs_LH.csv',  // Default filename for training bigram pairs
-  //study1: mainBigramFile: 'bigram_tables/study1/bigram_2x11tests_5easy_LH.csv',  // Default filename for main bigram pairs
-  //study2A: mainBigramFile: 'bigram_tables/study2/bigram_2x35pairs_set1_LH.csv',  // Default filename for main bigram pairs
-  //study2B: mainBigramFile: 'bigram_tables/study2/bigram_2x35pairs_set2_LH.csv',  // Default filename for main bigram pairs
-  //study3: mainBigramFile: 'bigram_tables/study3/bigram_2x35pairs_LH.csv',  // Default filename for main bigram pairs
-  //study4: mainBigramFile: 'bigram_tables/study4/bigram_2x35pairs_LH.csv',  // Default filename for main bigram pairs
-  //study5: mainBigramFile: 'bigram_tables/study5/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
-  //study6: mainBigramFile: 'bigram_tables/study6/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
-  //study7: mainBigramFile: 'bigram_tables/study7/bigram_2x50pairs_LH.csv',  // Default filename for main bigram pairs
-  //study8: mainBigramFile: 'bigram_tables/study8/bigram_2x38pairs_LH.csv',  // Default filename for main bigram pairs
-  mainBigramFile: 'bigram_tables/study9/bigram_2x34pairs_LH.csv',  // Default filename for main bigram pairs
-  randomizePairOrder: true,  // If true, randomize the order of bigram pairs
-  randomizeBigramsWithinPairs: false,  // If true, randomize the sequence of bigrams within each pair
-  useTimer: false,  // If true, use a timer (untested)
-  timeLimit: 10,  // Timer default time limit of 10 seconds for the entire experiment (untested)
+  numTrials: 10,  // Number of forced-choice pairs to present
+  itemsFile: 'data/items.csv',  // CSV with Items, Synonym 1, Synonym 2, Synonym 3
 };
 
 // OSF and server configuration
-const osfNodeId = "jf8sc";
-
-let experimentStartTime;
-let timerInterval;
+const osfNodeId = "dcv5z";
 
 // Prolific completion URL with placeholder for the completion code
 const PROLIFIC_COMPLETION_URL = "https://app.prolific.co/submissions/complete?cc=";
-const COMPLETION_CODE = "C1CL3V94";
-const NO_CONSENT_CODE = "C15846F6";
+const COMPLETION_CODE = "C1NWOX09";
+const NO_CONSENT_CODE = "C1O763HF";
 
 // Get Prolific ID from URL parameters
 let prolificID = '';
 function getUrlParam(name) {
-    const urlParams = new URLSearchParams(window.location.search);
-    return urlParams.get(name);
+  const urlParams = new URLSearchParams(window.location.search);
+  return urlParams.get(name);
 }
 prolificID = getUrlParam('PROLIFIC_PID') || 'unknown';
 if (!prolificID || prolificID === 'unknown') {
   console.warn("Warning: Prolific ID is not available. Proceeding with 'unknown' ID.");
-  // The experiment will continue with an 'unknown' Prolific ID
 }
 
 // Function to redirect to Prolific
@@ -75,32 +50,101 @@ async function loadOSFToken() {
   }
 }
 
-// Load bigram pairs from a CSV file or text source
-async function loadBigramPairs(trainingFile, mainFile) {
-  async function loadFile(filename) {
-    try {
-      const response = await fetch(`./${filename}`);
-      const csvText = await response.text();
-      return csvText.split('\n').map(row => row.trim()).filter(row => row)
-        .map(row => {
-          return row.match(/(".*?"|[^,]+)(?=\s*,|\s*$)/g)
-                    .map(entry => entry.replace(/^"(.*)"$/, '$1').trim());
+// Load items from CSV file
+async function loadItems(filename) {
+  try {
+    const response = await fetch(`./${filename}`);
+    const csvText = await response.text();
+    const lines = csvText.split('\n').map(row => row.trim()).filter(row => row);
+    
+    // Skip header row
+    const dataLines = lines.slice(1);
+    
+    const items = [];
+    const allTerms = []; // All items + all synonyms for random selection
+    
+    dataLines.forEach((line, index) => {
+      // Parse CSV properly handling quoted fields
+      const cols = line.match(/(".*?"|[^,]+)(?=\s*,|\s*$)/g) || [];
+      const cleanCols = cols.map(c => c.replace(/^"(.*)"$/, '$1').trim());
+      
+      const item = cleanCols[0] || '';
+      const syn1 = cleanCols[1] || '';
+      const syn2 = cleanCols[2] || '';
+      const syn3 = cleanCols[3] || '';
+      
+      if (item) {
+        items.push({
+          name: item,
+          synonyms: [syn1, syn2, syn3].filter(s => s)
         });
-    } catch (error) {
-      console.error(`Error loading ${filename}:`, error);
-      return [];
+        
+        // Add item and all its synonyms to the pool
+        allTerms.push({ term: item, isItem: true, sourceItem: item });
+        if (syn1) allTerms.push({ term: syn1, isItem: false, sourceItem: item });
+        if (syn2) allTerms.push({ term: syn2, isItem: false, sourceItem: item });
+        if (syn3) allTerms.push({ term: syn3, isItem: false, sourceItem: item });
+      }
+    });
+    
+    console.log(`Loaded ${items.length} items with ${allTerms.length} total terms`);
+    return { items, allTerms };
+  } catch (error) {
+    console.error(`Error loading ${filename}:`, error);
+    return { items: [], allTerms: [] };
+  }
+}
+
+// Generate random pairs for the experiment
+function generateRandomPairs(items, allTerms, numPairs) {
+  const pairs = [];
+  const usedPairs = new Set();
+  
+  for (let i = 0; i < numPairs; i++) {
+    let attempts = 0;
+    let validPair = false;
+    
+    while (!validPair && attempts < 100) {
+      attempts++;
+      
+      // Pick a random item
+      const item1 = items[Math.floor(Math.random() * items.length)];
+      
+      // Pick a random term (could be another item or any synonym, including from same source)
+      // Just exclude the exact same term
+      const eligibleTerms = allTerms.filter(t => t.term !== item1.name);
+      if (eligibleTerms.length === 0) continue;
+      
+      const term2 = eligibleTerms[Math.floor(Math.random() * eligibleTerms.length)];
+      
+      // Create a unique key for this pair (order-independent)
+      const pairKey = [item1.name, term2.term].sort().join('|||');
+      
+      if (!usedPairs.has(pairKey)) {
+        usedPairs.add(pairKey);
+        
+        // Randomize left/right position
+        if (Math.random() < 0.5) {
+          pairs.push({
+            left: { term: item1.name, isItem: true, sourceItem: item1.name },
+            right: term2
+          });
+        } else {
+          pairs.push({
+            left: term2,
+            right: { term: item1.name, isItem: true, sourceItem: item1.name }
+          });
+        }
+        validPair = true;
+      }
     }
   }
-
-  const introductoryPairs = await loadFile(trainingFile);
-  const mainPairs = await loadFile(mainFile);
-
-  return { introductoryPairs, mainPairs };
+  
+  return pairs;
 }
 
 // Function to create and update a progress counter
 function createProgressCounter() {
-  // Remove any existing counter first
   const existingCounter = document.getElementById('progress-counter');
   if (existingCounter) {
     existingCounter.remove();
@@ -125,22 +169,13 @@ function createProgressCounter() {
   document.body.appendChild(counterContainer);
 }
 
-// Function to update the progress counter
-function updateProgressCounter(currentTrial, totalTrials) {
+function updateProgressCounter(current, total) {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
-    counterContainer.textContent = `Trial ${currentTrial} of ${totalTrials}`;
-  } else {
-    // Recreate if missing
-    createProgressCounter();
-    const newCounter = document.getElementById('progress-counter');
-    if (newCounter) {
-      newCounter.textContent = `Trial ${currentTrial} of ${totalTrials}`;
-    }
+    counterContainer.textContent = `${current} of ${total}`;
   }
 }
 
-// Function to hide the progress counter
 function hideProgressCounter() {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
@@ -148,51 +183,64 @@ function hideProgressCounter() {
   }
 }
 
-// Function to show the progress counter
 function showProgressCounter() {
   const counterContainer = document.getElementById('progress-counter');
   if (counterContainer) {
     counterContainer.style.display = 'block';
   } else {
-    // Recreate if missing
     createProgressCounter();
   }
 }
 
-// global styles for the experiment
+// Global styles
 function setGlobalStyles() {
   const style = document.createElement('style');
   style.textContent = `
     .jspsych-content {
       max-width: 90% !important;
-      font-size: 24px !important;
+      font-size: 20px !important;
     }
     .jspsych-btn {
-      font-size: 20px !important;
-      padding: 15px 25px !important;
-      margin: 10px !important;
+      font-size: 18px !important;
+      padding: 15px 30px !important;
+      margin: 15px !important;
+      min-width: 200px;
     }
-    #timer {
-      position: fixed;
-      top: 10px;
-      right: 20px;
+    .choice-btn {
+      font-size: 22px !important;
+      padding: 20px 40px !important;
+      margin: 20px !important;
+      min-width: 250px;
+      background-color: #f0f0f0;
+      border: 2px solid #ccc;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .choice-btn:hover {
+      background-color: #e0e0e0;
+      border-color: #999;
+      transform: scale(1.02);
+    }
+    .prompt-text {
+      font-size: 24px;
+      margin-bottom: 40px;
+      color: #333;
+      line-height: 1.5;
+    }
+    .vs-text {
       font-size: 20px;
-      color: #000;
+      color: #666;
+      margin: 0 20px;
     }
-    .slider-container {
+    .choice-container {
       display: flex;
-      align-items: center;
       justify-content: center;
-      margin: 20px 0;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+      margin-top: 30px;
     }
-    .slider {
-      width: 300px;
-      margin: 0 10px;
-    }
-    .slider.inactive {
-      opacity: 0.5;
-    }
-    /* Styles for the thank you screen */
     .thank-you-container {
       text-align: center;
       max-width: 800px;
@@ -226,7 +274,6 @@ function setGlobalStyles() {
     .thank-you-button:hover {
       background-color: #2980b9;
     }
-    /* Animation for checkmark */
     @keyframes checkmark {
       0% { transform: scale(0); opacity: 0; }
       50% { transform: scale(1.2); opacity: 1; }
@@ -257,404 +304,181 @@ function setGlobalStyles() {
   document.head.appendChild(style);
 }
 
-// Consent trial
+// Consent trial for teacher participants
 const consentTrial = {
   type: htmlButtonResponse,
   stimulus: `
-    <div class='instruction' style='text-align: left; max-width: 800px; margin: 0 auto;'> 
-      <h2 style='text-align: center;'>Welcome</h2>
-      <dl>
-          <dt>Purpose</dt>
-          <dd>The purpose of this study is to determine how comfortable different letter pairs 
-          are to type on a computer keyboard to inform the design of future keyboard layouts.</dd>
+    <div class='instruction' style='text-align: left; max-width: 700px; margin: 0 auto; font-size: 14px;'> 
+      <h2 style='text-align: center; font-size: 22px;'>Welcome</h2>
+      <dl style='line-height: 1.4;'>
+          <dt style='font-weight: bold; margin-top: 10px;'>Purpose</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>This study is designed to understand which factors teachers consider to be the most important aspects of their students’ development and functioning.  Your responses will help inform the development of educational assessment tools.</dd>
 
-          <dt>Expectations</dt>
-          <dd>It is expected that you will be <b>touch typing</b> on a <b>QWERTY desktop computer keyboard</b>.</dd>
+          <dt style='font-weight: bold; margin-top: 10px;'>Eligibility</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>You must be a <b>current or former teacher</b> to participate in this study.</dd>
 
-          <dt>Procedures</dt>
-          <dd>If you choose to participate, you will be repeatedly asked to type two new pairs 
-          of letters and report which pair is easier (more comfortable) to type. </dd>
+          <dt style='font-weight: bold; margin-top: 10px;'>Procedures</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>You will be presented with pairs of student qualities (such as "Self-Control" vs. "Empathy") and asked to choose which of the two you consider to be a more relevant characteristic of students with whom  you work. You will be presented with pairs of student qualities (such as "Self-Control" vs. "Empathy") and asked to choose which of the two you consider to be a more relevant and important characteristic of students with whom you work. We value your experience and are interested in your considered professional judgment about each pair.</dd>
 
-          <dt>Risks</dt>
-          <dd>There are no anticipated risks or discomforts from this research that 
-          you would not normally have when typing on your own keyboard.</dd>
+          <dt style='font-weight: bold; margin-top: 10px;'>Duration</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>This study takes approximately 3-5 minutes to complete.</dd>
 
-          <dt>Benefits</dt>
-          <dd>There are no anticipated benefits to you from this research.</dd>
+          <dt style='font-weight: bold; margin-top: 10px;'>Risks</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>There are no anticipated risks or discomforts from this research.</dd>
 
-          <dt>Compensation</dt>
-          <dd>If you decide to participate, you will be compensated for your participation.</dd>
+          <dt style='font-weight: bold; margin-top: 10px;'>Benefits</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>Your participation will contribute to improving how we understand and assess important elements of youth development, function, and personal qualities.</dd>
 
-          <dt>Participation</dt>
-          <dd>Taking part or not in this research study is your decision. 
-          You can decide to participate and then change your mind at any point.</dd>
+          <dt style='font-weight: bold; margin-top: 10px;'>Compensation</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>If you decide to participate, you will be compensated for your participation as described in the Prolific study listing.</dd>
 
-          <dt>Contact Information</dt>
-          <dd>If you have any questions about the purpose, procedures, or any other issues 
-          related to this research study you may contact the Principal Investigator, 
-          Dr. Arno Klein, at arno.klein@childmind.org. </dd>
+          <dt style='font-weight: bold; margin-top: 10px;'>Participation</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>Taking part in this research study is your decision. You can decide to participate and then change your mind at any point.</dd>
+
+          <dt style='font-weight: bold; margin-top: 10px;'>Contact</dt>
+          <dd style='margin-left: 0; margin-bottom: 8px;'>If you have any questions about the purpose, procedures, or any other issues related to this research study you may contact the Principal Investigator, Dr. Arno Klein, at arno.klein@childmind.org.</dd>
       </dl>
-      <p style='text-align: center; font-weight: bold; margin-top: 20px;'>
-        Do you consent to participate in this study? <br> You must be 18 years of age or older to participate.
+      <p style='text-align: center; font-weight: bold; margin-top: 15px; font-size: 15px;'>
+        Do you consent to participate in this study? <br><span style='font-weight: normal;'>You must be 18 years of age or older to participate.</span>
       </p>
     </div>
   `,
   choices: ["I consent", "I do not consent"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
+  button_html: '<button class="jspsych-btn" style="font-size: 14px; padding: 8px 18px; margin: 0 10px;">%choice%</button>',
   on_load: function() {
     hideProgressCounter();
   },
   on_finish: function(data) {
-    if (data.response === 1) {  // "I do not consent" is selected
+    if (data.response === 1) {  // "I do not consent"
       redirectToProlific(NO_CONSENT_CODE);
     }
   }
 };
 
-// First informational page
-const keyboardLayoutInfo = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class='instruction'> 
-      <p>It is expected that your keyboard has the following character layout:</p>
-      <div style="display: flex; justify-content: center; margin: 20px 0;">
-        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/qwerty-layout.jpg" width="500" style="max-width: 100%;">
-      </div>
-    </div>
-  `,
-  choices: ["Next >"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
-  on_load: function() {
-    hideProgressCounter();
-  }
-};
-
-// Second informational page
-const typingInstructionsInfo = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class='instruction'> 
-      <p>You will be asked to <strong>touch type</strong> text containing pairs of letters.
-         Touch type as you normally would, with left fingers above the home row letters 
-         <span style="white-space: nowrap;"><span id=keystroke>A</span><span id=keystroke>S</span><span id=keystroke>D</span><span id=keystroke>F</span></span>
-         and right fingers above the home row letters 
-         <span style="white-space: nowrap;"><span id=keystroke>J</span><span id=keystroke>K</span><span id=keystroke>L</span><span id=keystroke>;</span></span>
-         </p>
-      <div style="display: flex; justify-content: center; margin: 20px 0;">
-        <img src="https://binarybottle.com/typing/bigram-typing-comfort-experiment/images/touchtype.jpg" width="500" style="max-width: 100%;">
-      </div>
-      <p>After typing the text, you will slide a slider bar <b>closer to the letter pair that felt easier for you to type</b>.</p>
-    </div>
-  `,
-  choices: ["Next >"],
-  button_html: '<button class="jspsych-btn" style="font-size: 16px; padding: 10px 20px; margin: 0 10px;">%choice%</button>',
-  on_load: function() {
-    hideProgressCounter();
-  }
-};
-
-// Function to generate random text with spaces
-function generateRandomText(ncharacters, character_list) {
-  let text = '';
-  let nextSpace = 5 + Math.floor(Math.random() * 4); // 5-8 characters
-  for (let i = 0; i < ncharacters; i++) {
-    if (i === nextSpace) {
-      text += ' ';
-      nextSpace = i + 5 + Math.floor(Math.random() * 4);
-    } else {
-      text += character_list[Math.floor(Math.random() * character_list.length)];
-    }
-  }
-  return text.replace(/\s+/g, ' ').trim(); // Ensure only single spaces and trim any leading/trailing spaces
-}
-
-// Add a function to track trial progress and update the progress counter
-let completedTrials = 0;
-let totalTrials = 0;
-
-function updateTrialProgress() {
-  completedTrials++;
-  updateProgressCounter(completedTrials, 76);
-}
-
-// createTypingTrial function tracks progress
-function createTypingTrial(bigram1, bigram2, trialId) {
-  // Existing code remains the same
-  const text1 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
-  const text2 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
-  const text3 = generateRandomText(experimentConfig.ncharacters, experimentConfig.character_list);
-  const bigramRepetition1 = (bigram1 + ' ').repeat(experimentConfig.nbigramRepetitions).trim();
-  const bigramRepetition2 = (bigram2 + ' ').repeat(experimentConfig.nbigramRepetitions).trim();
-  const alternatingBigrams = ((bigram1 + ' ' + bigram2 + ' ').repeat(experimentConfig.nbigramRepetitions)).trim();
-  
-  const fullText = `${text1} ${bigramRepetition1} ${text2} ${bigramRepetition2} ${text3} ${alternatingBigrams}`.replace(/\s+/g, ' ');
-  
-  let typedSequence = "";
-  let keyData = [];
-  const trialStartTime = performance.now();
-
-  function handleKeyPress(event) {
-    let typedKey = event.key.toLowerCase();
-    const expectedKey = fullText[typedSequence.length];
-    const keydownTime = performance.now() - trialStartTime;
-
-    if (event.key === 'Shift' || event.key.length > 1) {
-      return;
-    }
-
-    const isCorrect = typedKey === expectedKey;
-    
-    keyData.push({
-      expectedKey: expectedKey,
-      typedKey: typedKey,
-      isCorrect: isCorrect,
-      keydownTime: keydownTime.toFixed(2)
-    });
-
-    if (isCorrect) {
-      typedSequence += typedKey;
-
-      if (typedSequence === fullText) {
-        showSlider(bigram1, bigram2, trialId, fullText, keyData);
-      }
-    }
-
-    updateDisplay();
-  }
-
-  function updateDisplay() {
-    document.getElementById('text-to-type').innerHTML = fullText.split('').map((char, index) => {
-      const isBigram = (fullText.substr(index, 2) === bigram1 || fullText.substr(index, 2) === bigram2 ||
-                        fullText.substr(index - 1, 2) === bigram1 || fullText.substr(index - 1, 2) === bigram2);
-      const isTyped = index < typedSequence.length;
-      const style = [];
-      
-      if (isBigram) {
-        style.push('font-weight: bold');
-      }
-      
-      if (isTyped) {
-        if (isBigram) {
-          style.push('color: #8B0000');  // Darker gray for typed bigrams
-        } else {
-          style.push('color: #A52A2A');  // Lighter gray for other typed text
-        }
-      }
-      
-      return `<span class="letter" style="${style.join(';')}">${char}</span>`;
-    }).join('');
-  }
-
+// Create a forced-choice trial
+function createChoiceTrial(pair, trialIndex, totalTrials) {
   return {
-    type: htmlKeyboardResponse,
+    type: htmlButtonResponse,
     stimulus: `
-      <div class="jspsych-content-wrapper">
-        <div class="jspsych-content">
-          <p>Type the following text <br><i>with spaces!</i>:</p>
-          <p id="text-to-type" style="font-size: 24px; letter-spacing: 2px; white-space: pre-wrap;"></p>
-        </div>
-      </div>`,
-    choices: "NO_KEYS",
+      <div style="text-align: center;">
+        <p class="prompt-text">
+          When considering your students,<br>
+          which of the two presented terms<br>
+          represents what is more relevant and important<br>
+          for you to understand/assess?<br>
+          <br>
+          Please use your professional judgment<br>
+          to provide your best estimate of which term<br>
+          in each pair is most important.
+        </p>
+      </div>
+    `,
+    choices: [pair.left.term, pair.right.term],
+    button_html: '<button class="choice-btn">%choice%</button>',
     on_load: function() {
-      document.addEventListener('keydown', handleKeyPress);
-      updateDisplay();
-      showProgressCounter(); // Show progress counter for typing trials
+      showProgressCounter();
+      updateProgressCounter(trialIndex + 1, totalTrials);
     },
     on_finish: function(data) {
-      document.removeEventListener('keydown', handleKeyPress);
-    },
-    // Add data about the current trial for progress tracking
-    data: {
-      trial_id: trialId
+      const chosenIndex = data.response;
+      const chosen = chosenIndex === 0 ? pair.left : pair.right;
+      const unchosen = chosenIndex === 0 ? pair.right : pair.left;
+      
+      data.task = 'forced_choice';
+      data.trial_index = trialIndex;
+      data.left_term = pair.left.term;
+      data.left_is_item = pair.left.isItem;
+      data.left_source = pair.left.sourceItem;
+      data.right_term = pair.right.term;
+      data.right_is_item = pair.right.isItem;
+      data.right_source = pair.right.sourceItem;
+      data.chosen_term = chosen.term;
+      data.chosen_is_item = chosen.isItem;
+      data.chosen_source = chosen.sourceItem;
+      data.unchosen_term = unchosen.term;
+      data.unchosen_is_item = unchosen.isItem;
+      data.unchosen_source = unchosen.sourceItem;
+      data.response_time = data.rt;
     }
   };
 }
 
-// Update the showSlider function to update progress
-function showSlider(bigram1, bigram2, trialId, fullText, keyData) {
-  const sliderHtml = `
-    <p>Which was easier to type?</p>
-    <div class="slider-container">
-      <span>${bigram1}</span>
-      <input type="range" min="-100" max="100" value="0" class="slider" id="comfortSlider">
-      <span>${bigram2}</span>
+// Thank you trial
+const thankYouTrial = {
+  type: htmlButtonResponse,
+  stimulus: `
+    <div class="thank-you-container">
+      <div class="checkmark"></div>
+      <h2 class="thank-you-title">Thank You!</h2>
+      <p class="thank-you-message">
+        Thank you for your participation in this study!<br>
+        Your responses will help us understand what qualities teachers value in their students.<br><br>
+        All of your data has been successfully recorded.
+      </p>
     </div>
-    <button id="nextButton" style="display: none;">Next</button>
-  `;
-
-  document.querySelector('.jspsych-content').innerHTML += sliderHtml;
-
-  const slider = document.getElementById('comfortSlider');
-  const nextButton = document.getElementById('nextButton');
-
-  function activateSlider() {
-    if (!slider.classList.contains('active')) {
-      slider.classList.add('active');
-      nextButton.style.display = 'block';
-    }
+  `,
+  choices: ["Complete Study"],
+  button_html: '<button class="thank-you-button">%choice%</button>',
+  on_load: function() {
+    hideProgressCounter();
+  },
+  on_finish: function() {
+    endExperiment();
   }
+};
 
-  slider.addEventListener('mousedown', activateSlider);
-  slider.addEventListener('touchstart', activateSlider);
-  slider.addEventListener('input', activateSlider);
-
-  nextButton.addEventListener('click', function() {
-    let sliderValue = parseInt(slider.value);
-    
-    let chosenBigram, unchosenBigram;
-    if (sliderValue === 0) {
-      // Randomly choose if the slider is at 0
-      if (Math.random() < 0.5) {
-        chosenBigram = bigram1;
-        unchosenBigram = bigram2;
-        sliderValue = -1;  // Slight preference for the left bigram
-      } else {
-        chosenBigram = bigram2;
-        unchosenBigram = bigram1;
-        sliderValue = 1;  // Slight preference for the right bigram
-      }
-    } else {
-      chosenBigram = sliderValue < 0 ? bigram1 : bigram2;
-      unchosenBigram = sliderValue < 0 ? bigram2 : bigram1;
-    }
-
-    const bigramData = calculateBigramTimes(keyData, bigram1, bigram2);
-    
-    // Update progress counter with hardcoded value
-    completedTrials++;
-    updateProgressCounter(completedTrials, 76);
-    
-    jsPsych.finishTrial({
-      task: 'typing_and_choice',
-      trialId: trialId,
-      text: fullText,
-      sliderValue: sliderValue,
-      chosenBigram: chosenBigram,
-      unchosenBigram: unchosenBigram,
-      chosenBigramTime: bigramData[chosenBigram].medianTime,
-      unchosenBigramTime: bigramData[unchosenBigram].medianTime,
-      chosenBigramCorrect: bigramData[chosenBigram].correctCount,
-      unchosenBigramCorrect: bigramData[unchosenBigram].correctCount,
-      keyData: keyData
-    });
-  });
-}
-
-function calculateBigramTimes(keyData, bigram1, bigram2) {
-  const bigramTimes = {
-    [bigram1]: [],
-    [bigram2]: []
-  };
-  const bigramCorrect = {
-    [bigram1]: 0,
-    [bigram2]: 0
-  };
-
-  for (let i = 0; i < keyData.length - 1; i++) {
-    const currentBigram = keyData[i].typedKey + keyData[i+1].typedKey;
-    if ((currentBigram === bigram1 || currentBigram === bigram2) && 
-        keyData[i].isCorrect && keyData[i+1].isCorrect) {
-      const time = keyData[i+1].keydownTime - keyData[i].keydownTime;
-      bigramTimes[currentBigram].push(parseFloat(time));
-      bigramCorrect[currentBigram]++;
-    }
-  }
-
-  return {
-    [bigram1]: {
-      medianTime: calculateMedian(bigramTimes[bigram1]),
-      correctCount: bigramCorrect[bigram1]
-    },
-    [bigram2]: {
-      medianTime: calculateMedian(bigramTimes[bigram2]),
-      correctCount: bigramCorrect[bigram2]
-    }
-  };
-}
-
-function calculateMedian(arr) {
-  if (arr.length === 0) return null;
-  const sorted = arr.sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-// Function to escape commas and wrap fields in quotes if necessary
-function escapeCSVField(field) {
-  if (typeof field === 'string' && field.includes(',')) {
-    return `"${field.replace(/"/g, '""')}"`;  // Escape double quotes by doubling them
-  }
-  return field;
-}
-
-// Function to convert data to CSV format
+// Convert data to CSV format
 function convertToCSV(data) {
-  try {
-    const rawHeaders = ['user_id', 'trialId', 'expectedKey', 'typedKey', 'isCorrect', 'keydownTime'];
-    const summaryHeaders = ['user_id', 'trialId', 'text', 'sliderValue', 'chosenBigram', 'unchosenBigram', 'chosenBigramTime', 'unchosenBigramTime', 'chosenBigramCorrect', 'unchosenBigramCorrect'];
+  const headers = [
+    'user_id', 'trial_index', 
+    'left_term', 'left_is_item', 'left_source',
+    'right_term', 'right_is_item', 'right_source',
+    'chosen_term', 'chosen_is_item', 'chosen_source',
+    'unchosen_term', 'unchosen_is_item', 'unchosen_source',
+    'response_time'
+  ];
 
-    let rawContent = rawHeaders.join(',') + '\n';
-    let summaryContent = summaryHeaders.join(',') + '\n';
+  let content = headers.join(',') + '\n';
 
-    data.forEach(trial => {
-      if (trial.task === 'typing_and_choice') {
-        // Raw data
-        trial.keyData.forEach(keyEvent => {
-          const rawRow = [
-            prolificID,
-            trial.trialId,
-            escapeCSVField(keyEvent.expectedKey),
-            escapeCSVField(keyEvent.typedKey),
-            keyEvent.isCorrect,
-            keyEvent.keydownTime
-          ];
-          rawContent += rawRow.join(',') + '\n';
-        });
+  data.forEach(trial => {
+    if (trial.task === 'forced_choice') {
+      const row = [
+        prolificID,
+        trial.trial_index,
+        `"${trial.left_term}"`,
+        trial.left_is_item,
+        `"${trial.left_source}"`,
+        `"${trial.right_term}"`,
+        trial.right_is_item,
+        `"${trial.right_source}"`,
+        `"${trial.chosen_term}"`,
+        trial.chosen_is_item,
+        `"${trial.chosen_source}"`,
+        `"${trial.unchosen_term}"`,
+        trial.unchosen_is_item,
+        `"${trial.unchosen_source}"`,
+        trial.response_time
+      ];
+      content += row.join(',') + '\n';
+    }
+  });
 
-        // Summary data
-        const summaryRow = [
-          prolificID,
-          trial.trialId,
-          escapeCSVField(trial.text),
-          trial.sliderValue,
-          escapeCSVField(trial.chosenBigram),
-          escapeCSVField(trial.unchosenBigram),
-          trial.chosenBigramTime,
-          trial.unchosenBigramTime,
-          trial.chosenBigramCorrect,
-          trial.unchosenBigramCorrect
-        ];
-        summaryContent += summaryRow.join(',') + '\n';
-      }
-    });
-
-    return { rawContent, summaryContent };
-  } catch (error) {
-    console.error('Error converting data to CSV:', error);
-    throw error;
-  }
+  return content;
 }
 
-// Function to store data locally on the server, including Prolific ID in the filenames
-function storeDataLocally(rawContent, summaryContent, prolificID) {
+// Store data locally
+function storeDataLocally(content, prolificID) {
   try {
     const timestamp = Date.now();
-    const rawFileName = `raw_data_${prolificID}_${timestamp}.csv`;
-    const summaryFileName = `summary_data_${prolificID}_${timestamp}.csv`;
-
-    // Instead of writing to the file system, we'll use localStorage
-    localStorage.setItem(rawFileName, rawContent);
-    console.log('Raw data successfully saved locally:', rawFileName);
-
-    localStorage.setItem(summaryFileName, summaryContent);
-    console.log('Summary data successfully saved locally:', summaryFileName);
+    const fileName = `choice_data_${prolificID}_${timestamp}.csv`;
+    localStorage.setItem(fileName, content);
+    console.log('Data saved locally:', fileName);
   } catch (error) {
     console.error('Error saving data locally:', error);
-    throw error;
   }
 }
 
-// Function to upload data to OSF
+// Upload to OSF
 async function uploadToOSF(url, data, token) {
   const response = await fetch(url, {
     method: 'PUT',
@@ -671,289 +495,118 @@ async function uploadToOSF(url, data, token) {
   }
 }
 
-// Function to attempt upload with retries
 async function uploadWithRetry(url, data, token, maxRetries = 3) {
   let attempt = 0;
   while (attempt < maxRetries) {
     try {
-      await uploadToOSF(url, data, token);  // Try to upload the file
-      console.log(`Upload successful after ${attempt + 1} attempt(s):`, url);
-      break;  // Exit the loop if upload succeeds
+      await uploadToOSF(url, data, token);
+      console.log(`Upload successful after ${attempt + 1} attempt(s)`);
+      break;
     } catch (error) {
       console.error(`Attempt ${attempt + 1} failed:`, error);
       attempt++;
       if (attempt >= maxRetries) {
-        throw new Error(`Failed to upload after ${maxRetries} attempts. Error: ${error.message}`);
+        throw new Error(`Failed to upload after ${maxRetries} attempts`);
       }
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retrying
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
 }
 
-// Function to store data both on OSF and locally on the server, using Prolific ID
 async function storeDataOnOSF(data) {
   const osfToken = await loadOSFToken();
   if (!osfToken) {
-    console.error('Error: OSF API token not available. Data will not be stored on OSF.');
+    console.error('OSF API token not available');
     return;
   }
 
-  const { rawContent, summaryContent } = convertToCSV(data);
+  const csvContent = convertToCSV(data);
+  const dataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=choice_data_${prolificID}_${Date.now()}.csv`;
 
-  // Define URLs after prolificID is assigned
-  const rawDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=raw_data_${prolificID}_${Date.now()}.csv`;
-  const summaryDataUrl = `https://files.osf.io/v1/resources/${osfNodeId}/providers/osfstorage/?kind=file&name=summary_data_${prolificID}_${Date.now()}.csv`;
-
-  // Store data on OSF
   try {
-    console.log("Attempting to upload raw data to OSF...");
-    await uploadWithRetry(rawDataUrl, rawContent, osfToken);
-
-    console.log("Attempting to upload summary data to OSF...");
-    await uploadWithRetry(summaryDataUrl, summaryContent, osfToken);
-
-    // Store data locally on the server, passing the Prolific ID
-    console.log("Storing data locally on the server...");
-    storeDataLocally(rawContent, summaryContent, prolificID);
-
-    console.log('Data successfully stored on OSF and locally on the server');
+    await uploadWithRetry(dataUrl, csvContent, osfToken);
+    storeDataLocally(csvContent, prolificID);
+    console.log('Data successfully stored on OSF');
   } catch (error) {
     console.error('Error storing data:', error);
-    throw error;
+    storeDataLocally(csvContent, prolificID);
   }
 }
 
-// Timer function for the entire experiment
-function startExperimentTimer() {
-  if (!experimentConfig.useTimer) {
-    console.log("Timer is disabled.");
-    return;
-  }
-
-  let timeRemaining = experimentConfig.timeLimit;
-  const timerElement = document.createElement('div');
-  timerElement.id = 'timer';
-  document.body.appendChild(timerElement);
-
-  timerInterval = setInterval(() => {
-    timeRemaining--;
-    timerElement.textContent = `Time left: ${timeRemaining} s`;
-
-    if (timeRemaining <= 0) {
-      clearInterval(timerInterval);
-      console.log("Time is up, ending experiment...");
-      endExperiment();
-    }
-  }, 1000);
-}
-
-// Start button screen
-const startExperiment = {
-  type: htmlButtonResponse,
-  stimulus: function() {
-    let stimulusText = `<p style="font-size: 28px;">Ready to start?</p>`;
-    if (experimentConfig.useTimer) {
-      stimulusText += `<p style="font-size: 24px;">You will have ${experimentConfig.timeLimit} seconds to complete the experiment.</p>`;
-    }
-    stimulusText += `<p style="font-size: 24px;">Press the button when you're ready to begin!</p>`;
-    return stimulusText;
-  },
-  choices: ["Start"],
-  button_html: '<button class="jspsych-btn" style="font-size: 24px; padding: 15px 30px;">%choice%</button>',
-  on_load: function() {
-    updateProgressCounter(0, 76);
-    showProgressCounter();
-  },
-  on_finish: () => {
-    experimentStartTime = performance.now();
-    if (experimentConfig.useTimer) {
-      startExperimentTimer();
-    }
-  }
-};
-
-// thankYouTrial
-const thankYouTrial = {
-  type: htmlButtonResponse,
-  stimulus: `
-    <div class="thank-you-container">
-      <div class="checkmark"></div>
-      <h2 class="thank-you-title">Thank You!</h2>
-      <p class="thank-you-message">
-        Your participation in this study is greatly appreciated.<br>
-        Your responses will help us improve keyboard layouts for better typing experiences.<br><br>
-        All of your data has been successfully recorded.
-      </p>
-    </div>
-  `,
-  choices: ["Complete Study"],
-  button_html: '<button class="thank-you-button">%choice%</button>',
-  on_load: function() {
-    console.log("Thank you trial loaded");
-    hideProgressCounter(); // Hide progress counter on the thank you screen
-  },
-  on_finish: function () {
-    console.log("Thank you trial finished, calling endExperiment function now...");
-    endExperiment();
-  }
-};
-
-// End the experiment and upload data to OSF
+// End experiment
 function endExperiment() {
   const experimentData = jsPsych.data.get().values();
-  console.log("All experiment data:", experimentData);
-
-  // Filter out any empty or invalid data
-  const validData = experimentData.filter(trial => trial.task === 'typing_and_choice' && trial.keyData && trial.keyData.length > 0);
-  console.log("Valid data for CSV:", validData);
-
-  // Try storing data on OSF, but redirect to Prolific regardless of success or failure
+  const validData = experimentData.filter(trial => trial.task === 'forced_choice');
+  
   storeDataOnOSF(validData)
-    .then(() => {
-      console.log('Data stored successfully on OSF.');
-    })
-    .catch((error) => {
-      console.error('Error storing data on OSF:', error);
-    })
-    .finally(() => {
-      // Ensure redirection to Prolific regardless of data storage success or failure
-      console.log('Redirecting to Prolific after experiment ends.');
-      redirectToProlific(COMPLETION_CODE);
-    });
+    .then(() => console.log('Data stored successfully'))
+    .catch(error => console.error('Error storing data:', error))
+    .finally(() => redirectToProlific(COMPLETION_CODE));
 }
 
-// runExperiment function
+// Main experiment function
 async function runExperiment(options = {}) {
-  // Update experimentConfig with provided options
   Object.assign(experimentConfig, options);
-
+  
   setGlobalStyles();
+  createProgressCounter();
+  hideProgressCounter();
   
-  const osfToken = await loadOSFToken();
-  const { introductoryPairs, mainPairs } = await loadBigramPairs(
-    experimentConfig.trainingBigramFile,
-    experimentConfig.mainBigramFile
-  );
+  // Load items
+  const { items, allTerms } = await loadItems(experimentConfig.itemsFile);
   
-  if (introductoryPairs.length === 0 || (mainPairs.length === 0 && !experimentConfig.practiceOnly)) {
-    jsPsych.endExperiment('Error loading bigram pairs');
+  if (items.length === 0) {
+    jsPsych.endExperiment('Error loading items');
     return;
   }
-
-  // Apply randomization based on configuration
-  let processedMainPairs = mainPairs;
-  if (experimentConfig.randomizePairOrder) {
-    processedMainPairs = jsPsych.randomization.shuffle(processedMainPairs);
-  }
-  if (experimentConfig.randomizeBigramsWithinPairs) {
-    processedMainPairs = processedMainPairs.map(pair => jsPsych.randomization.shuffle(pair));
-  }
-
-  // Hardcode total number of trials for progress tracking
-  totalTrials = 76;  // Hardcoded to 76 screens
   
-  // Create progress counter immediately and make sure it's initialized
-  createProgressCounter();
-  completedTrials = 0;
-  updateProgressCounter(1, 76);  // Start at 1 of 76
+  // Generate random pairs
+  const pairs = generateRandomPairs(items, allTerms, experimentConfig.numTrials);
+  console.log(`Generated ${pairs.length} pairs for experiment`);
   
-  // Initially hide it until needed
-  hideProgressCounter();
-
   const timeline = [];
-
-  // Add consent trial to timeline
+  
+  // Add consent
   timeline.push(consentTrial);
-
-  // Create the experiment timeline
+  
+  // Create main experiment timeline (only runs if consent given)
   const experimentTimeline = {
     timeline: [
+      // Instructions
       {
         type: htmlButtonResponse,
-        stimulus: keyboardLayoutInfo.stimulus,
-        choices: keyboardLayoutInfo.choices,
-        button_html: keyboardLayoutInfo.button_html,
-        on_load: function() {
-          hideProgressCounter(); // Hide progress counter on instruction screens
-        }
+        stimulus: `
+          <div style="text-align: center; max-width: 700px; margin: 0 auto;">
+            <h2>Instructions</h2>
+            <p style="font-size: 20px; line-height: 1.6;">
+              You will see pairs of student qualities.<br><br>
+              For each pair, choose the quality that is <strong>more important</strong> 
+              for you to understand when reflecting on your students.<br><br>
+              There are no right or wrong answers—we're interested in your professional judgment.
+            </p>
+          </div>
+        `,
+        choices: ["Begin"],
+        button_html: '<button class="jspsych-btn" style="font-size: 20px; padding: 15px 40px;">%choice%</button>',
+        on_load: hideProgressCounter
       },
-      {
-        type: htmlButtonResponse,
-        stimulus: typingInstructionsInfo.stimulus,
-        choices: typingInstructionsInfo.choices,
-        button_html: typingInstructionsInfo.button_html,
-        on_load: function() {
-          hideProgressCounter(); // Hide progress counter on instruction screens
-        }
-      },
-      {
-        type: htmlButtonResponse,
-        stimulus: startExperiment.stimulus,
-        choices: startExperiment.choices,
-        button_html: startExperiment.button_html,
-        on_load: function() {
-          // Initialize progress counter at 0%
-          updateProgressCounter(1, 76);
-          showProgressCounter();
-        },
-        on_finish: () => {
-          experimentStartTime = performance.now();
-          if (experimentConfig.useTimer) {
-            startExperimentTimer();
-          }
-        }
-      },
-      ...introductoryPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `intro-trial-${index + 1}`)
-      ]),
+      // Choice trials
+      ...pairs.map((pair, index) => createChoiceTrial(pair, index, pairs.length)),
+      // Thank you
+      thankYouTrial
     ],
     conditional_function: function() {
-      // Only run this timeline if consent was given (i.e., the first option was selected)
       return jsPsych.data.get().last(1).values()[0].response === 0;
     }
   };
-
-  // Add transition screen and main pairs if not practiceOnly
-  if (!experimentConfig.practiceOnly) {
-    experimentTimeline.timeline.push(
-      {
-        type: htmlButtonResponse,
-        stimulus: `<p>Great job! You've completed the practice session.<br>
-                    Now we'll move on to the main part of the experiment,<br>
-                    with a series of tens of such trials.<br><br>
-                    Please give your best estimate about how much easier<br>
-                    one letter pair is to type than the other.</p>`,
-        choices: ['Continue'],
-        on_load: function() {
-          hideProgressCounter(); // Hide progress counter on transition screen
-        }
-      },
-      ...processedMainPairs.flatMap(([bigram1, bigram2], index) => [
-        createTypingTrial(bigram1, bigram2, `main-trial-${index + 1}`)
-      ])
-    );
-  }
-
-  // Add thank you trial at the end
-  experimentTimeline.timeline.push(thankYouTrial);
-
+  
   timeline.push(experimentTimeline);
-
-  // Run the timeline
-  console.log("Running experiment timeline...");
+  
   jsPsych.run(timeline);
 }
 
-// Start the experiment with options
+// Start the experiment
 runExperiment({
-  practiceOnly: experimentConfig.practiceOnly,
-  useTimer: experimentConfig.useTimer,
-  timeLimit: experimentConfig.timeLimit,
-  nbigramRepetitions: experimentConfig.nbigramRepetitions,
-  randomizePairOrder: experimentConfig.randomizePairOrder,
-  randomizeBigramsWithinPairs: experimentConfig.randomizeBigramsWithinPairs,
-  trainingBigramFile: experimentConfig.trainingBigramFile,
-  mainBigramFile: experimentConfig.mainBigramFile,
-  character_list: experimentConfig.character_list,
-  ncharacters: experimentConfig.ncharacters
-});    
+  numTrials: experimentConfig.numTrials,
+  itemsFile: experimentConfig.itemsFile
+});
