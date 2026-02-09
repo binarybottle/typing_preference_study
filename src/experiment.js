@@ -364,12 +364,10 @@ function createChoiceTrial(pair, trialIndex, totalTrials) {
         <p class="prompt-text">
           When considering your students,<br>
           which of the two presented terms<br>
-          represents what is more relevant and important<br>
-          for you to understand/assess?<br>
+          is more relevant and important<br>
+          for you to understand or assess?<br>
           <br>
-          Please use your professional judgment<br>
-          to provide your best estimate of which term<br>
-          in each pair is most important.
+          Please use your professional judgment.
         </p>
       </div>
     `,
@@ -580,9 +578,8 @@ async function runExperiment(options = {}) {
             <h2>Instructions</h2>
             <p style="font-size: 20px; line-height: 1.6;">
               You will see pairs of student qualities.<br><br>
-              For each pair, choose the quality that is <strong>more important</strong> 
-              for you to understand when reflecting on your students.<br><br>
-              There are no right or wrong answers—we're interested in your professional judgment.
+              For each pair, choose the quality that is <strong>more relevant and important</strong> 
+              for you to understand when reflecting on your students.
             </p>
           </div>
         `,
