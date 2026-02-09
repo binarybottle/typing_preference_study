@@ -10,6 +10,15 @@ const jsPsych = initJsPsych();
 let experimentConfig = {
   numTrials: 10,  // Number of forced-choice pairs to present
   itemsFile: 'data/items.csv',  // CSV with Items, Synonym 1, Synonym 2, Synonym 3
+  // Attention checks: ~1 every 5 min if ~60 screens between checks
+  attentionCheckPairs: [
+    ['Paying attention', 'Continuing to stop'],
+    ['Respect for others ', 'Reading the drivel'],
+    ['Playing with others', 'Receptive unfamiliar'],
+    ['Managing emotions', 'Learning the fatigue'],
+    ['Social skills', 'Learning unuseless'],
+  ],  // Each pair is [correctWord, distractorWord]; one pair is chosen at random per check
+  screensBetweenAttentionChecks: 60,  // Number of main (forced-choice) trials between attention checks
 };
 
 // OSF and server configuration
@@ -401,6 +410,41 @@ function createChoiceTrial(pair, trialIndex, totalTrials) {
   };
 }
 
+// Create an attention-check trial (pair = [correctWord, distractorWord])
+function createAttentionCheckTrial(pair, overallIndex, totalTrials) {
+  const [correctWord, distractorWord] = pair;
+  const leftWord = Math.random() < 0.5 ? correctWord : distractorWord;
+  const rightWord = leftWord === correctWord ? distractorWord : correctWord;
+  const correctChoiceIndex = leftWord === correctWord ? 0 : 1;
+
+  return {
+    type: htmlButtonResponse,
+    stimulus: `
+      <div style="text-align: center;">
+        <p class="prompt-text">
+          To show you are paying attention,<br>
+          please select the word <strong>\"${correctWord}\"</strong> below.
+        </p>
+      </div>
+    `,
+    choices: [leftWord, rightWord],
+    button_html: '<button class="choice-btn">%choice%</button>',
+    on_load: function() {
+      showProgressCounter();
+      updateProgressCounter(overallIndex + 1, totalTrials);
+    },
+    on_finish: function(data) {
+      const passed = data.response === correctChoiceIndex;
+      data.task = 'attention_check';
+      data.trial_index = overallIndex;
+      data.correct_word = correctWord;
+      data.chosen_word = data.response === 0 ? leftWord : rightWord;
+      data.passed = passed;
+      data.response_time = data.rt;
+    }
+  };
+}
+
 // Thank you trial
 const thankYouTrial = {
   type: htmlButtonResponse,
@@ -428,12 +472,13 @@ const thankYouTrial = {
 // Convert data to CSV format
 function convertToCSV(data) {
   const headers = [
-    'user_id', 'trial_index', 
+    'user_id', 'task', 'trial_index',
     'left_term', 'left_is_item', 'left_source',
     'right_term', 'right_is_item', 'right_source',
     'chosen_term', 'chosen_is_item', 'chosen_source',
     'unchosen_term', 'unchosen_is_item', 'unchosen_source',
-    'response_time'
+    'response_time',
+    'correct_word', 'chosen_word', 'passed'
   ];
 
   let content = headers.join(',') + '\n';
@@ -442,20 +487,35 @@ function convertToCSV(data) {
     if (trial.task === 'forced_choice') {
       const row = [
         prolificID,
+        'forced_choice',
         trial.trial_index,
-        `"${trial.left_term}"`,
+        `"${(trial.left_term || '').replace(/"/g, '""')}"`,
         trial.left_is_item,
-        `"${trial.left_source}"`,
-        `"${trial.right_term}"`,
+        `"${(trial.left_source || '').replace(/"/g, '""')}"`,
+        `"${(trial.right_term || '').replace(/"/g, '""')}"`,
         trial.right_is_item,
-        `"${trial.right_source}"`,
-        `"${trial.chosen_term}"`,
+        `"${(trial.right_source || '').replace(/"/g, '""')}"`,
+        `"${(trial.chosen_term || '').replace(/"/g, '""')}"`,
         trial.chosen_is_item,
-        `"${trial.chosen_source}"`,
-        `"${trial.unchosen_term}"`,
+        `"${(trial.chosen_source || '').replace(/"/g, '""')}"`,
+        `"${(trial.unchosen_term || '').replace(/"/g, '""')}"`,
         trial.unchosen_is_item,
-        `"${trial.unchosen_source}"`,
-        trial.response_time
+        `"${(trial.unchosen_source || '').replace(/"/g, '""')}"`,
+        trial.response_time,
+        '', '', ''
+      ];
+      content += row.join(',') + '\n';
+    } else if (trial.task === 'attention_check') {
+      const row = [
+        prolificID,
+        'attention_check',
+        trial.trial_index,
+        '', '', '', '', '', '',
+        '', '', '', '', '', '',
+        trial.response_time,
+        `"${(trial.correct_word || '').replace(/"/g, '""')}"`,
+        `"${(trial.chosen_word || '').replace(/"/g, '""')}"`,
+        trial.passed
       ];
       content += row.join(',') + '\n';
     }
@@ -534,8 +594,10 @@ async function storeDataOnOSF(data) {
 // End experiment
 function endExperiment() {
   const experimentData = jsPsych.data.get().values();
-  const validData = experimentData.filter(trial => trial.task === 'forced_choice');
-  
+  const validData = experimentData.filter(trial =>
+    trial.task === 'forced_choice' || trial.task === 'attention_check'
+  );
+
   storeDataOnOSF(validData)
     .then(() => console.log('Data stored successfully'))
     .catch(error => console.error('Error storing data:', error))
@@ -561,12 +623,45 @@ async function runExperiment(options = {}) {
   // Generate random pairs
   const pairs = generateRandomPairs(items, allTerms, experimentConfig.numTrials);
   console.log(`Generated ${pairs.length} pairs for experiment`);
-  
+
+  const attentionCheckPairs = experimentConfig.attentionCheckPairs || [];
+  const screensBetween = experimentConfig.screensBetweenAttentionChecks ?? 60;
+  const numAttentionChecks = attentionCheckPairs.length > 0 && screensBetween > 0
+    ? Math.floor(pairs.length / screensBetween)
+    : 0;
+  const totalTrials = pairs.length + numAttentionChecks;
+
+  // Build interleaved trial list: main trials with an attention check every screensBetween
+  const mainAndAttentionTrials = [];
+  let mainIndex = 0;
+  for (let i = 0; i < numAttentionChecks; i++) {
+    for (let j = 0; j < screensBetween; j++) {
+      mainAndAttentionTrials.push(createChoiceTrial(pairs[mainIndex], mainIndex, totalTrials));
+      mainIndex++;
+    }
+    const overallIndex = mainAndAttentionTrials.length;
+    const acPair = attentionCheckPairs[Math.floor(Math.random() * attentionCheckPairs.length)];
+    mainAndAttentionTrials.push(createAttentionCheckTrial(acPair, overallIndex, totalTrials));
+  }
+  while (mainIndex < pairs.length) {
+    mainAndAttentionTrials.push(createChoiceTrial(pairs[mainIndex], mainIndex, totalTrials));
+    mainIndex++;
+  }
+  // Fix trial_index and total for progress: use position in combined timeline
+  mainAndAttentionTrials.forEach((trial, idx) => {
+    const onLoad = trial.on_load;
+    trial.on_load = function() {
+      if (onLoad) onLoad.call(this);
+      const counterEl = document.getElementById('progress-counter');
+      if (counterEl) counterEl.textContent = `${idx + 1} of ${totalTrials}`;
+    };
+  });
+
   const timeline = [];
-  
+
   // Add consent
   timeline.push(consentTrial);
-  
+
   // Create main experiment timeline (only runs if consent given)
   const experimentTimeline = {
     timeline: [
@@ -578,7 +673,7 @@ async function runExperiment(options = {}) {
             <h2>Instructions</h2>
             <p style="font-size: 20px; line-height: 1.6;">
               You will see pairs of student qualities.<br><br>
-              For each pair, choose the quality that is <strong>more relevant and important</strong> 
+              For each pair, choose the quality that is <strong>more relevant and important</strong>
               for you to understand when reflecting on your students.
             </p>
           </div>
@@ -587,8 +682,8 @@ async function runExperiment(options = {}) {
         button_html: '<button class="jspsych-btn" style="font-size: 20px; padding: 15px 40px;">%choice%</button>',
         on_load: hideProgressCounter
       },
-      // Choice trials
-      ...pairs.map((pair, index) => createChoiceTrial(pair, index, pairs.length)),
+      // Choice trials and attention checks interleaved
+      ...mainAndAttentionTrials,
       // Thank you
       thankYouTrial
     ],
@@ -596,9 +691,9 @@ async function runExperiment(options = {}) {
       return jsPsych.data.get().last(1).values()[0].response === 0;
     }
   };
-  
+
   timeline.push(experimentTimeline);
-  
+
   jsPsych.run(timeline);
 }
 
