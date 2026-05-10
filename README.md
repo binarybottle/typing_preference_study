@@ -11,7 +11,7 @@ License: Apache v2.0
 
 ## Overview
 
-This repository provides a complete analysis pipeline for studying keyboard typing preferences and deriving evidence-based keyboard layout optimizations. The pipeline transforms raw keystroke data and preference ratings into statistically grounded information to guide keyboard layout design.
+This repository provides a complete analysis pipeline for studying keyboard typing preferences and deriving evidence-based keyboard layout optimizations. The pipeline transforms raw keystroke data and preference ratings into statistically grounded information to guide keyboard layout design. This work was part of a study described in a peer-reviewed manuscript in the International Journal of Human-Computer Interaction titled "Optimizing comfortable keyboard layouts using human typing preferences and language-dependent n-grams: the Engram Study" (http://dx.doi.org/10.1080/10447318.2026.2665409).
 
 **Research Focus**: Understanding the relationship between typing speed, user preferences, and biomechanical comfort to inform optimal keyboard layouts.
 
